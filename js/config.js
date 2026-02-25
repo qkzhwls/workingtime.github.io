@@ -138,8 +138,8 @@ function getDefaultConfig() {
         ],
         systemAccounts: ['관리자', '시스템'],
         memberWages: {},
-        memberEmails: {},
-        memberRoles: {},
+        memberEmails: {"박호진" : "qkzhwls@naver.com"},
+        memberRoles: {"박호진" : "amdin"},
         keyTasks: ['국내배송', '중국제작', '직진배송', '채우기', '개인담당업무'],
         dashboardItems: [
             'total-staff', 'leave-staff', 'active-staff', 'working-staff', 'idle-staff',
@@ -174,3 +174,4 @@ function getDefaultConfig() {
     };
 
 }
+
