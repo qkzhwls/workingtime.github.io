@@ -3,60 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3층 로케이션 관리 시스템</title>
+    <title>3층 로케이션 도면 관리</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
     <style>
-        /* 로케이션 전용 추가 스타일 */
-        .location-container { padding: 20px; }
-        .search-bar { margin-bottom: 20px; display: flex; gap: 10px; }
-        .search-bar input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #222; color: white; }
-        .location-table { width: 100%; border-collapse: collapse; background: #2a2a2a; border-radius: 10px; overflow: hidden; }
-        .location-table th, .location-table td { padding: 15px; text-align: left; border-bottom: 1px solid #3d3d3d; }
-        .location-table th { background: #333; color: #aaa; font-weight: normal; }
-        .stock-badge { padding: 5px 10px; border-radius: 5px; font-weight: bold; }
-        .stock-low { background: #5c2b2b; color: #ff8a8a; }
-        .btn-action { padding: 8px 12px; border-radius: 5px; cursor: pointer; border: none; }
-        .btn-edit { background: #3d5afe; color: white; }
+        :root { --cell-size: 100px; }
+        .location-body { background-color: #1a1a1a; color: #eee; padding: 20px; font-family: 'Noto Sans KR', sans-serif; }
+        .map-wrapper { overflow: auto; background: #222; border-radius: 12px; padding: 20px; border: 1px solid #444; height: 80vh; }
+        
+        /* 엑셀 느낌의 그리드 레이아웃 */
+        .location-grid { 
+            display: grid; 
+            gap: 4px; 
+            grid-auto-columns: var(--cell-size);
+            grid-auto-rows: minmax(80px, auto);
+        }
+
+        /* 로케이션 박스 디자인 */
+        .loc-box {
+            background: #333; border: 1px solid #555; border-radius: 6px;
+            padding: 8px; font-size: 11px; display: flex; flex-direction: column;
+            justify-content: space-between; cursor: pointer; transition: 0.2s;
+        }
+        .loc-box:hover { background: #444; border-color: #3d5afe; }
+        .loc-id { color: #3d5afe; font-weight: bold; border-bottom: 1px solid #444; margin-bottom: 5px; }
+        .loc-code { color: #fff; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+        .loc-stock { text-align: right; color: #aaa; font-size: 10px; }
+        
+        /* 통로 또는 빈 공간 */
+        .empty-box { background: transparent; border: none; }
+
+        .header-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .btn { padding: 10px 16px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; }
+        .btn-blue { background: #3d5afe; color: white; }
     </style>
 </head>
-<body class="dark-theme">
-    <div class="location-container">
-        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <h1>📦 3층 로케이션 관리</h1>
-            <button onclick="window.location.href='index.html'" class="btn-action" style="background: #444;">
-                <i class="fas fa-home"></i> 메인으로
-            </button>
-        </header>
-
-        <div class="search-bar">
-            <input type="text" id="location-search" placeholder="상품명 또는 로케이션 번호 검색...">
-            <button class="btn-action btn-edit" id="btn-add-location">+ 새 로케이션 등록</button>
+<body class="location-body">
+    <div class="header-bar">
+        <h1>📦 3층 로케이션 도면</h1>
+        <div>
+            <button class="btn btn-blue" id="btn-sync-excel"><i class="fas fa-file-import"></i> 엑셀 데이터 동기화</button>
+            <button class="btn" style="background:#444; color:white;" onclick="window.close()">닫기</button>
         </div>
+    </div>
 
-        <table class="location-table">
-            <thead>
-                <tr>
-                    <th>로케이션</th>
-                    <th>상품명</th>
-                    <th>현재 재고</th>
-                    <th>최근 수정일</th>
-                    <th>관리</th>
-                </tr>
-            </thead>
-            <tbody id="location-list">
-                <tr>
-                    <td colspan="5" style="text-align:center; color:#888;">데이터를 불러오는 중...</td>
-                </tr>
-            </tbody>
-        </table>
+    <div class="map-wrapper">
+        <div id="location-map" class="location-grid">
+            </div>
     </div>
 
     <script type="module">
-        import { initializeFirebase, loadAppConfig } from './js/config.js';
+        import { initializeFirebase } from './js/config.js';
         const { db } = initializeFirebase();
-        
-        // 여기에 로케이션 전용 자바스크립트 로직을 작성할 예정입니다.
+
+        // 엑셀(CSV) 데이터를 기반으로 도면을 그리는 로직은 js/location.js에서 관리합니다.
     </script>
+    <script type="module" src="js/location.js"></script>
 </body>
 </html>
