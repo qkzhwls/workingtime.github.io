@@ -28,17 +28,17 @@
                 </button>
             </div>
 
-            <div id="nav-content"
+            <div "nav-content"
                  class="hidden md:flex flex-col md:flex-row md:justify-between md:items-center gap-4 md:gap-2 w-full
                         absolute md:relative top-20 md:top-auto left-0 md:left-auto right-0 md:right-auto
                         bg-white md:bg-transparent shadow-lg md:shadow-none z-40 p-4 md:p-0 rounded-lg md:rounded-none border md:border-none">
 
-                <div id="current-date-display" class="text-lg font-bold text-gray-700 hidden md:text-lg md:mr-auto"></div>
+                <div "current-date-display" class="text-lg font-bold text-gray-700 hidden md:text-lg md:mr-auto"></div>
 
-                <div id="top-right-controls" class="flex flex-col items-start md:items-end gap-2 hidden">
-                    <div id="connection-indicator" class="flex items-center gap-2">
-                        <span id="user-greeting" class="text-sm font-semibold text-gray-700 mr-2 hidden"></span>
-                        <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-gray-400"></span>
+                <div "top-right-controls" class="flex flex-col items-start md:items-end gap-2 hidden">
+                    <div "connection-indicator" class="flex items-center gap-2">
+                        <span "user-greeting" class="text-sm font-semibold text-gray-700 mr-2 hidden"></span>
+                        <span "status-dot" class="w-2.5 h-2.5 rounded-full bg-gray-400"></span>
                         <span id="connection-status" class="text-xs font-medium text-gray-500"></span>
                     </div>
                     
@@ -79,7 +79,9 @@
                                 <button id="open-cost-simulation-btn" class="w-full text-left flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-100">
                                     <span>💰</span> <span class="font-medium">운영 시뮬레이션</span>
                                 </button>
-                                
+                                <button id="btn-location-management" class="w-full text-left flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-100">
+                                    <span>📦</span> <span class="font-medium">3층 로케이션 관리</span>
+                                </button>
                                 <button id="open-history-btn" class="w-full text-left flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-100" style="display: none;">
                                     <span>📜</span> <span class="font-medium">데이터 관리</span>
                                 </button>
@@ -297,4 +299,5 @@
         initApp();
     </script>
 </body>
+
 </html>
