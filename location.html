@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3층 로케이션 관리 시스템</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
+    <style>
+        /* 로케이션 전용 추가 스타일 */
+        .location-container { padding: 20px; }
+        .search-bar { margin-bottom: 20px; display: flex; gap: 10px; }
+        .search-bar input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #222; color: white; }
+        .location-table { width: 100%; border-collapse: collapse; background: #2a2a2a; border-radius: 10px; overflow: hidden; }
+        .location-table th, .location-table td { padding: 15px; text-align: left; border-bottom: 1px solid #3d3d3d; }
+        .location-table th { background: #333; color: #aaa; font-weight: normal; }
+        .stock-badge { padding: 5px 10px; border-radius: 5px; font-weight: bold; }
+        .stock-low { background: #5c2b2b; color: #ff8a8a; }
+        .btn-action { padding: 8px 12px; border-radius: 5px; cursor: pointer; border: none; }
+        .btn-edit { background: #3d5afe; color: white; }
+    </style>
+</head>
+<body class="dark-theme">
+    <div class="location-container">
+        <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h1>📦 3층 로케이션 관리</h1>
+            <button onclick="window.location.href='index.html'" class="btn-action" style="background: #444;">
+                <i class="fas fa-home"></i> 메인으로
+            </button>
+        </header>
+
+        <div class="search-bar">
+            <input type="text" id="location-search" placeholder="상품명 또는 로케이션 번호 검색...">
+            <button class="btn-action btn-edit" id="btn-add-location">+ 새 로케이션 등록</button>
+        </div>
+
+        <table class="location-table">
+            <thead>
+                <tr>
+                    <th>로케이션</th>
+                    <th>상품명</th>
+                    <th>현재 재고</th>
+                    <th>최근 수정일</th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody id="location-list">
+                <tr>
+                    <td colspan="5" style="text-align:center; color:#888;">데이터를 불러오는 중...</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script type="module">
+        import { initializeFirebase, loadAppConfig } from './js/config.js';
+        const { db } = initializeFirebase();
+        
+        // 여기에 로케이션 전용 자바스크립트 로직을 작성할 예정입니다.
+    </script>
+</body>
+</html>
