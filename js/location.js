@@ -13,67 +13,40 @@ async function loadAndRender() {
             data.push({ id: docSnap.id, ...docSnap.data() });
         });
 
-        // DB에 도면이 없으면 안내문 표시
+        const tbody = document.getElementById('location-list-body');
+        
         if (data.length === 0) {
-            document.getElementById('location-map').innerHTML = 
-                '<div style="grid-column: 1 / -1; text-align:center; padding: 50px; color:#666; font-size:16px;">' +
-                '등록된 도면이 없습니다.<br>최초 1회 마스터 엑셀 파일을 업로드하여 도면 뼈대를 구축해 주세요.</div>';
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 50px; color:#666; font-size:16px;">등록된 데이터가 없습니다.<br>상단의 파일 선택을 통해 마스터 데이터를 업로드해 주세요.</td></tr>';
+            }
             return;
         }
 
-        renderMap(data);
         renderList(data);
     } catch (error) {
         console.error("데이터 로딩 실패:", error);
     }
 }
 
-// 2. 도면 뷰 렌더링 (DB에 저장된 고정 좌표 사용)
-function renderMap(data) {
-    const container = document.getElementById('location-map');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    container.style.gridAutoColumns = '70px'; // 엑셀 비율에 맞춘 너비
-    container.style.gridAutoRows = '60px'; // 엑셀 비율에 맞춘 높이
-    container.style.gap = '2px';
-    
-    data.forEach(loc => {
-        const box = document.createElement('div');
-        box.className = 'loc-box';
-        // DB에 저장된 고정 좌표로 위치 지정
-        box.style.gridRow = loc.row;
-        box.style.gridColumn = loc.col;
-        
-        box.innerHTML = `
-            <div class="loc-id" style="font-weight:bold; color:#333; font-size:11px;">${loc.id}</div>
-            <div class="loc-code" style="font-size:10px; color:#3d5afe; font-weight:bold; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                ${loc.code || '비어있음'}
-            </div>
-        `;
-        container.appendChild(box);
-    });
-}
-
-// 3. 리스트 뷰 렌더링
+// 2. 리스트 뷰 렌더링 (7천개 데이터 고속 렌더링)
 function renderList(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
     
-    // 로케이션 아이디 순으로 정렬
+    // 로케이션 아이디 순으로 정렬 (특수기호 및 알파벳순)
     data.sort((a, b) => a.id.localeCompare(b.id));
 
     tbody.innerHTML = data.map(loc => `
         <tr>
-            <td><strong>${loc.id}</strong></td>
-            <td style="color:#3d5afe; font-weight:bold;">${loc.code || '-'}</td>
-            <td>${loc.row}행, ${loc.col}열</td>
-            <td><button class="btn-del" style="color:red; cursor:pointer; border:none; background:none;" onclick="deleteLoc('${loc.id}')">삭제</button></td>
+            <td><strong style="font-size: 15px;">${loc.id}</strong></td>
+            <td style="color:#3d5afe; font-weight:bold;">${loc.code || '<span style="color:#aaa; font-weight:normal;">비어있음</span>'}</td>
+            <td style="color:#666; font-size: 13px;">${loc.row}행, ${loc.col}열</td>
+            <td><button class="btn-del" onclick="deleteLoc('${loc.id}')">삭제</button></td>
         </tr>
     `).join('');
 }
 
-// 4. 업로드 파일 처리 (최초 도면 구축)
+// 3. 파일 업로드 및 인코딩 자동 감지 로직
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -82,46 +55,71 @@ if (fileInput) {
 
         const reader = new FileReader();
         reader.onload = async function(event) {
-            try {
-                const data = new Uint8Array(event.target.result);
-                // @ts-ignore
-                const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                // @ts-ignore
-                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null });
-                
-                if (rows && rows.length > 0) {
-                    await buildMasterMap(rows);
-                } else {
-                    alert("파일에서 데이터를 찾을 수 없습니다.");
-                }
-            } catch (error) {
-                console.error("파일 분석 중 오류 발생:", error);
-                alert("파일을 읽는 중 오류가 발생했습니다.");
+            let content = event.target.result;
+            
+            // UTF-8로 읽었을 때 한글이나 기호가 깨졌다면 EUC-KR로 다시 읽기 시도
+            if (content.includes('')) {
+                const reader2 = new FileReader();
+                reader2.onload = async function(e2) {
+                    await processText(e2.target.result);
+                };
+                reader2.readAsText(file, 'euc-kr');
+            } else {
+                await processText(content);
             }
         };
-        reader.readAsArrayBuffer(file);
+        reader.readAsText(file, 'utf-8');
     });
 }
 
-// 5. ⭐️ 핵심: 도면 뼈대 DB 저장 로직 ⭐️
-async function buildMasterMap(rows) {
-    if (!confirm("업로드한 파일을 기준으로 도면 뼈대를 (재)구축하시겠습니까?\n기존에 저장된 도면 좌표가 모두 업데이트됩니다.")) return;
+// 4. 텍스트 분석 (웹페이지 HTML 테이블 또는 CSV)
+async function processText(content) {
+    let rows = [];
+
+    if (content.includes('<table') || content.includes('<html') || content.includes('<TR')) {
+        const parser = new DOMParser();
+        const docHTML = parser.parseFromString(content, 'text/html');
+        const trs = docHTML.querySelectorAll('tr');
+        
+        trs.forEach(tr => {
+            const rowData = [];
+            tr.querySelectorAll('td, th').forEach(td => rowData.push(td.innerText.trim()));
+            rows.push(rowData);
+        });
+    } else {
+        // 일반 CSV 쉼표 분리
+        rows = content.split('\n').map(row => row.split(',').map(cell => cell.trim().replace(/^"|"$/g, '')));
+    }
+
+    if (rows && rows.length > 0) {
+        await buildMasterList(rows);
+    } else {
+        alert("파일에서 데이터를 찾을 수 없습니다.");
+    }
+}
+
+// 5. 대용량 데이터 추출 및 쪼개기 저장 (Firebase 500개 제한 회피)
+async function buildMasterList(rows) {
+    if (!confirm("업로드한 파일의 전체 로케이션을 시스템에 등록하시겠습니까?\n데이터가 많을 경우 약간의 시간이 소요될 수 있습니다.")) return;
     
-    const batch = writeBatch(db);
+    const tbody = document.getElementById('location-list-body');
+    if(tbody) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 50px; color:#3d5afe; font-size:18px; font-weight:bold;">🔥 수천 개의 데이터를 분석하고 저장하는 중입니다...<br>잠시만 기다려주세요!</td></tr>';
+    }
+    
+    let batch = writeBatch(db);
     let count = 0;
+    let batchCount = 0;
 
     for (let r = 0; r < rows.length; r++) {
         for (let c = 0; c < rows[r].length; c++) {
             const val = rows[r][c]?.toString().trim();
             
-            // ★★ 기호 또는 Z-801 등 로케이션 기호 찾기
-            if (val && (val.includes('★★') || /^[A-Z]-\d{2,}/.test(val))) {
+            // ★★ 기호 또는 알파벳-숫자(L-6-157, Z-801 등) 패턴 모두 잡기
+            if (val && (val.includes('★★') || /^[A-Z]-\d+/.test(val))) {
                 const locId = val;
                 let productCode = '';
                 
-                // 최초 1회 상품코드도 같이 가져오기
                 if (rows[r + 1]) {
                     const cellBelow = rows[r + 1][c]?.toString().trim() || '';
                     const cellBelowRight = rows[r + 1][c + 1]?.toString().trim() || '';
@@ -134,27 +132,40 @@ async function buildMasterMap(rows) {
                 }
                 
                 const docRef = doc(db, LOC_COLLECTION, locId);
-                // 엑셀의 좌표(row, col)를 DB에 영구 저장!
                 batch.set(docRef, {
                     row: r + 1,
                     col: c + 1,
                     code: productCode,
                     updatedAt: new Date()
                 });
+                
                 count++;
+                batchCount++;
+                
+                // 400개 단위로 데이터 쪼개서 서버로 밀어넣기
+                if (batchCount >= 400) {
+                    await batch.commit();
+                    batch = writeBatch(db); 
+                    batchCount = 0;
+                }
             }
         }
     }
 
-    await batch.commit();
-    alert(`도면 구축 완료!\n총 ${count}개의 로케이션이 DB에 영구 저장되었습니다.`);
+    // 남은 자투리 데이터 마저 전송
+    if (batchCount > 0) {
+        await batch.commit();
+    }
+
+    alert(`✅ 데이터 리스트 등록 완료!\n총 ${count}개의 로케이션이 시스템에 반영되었습니다.`);
     
     document.getElementById('excel-upload').value = '';
-    loadAndRender(); // DB에서 다시 불러와서 그리기
+    loadAndRender(); 
 }
 
+// 개별 삭제 로직
 window.deleteLoc = async (id) => {
-    if(confirm(`${id} 로케이션을 삭제하시겠습니까?`)) {
+    if(confirm(`${id} 로케이션 데이터를 영구적으로 삭제하시겠습니까?`)) {
         await deleteDoc(doc(db, LOC_COLLECTION, id));
         loadAndRender();
     }
