@@ -19,12 +19,21 @@
         .content-view { padding: 0 20px; display: none; }
         .content-view.active { display: block; }
         
-        /* 리스트 뷰 전용 스타일 */
+        /* 리스트 뷰 전용 스타일 (7000 x 1 형태 최적화) */
         .list-container { overflow: auto; background: white; padding: 20px; border-radius: 12px; border: 1px solid #eee; height: 70vh; }
-        .list-table { width: 100%; border-collapse: collapse; }
+        .list-table { width: 100%; max-width: 600px; margin: 0 auto; border-collapse: collapse; }
         .list-table th, .list-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
-        .list-table th { background: #f4f4f4; position: sticky; top: 0; z-index: 10; }
-        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; }
+        .list-table th { background: #f4f4f4; position: sticky; top: 0; z-index: 10; font-size: 16px; text-align: center;}
+        
+        /* 1개의 셀 안에 로케이션 정보와 삭제 버튼을 양끝으로 배치 */
+        .single-cell-content { display: flex; justify-content: space-between; align-items: center; }
+        .loc-info { font-size: 15px; }
+        .loc-num { display: inline-block; width: 50px; color: #888; font-size: 13px; }
+        .loc-name { font-weight: bold; color: #333; display: inline-block; width: 120px; }
+        .loc-code { color: #3d5afe; font-weight: bold; }
+        
+        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; padding: 5px 10px;}
+        .btn-del:hover { background: #ffebee; border-radius: 4px; }
 
         /* 도면 뷰 임시 스타일 */
         .map-container { display: flex; justify-content: center; align-items: center; background: white; border-radius: 12px; border: 1px solid #eee; height: 70vh; color: #666; font-size: 18px; font-weight: bold; text-align: center; line-height: 1.6; }
@@ -46,7 +55,7 @@
     </div>
 
     <div class="tabs">
-        <button class="tab-btn active" onclick="switchView('list')"><i class="fas fa-list"></i> 데이터 리스트 관리</button>
+        <button class="tab-btn active" onclick="switchView('list')"><i class="fas fa-list"></i> 7000 x 1 데이터 리스트</button>
         <button class="tab-btn" onclick="switchView('map')"><i class="fas fa-map"></i> 도면 보기</button>
     </div>
 
@@ -55,14 +64,11 @@
             <table class="list-table">
                 <thead>
                     <tr>
-                        <th>로케이션 번호</th>
-                        <th>상품코드</th>
-                        <th>엑셀 원본 좌표</th>
-                        <th>관리</th>
+                        <th>로케이션 전체 목록 (7000 x 1)</th>
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
-                    <tr><td colspan="4" style="text-align:center; padding: 30px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
+                    <tr><td style="text-align:center; padding: 30px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
                 </tbody>
             </table>
         </div>
