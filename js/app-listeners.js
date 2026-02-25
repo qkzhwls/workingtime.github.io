@@ -25,3 +25,4 @@ export function initializeAppListeners() {
     }); // ✅ [신규] 로케이션 관리 버튼
 }
 
+
