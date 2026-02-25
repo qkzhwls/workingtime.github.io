@@ -21,6 +21,7 @@ export function initializeAppListeners() {
     setupMainBoardListeners(); // ✅ [신규] 메인 현황판 리스너 호출
     
     document.getElementById('btn-location-management')?.addEventListener('click', () => {
-        window.location.href = 'location.html';
+        window.open('location.html', '_blank');
     }); // ✅ [신규] 로케이션 관리 버튼
 }
+
