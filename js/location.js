@@ -31,8 +31,8 @@ function renderMap(data) {
         box.style.gridRow = loc.row;
         box.style.gridColumn = loc.col;
         box.innerHTML = `
-            <div class="loc-id">${loc.id}</div>
-            <div class="loc-code">${loc.code || '-'}</div>
+            <div class="loc-id" style="font-weight:bold; color:#333;">${loc.id}</div>
+            <div class="loc-code" style="font-size:12px; color:#666;">${loc.code || '-'}</div>
         `;
         container.appendChild(box);
     });
@@ -47,53 +47,53 @@ function renderList(data) {
             <td><strong>${loc.id}</strong></td>
             <td>${loc.code || '-'}</td>
             <td>${loc.row}행, ${loc.col}열</td>
-            <td><button class="btn-del" onclick="deleteLoc('${loc.id}')">삭제</button></td>
+            <td><button class="btn-del" style="color:red; cursor:pointer; border:none; background:none;" onclick="deleteLoc('${loc.id}')">삭제</button></td>
         </tr>
     `).join('');
 }
 
-// 4. 파일 분석 및 업로드 (HTML XLS 및 CSV 통합 대응)
+// 4. SheetJS를 이용한 파일 분석 및 업로드 (xls, xlsx, html 기반 xls 통합 대응)
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
-    fileInput.addEventListener('change', async function(e) {
+    fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
 
         const reader = new FileReader();
         reader.onload = async function(event) {
-            const content = event.target.result;
-            let rows = [];
-
-            if (content.includes('<table') || content.includes('<html')) {
-                // 💡 HTML 기반 XLS 파일 분석 로직
-                const parser = new DOMParser();
-                const docHTML = parser.parseFromString(content, 'text/html');
-                const trs = docHTML.querySelectorAll('tr');
-                trs.forEach(tr => {
-                    const rowData = [];
-                    tr.querySelectorAll('td').forEach(td => rowData.push(td.innerText.trim()));
-                    rows.push(rowData);
-                });
-            } else {
-                // 일반 CSV 파일 분석 (PapaParse 활용)
+            try {
+                const data = new Uint8Array(event.target.result);
+                // @ts-ignore - XLSX는 html 파일에 로드되어 있음
+                const workbook = XLSX.read(data, { type: 'array' });
+                
+                // 첫 번째 시트 가져오기
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                
+                // 2차원 배열 형태로 변환 (빈 칸은 null 처리)
                 // @ts-ignore
-                const result = Papa.parse(content);
-                rows = result.data;
-            }
-
-            if (rows.length > 0) {
-                await processLocationData(rows);
+                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: null });
+                
+                if (rows && rows.length > 0) {
+                    await processLocationData(rows);
+                } else {
+                    alert("파일에서 데이터를 찾을 수 없습니다.");
+                }
+            } catch (error) {
+                console.error("파일 분석 중 오류 발생:", error);
+                alert("파일을 읽는 중 오류가 발생했습니다. 지원하지 않는 형식이거나 파일이 손상되었을 수 있습니다.");
             }
         };
-        reader.readAsText(file, 'euc-kr'); // 한글 깨짐 방지를 위해 euc-kr 시도
+        // SheetJS는 ArrayBuffer로 읽는 것을 권장
+        reader.readAsArrayBuffer(file);
     });
 }
 
 // 5. 로케이션 데이터 가공 및 DB 저장
 async function processLocationData(rows) {
-    if (!confirm("기존 데이터를 초기화하고 새로 업로드하시겠습니까?")) return;
+    if (!confirm("기존 도면 데이터를 지우고 새로 업로드하시겠습니까?")) return;
     
-    const batch = writeBatch(db); // 대량 저장을 위해 배치 사용
+    const batch = writeBatch(db);
     let count = 0;
 
     for (let r = 0; r < rows.length; r++) {
@@ -103,10 +103,21 @@ async function processLocationData(rows) {
             // '★★'가 포함된 셀을 로케이션 이름으로 인식
             if (val && val.includes('★★')) {
                 const locId = val;
-                // 상품코드는 엑셀 구조상 바로 아래 행(r+1)에 위치함
                 let productCode = '';
-                if (rows[r + 1] && rows[r + 1][c]) {
-                    productCode = rows[r + 1][c].replace('상품코드', '').trim();
+                
+                // 엑셀 구조 분석: '★★-02' 바로 아래 칸이나 그 오른쪽 칸에 '상품코드' 혹은 실제 코드가 있을 수 있음.
+                if (rows[r + 1]) {
+                    const cellBelow = rows[r + 1][c]?.toString().trim();
+                    const cellBelowRight = rows[r + 1][c + 1]?.toString().trim();
+                    
+                    // 1. 바로 아래 칸이 '상품코드'라는 글자고, 그 오른쪽 칸에 실제 코드가 있는 경우
+                    if (cellBelow === '상품코드' && cellBelowRight) {
+                        productCode = cellBelowRight;
+                    } 
+                    // 2. 바로 아래 칸에 '상품코드'라는 글자 없이 바로 코드가 있거나 같이 들어있는 경우
+                    else if (cellBelow && cellBelow !== '상품코드' && cellBelow !== '#N/A') {
+                        productCode = cellBelow.replace('상품코드', '').trim();
+                    }
                 }
                 
                 const docRef = doc(db, LOC_COLLECTION, locId);
@@ -123,12 +134,16 @@ async function processLocationData(rows) {
 
     await batch.commit();
     alert(`${count}개의 로케이션이 성공적으로 등록되었습니다!`);
+    
+    // 입력 칸 비우기 (같은 파일 재업로드 가능하도록)
+    document.getElementById('excel-upload').value = '';
+    
     loadAndRender();
 }
 
-// 전역 함수 등록
+// 전역 삭제 함수
 window.deleteLoc = async (id) => {
-    if(confirm(`${id}를 삭제하시겠습니까?`)) {
+    if(confirm(`${id} 로케이션을 삭제하시겠습니까?`)) {
         await deleteDoc(doc(db, LOC_COLLECTION, id));
         loadAndRender();
     }
