@@ -6,6 +6,7 @@ const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
 let sortConfig = { key: 'id', direction: 'asc' }; 
+let filters = { loc: 'all', code: 'all', stock: 'all' };
 
 async function loadAndRender() {
     try {
@@ -17,69 +18,65 @@ async function loadAndRender() {
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
 
-        setupFilterOptions();
+        setupFilterPopups();
         applyFiltersAndSort();
     } catch (error) {
         console.error("로딩 실패:", error);
-        document.getElementById('firebase-guide').style.display = 'block';
     }
 }
 
-// 헤더 내 드롭다운 필터 옵션 생성
-function setupFilterOptions() {
-    const locSelect = document.getElementById('filter-loc-prefix');
-    const stockSelect = document.getElementById('filter-stock-qty');
-    
-    if(!locSelect || !stockSelect) return;
+// 팝업 메뉴 안의 옵션들을 동적으로 생성
+function setupFilterPopups() {
+    const locPop = document.getElementById('pop-loc');
+    const stockPop = document.getElementById('pop-stock');
 
-    // 로케이션 첫 글자 추출 (★ 강제 포함)
+    // 1. 로케이션 필터 생성
     let prefixSet = new Set(originalData.map(d => d.id.charAt(0)));
-    prefixSet.add('★'); 
+    prefixSet.add('★');
+    const prefixes = [...prefixSet].sort((a, b) => (a === '★' ? -1 : (b === '★' ? 1 : a.localeCompare(b))));
 
-    const prefixes = [...prefixSet].sort((a, b) => {
-        if (a === '★') return -1; 
-        if (b === '★') return 1;
-        return a.localeCompare(b);
-    });
-
-    locSelect.innerHTML = '<option value="all">(로케이션: 전체)</option>';
+    let locHtml = '<div class="filter-option" onclick="setFilter(\'loc\', \'all\')">전체</div>';
     prefixes.forEach(p => {
-        const label = (p === '★') ? '★ 구역' : `${p} 구역`;
-        locSelect.innerHTML += `<option value="${p}">${label}</option>`;
+        locHtml += `<div class="filter-option" onclick="setFilter('loc', '${p}')">${p} 구역</div>`;
     });
+    locPop.innerHTML = locHtml;
 
-    // 재고 수량 추출 (엑셀 방식)
-    const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))]
-                   .sort((a, b) => Number(a) - Number(b));
-    stockSelect.innerHTML = '<option value="all">(재고: 전체)</option>';
+    // 2. 재고 필터 생성
+    const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
+    let stockHtml = '<div class="filter-option" onclick="setFilter(\'stock\', \'all\')">전체</div>';
     stocks.forEach(s => {
-        stockSelect.innerHTML += `<option value="${s}">${s}</option>`;
+        stockHtml += `<div class="filter-option" onclick="setFilter('stock', '${s}')">${s}</div>`;
     });
+    stockPop.innerHTML = stockHtml;
 }
 
-// 필터 및 정렬 통합 적용 로직
+// 필터 변경 함수 (HTML에서 호출됨)
+window.setFilter = (type, value) => {
+    filters[type] = value;
+    
+    // 활성화 표시 (색상 변경)
+    const btnId = `btn-filter-${type}`;
+    const btn = document.getElementById(btnId);
+    if (value === 'all') btn.classList.remove('active');
+    else btn.classList.add('active');
+
+    applyFiltersAndSort();
+};
+
 function applyFiltersAndSort() {
-    const locFilter = document.getElementById('filter-loc-prefix')?.value || 'all';
-    const codeFilter = document.getElementById('filter-code-status')?.value || 'all';
-    const stockFilter = document.getElementById('filter-stock-qty')?.value || 'all';
-
     let filtered = originalData.filter(item => {
-        // 1. 로케이션 필터
-        if (locFilter !== 'all' && item.id.charAt(0) !== locFilter) return false;
+        if (filters.loc !== 'all' && item.id.charAt(0) !== filters.loc) return false;
         
-        // 2. 상품코드 필터
         const hasCode = item.code && item.code !== item.id && item.code.trim() !== "";
-        if (codeFilter === 'empty' && hasCode) return false;
-        if (codeFilter === 'not-empty' && !hasCode) return false;
+        if (filters.code === 'empty' && hasCode) return false;
+        if (filters.code === 'not-empty' && !hasCode) return false;
 
-        // 3. 정상재고 필터
         const itemStock = (item.stock || '0').toString();
-        if (stockFilter !== 'all' && itemStock !== stockFilter) return false;
+        if (filters.stock !== 'all' && itemStock !== filters.stock) return false;
 
         return true;
     });
 
-    // 정렬 처리
     filtered.sort((a, b) => {
         let aVal = a[sortConfig.key] || '';
         let bVal = b[sortConfig.key] || '';
@@ -101,125 +98,86 @@ function renderTable(data) {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
         html += `
             <tr>
-                <td style="font-weight:bold;">${loc.id}</td>
+                <td style="font-weight:bold; font-size:15px;">${loc.id}</td>
                 <td style="color:#3d5afe; font-weight:bold;">${displayCode}</td>
-                <td style="text-align:left; font-size:13px;">${loc.name || ''}</td>
+                <td style="text-align:left;">${loc.name || ''}</td>
                 <td style="text-align:left; font-size:12px;">${loc.option || ''}</td>
                 <td>${loc.stock || '0'}</td>
                 <td><button class="btn-del" onclick="deleteLoc('${loc.id}')">삭제</button></td>
             </tr>
         `;
     });
-    tbody.innerHTML = html || '<tr><td colspan="6" style="padding:50px;">필터 결과가 없습니다.</td></tr>';
+    tbody.innerHTML = html || '<tr><td colspan="6" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 엑셀 업로드 처리
+// 업로드 로직
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
         const file = e.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = function(e) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const json = XLSX.utils.sheet_to_json(worksheet);
-
-            if (json.length > 0) {
-                updateDatabase(json);
-            }
+            const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+            if (json.length > 0) updateDatabase(json);
         };
         reader.readAsArrayBuffer(file);
     });
 }
 
-// 파이어베이스 데이터 업데이트
 async function updateDatabase(rows) {
-    if (!confirm(`${rows.length}개의 데이터를 동기화하시겠습니까?`)) return;
-
+    if (!confirm(`${rows.length}개 데이터를 동기화하시겠습니까?`)) return;
     const tbody = document.getElementById('location-list-body');
     tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
-
     try {
         let batch = writeBatch(db);
         let count = 0;
         let batchCount = 0;
-
         for (const row of rows) {
             const locId = row['로케이션']?.toString().trim();
             if (!locId) continue;
-
             const locMatch = locId.match(/([A-Z]-\d-\d{3}|★★-\d{2})/);
             if (locMatch) {
                 const cleanLocId = locMatch[1];
                 const docRef = doc(db, LOC_COLLECTION, cleanLocId);
-
-                const updateData = {
+                batch.set(docRef, {
                     code: row['상품코드']?.toString().trim() || '',
                     name: row['상품명']?.toString().trim() || '',
                     option: row['옵션']?.toString().trim() || '',
                     stock: row['정상재고']?.toString().trim() || '0',
                     updatedAt: new Date()
-                };
-
-                batch.set(docRef, updateData, { merge: true });
+                }, { merge: true });
                 count++;
                 batchCount++;
-
-                if (batchCount >= 400) {
-                    await batch.commit();
-                    batch = writeBatch(db);
-                    batchCount = 0;
-                }
+                if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
             }
         }
-
         if (batchCount > 0) await batch.commit();
-        alert(`✅ 완료! ${count}개의 정보가 업데이트되었습니다.`);
+        alert(`✅ 완료! ${count}개 정보가 업데이트되었습니다.`);
         loadAndRender();
     } catch (error) {
         console.error("실패:", error);
-        alert("오류가 발생했습니다.");
         loadAndRender();
     }
 }
 
-// 정렬 함수
 window.sortTable = (key) => {
-    if (sortConfig.key === key) {
-        sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
-    } else {
-        sortConfig.key = key;
-        sortConfig.direction = 'asc';
-    }
+    if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
+    else { sortConfig.key = key; sortConfig.direction = 'asc'; }
     applyFiltersAndSort();
 };
 
-// 개별 삭제
 window.deleteLoc = async (id) => {
-    if(confirm(`${id}를 삭제하시겠습니까?`)) {
-        await deleteDoc(doc(db, LOC_COLLECTION, id));
-        loadAndRender();
-    }
+    if(confirm(`${id}를 삭제하시겠습니까?`)) { await deleteDoc(doc(db, LOC_COLLECTION, id)); loadAndRender(); }
 };
 
-// 전체 초기화
 window.resetAllFiltersAndSort = () => {
-    document.getElementById('filter-loc-prefix').value = 'all';
-    document.getElementById('filter-code-status').value = 'all';
-    document.getElementById('filter-stock-qty').value = 'all';
+    filters = { loc: 'all', code: 'all', stock: 'all' };
     sortConfig = { key: 'id', direction: 'asc' };
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     applyFiltersAndSort();
 };
-
-// 필터 이벤트 바인딩
-document.addEventListener('change', (e) => {
-    if (e.target.classList.contains('header-filter')) {
-        applyFiltersAndSort();
-    }
-});
 
 window.onload = loadAndRender;
