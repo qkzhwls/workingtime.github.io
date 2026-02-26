@@ -1,12 +1,11 @@
 import { initializeFirebase } from './config.js';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
 const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
 let sortConfig = { key: 'id', direction: 'asc' }; 
-// loc는 다중 선택을 위해 빈 배열로 초기화합니다.
 let filters = { loc: [], code: 'all', stock: 'all' };
 
 async function loadAndRender() {
@@ -183,11 +182,10 @@ function renderTable(data) {
                 <td style="text-align:left;">${loc.name || ''}</td>
                 <td style="text-align:left; font-size:12px;">${loc.option || ''}</td>
                 <td>${loc.stock || '0'}</td>
-                <td><button class="btn-del" onclick="deleteLoc('${loc.id}')">삭제</button></td>
             </tr>
         `;
     });
-    tbody.innerHTML = html || '<tr><td colspan="6" style="padding:50px;">데이터가 없습니다.</td></tr>';
+    tbody.innerHTML = html || '<tr><td colspan="5" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
 const fileInput = document.getElementById('excel-upload');
@@ -209,7 +207,7 @@ if (fileInput) {
 async function updateDatabase(rows) {
     if (!confirm(`${rows.length}개 데이터를 동기화하시겠습니까?`)) return;
     const tbody = document.getElementById('location-list-body');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
     try {
         let batch = writeBatch(db);
         let count = 0;
@@ -241,9 +239,5 @@ async function updateDatabase(rows) {
         loadAndRender();
     }
 }
-
-window.deleteLoc = async (id) => {
-    if(confirm(`${id}를 삭제하시겠습니까?`)) { await deleteDoc(doc(db, LOC_COLLECTION, id)); loadAndRender(); }
-};
 
 window.onload = loadAndRender;
