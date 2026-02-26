@@ -18,9 +18,7 @@ async function loadAndRender() {
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
 
-        // 초기 필터 옵션 설정
         setupFilterOptions();
-        // 화면 렌더링
         applyFiltersAndSort();
     } catch (error) {
         console.error("로딩 실패:", error);
@@ -28,20 +26,18 @@ async function loadAndRender() {
     }
 }
 
-// 2. 필터 옵션 동적 생성 (엑셀 방식)
+// 2. 필터 옵션 동적 생성
 function setupFilterOptions() {
     const locSelect = document.getElementById('filter-loc-prefix');
     const stockSelect = document.getElementById('filter-stock-qty');
     
-    // 로케이션 앞자리 추출 (A, B, C..., ★)
     const prefixes = [...new Set(originalData.map(d => d.id.charAt(0)))].sort();
     locSelect.innerHTML = '<option value="all">전체(A-Z, ★)</option>';
     prefixes.forEach(p => {
         locSelect.innerHTML += `<option value="${p}">${p} 구역</option>`;
     });
 
-    // 정상재고 수량 추출 (엑셀 필터처럼 존재하는 수량만 나열)
-    const stocks = [...new Set(originalData.map(d => d.stock || '0'))]
+    const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))]
                    .sort((a, b) => Number(a) - Number(b));
     stockSelect.innerHTML = '<option value="all">전체</option>';
     stocks.forEach(s => {
@@ -56,38 +52,31 @@ function applyFiltersAndSort() {
     const stockFilter = document.getElementById('filter-stock-qty').value;
 
     let filtered = originalData.filter(item => {
-        // 로케이션 필터
         if (locFilter !== 'all' && item.id.charAt(0) !== locFilter) return false;
         
-        // 상품코드 필터
         const hasCode = item.code && item.code !== item.id;
         if (codeFilter === 'empty' && hasCode) return false;
         if (codeFilter === 'not-empty' && !hasCode) return false;
 
-        // 정상재고 필터 (엑셀 방식: 선택한 값과 일치)
         const itemStock = (item.stock || '0').toString();
         if (stockFilter !== 'all' && itemStock !== stockFilter) return false;
 
         return true;
     });
 
-    // 정렬 실행
     filtered.sort((a, b) => {
         let aVal = a[sortConfig.key] || '';
         let bVal = b[sortConfig.key] || '';
-        
-        // 숫자 정렬 처리 (재고 등)
         if (sortConfig.key === 'stock') {
             return sortConfig.direction === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
         }
-        
-        return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        return sortConfig.direction === 'asc' ? aVal.toString().localeCompare(bVal.toString()) : bVal.toString().localeCompare(aVal.toString());
     });
 
     renderTable(filtered);
 }
 
-// 4. 테이블 그리기
+// 4. 테이블 렌더링
 function renderTable(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
@@ -99,17 +88,94 @@ function renderTable(data) {
             <tr>
                 <td style="font-weight:bold;">${loc.id}</td>
                 <td style="color:#3d5afe; font-weight:bold;">${displayCode}</td>
-                <td>${loc.name || ''}</td>
+                <td style="text-align:left;">${loc.name || ''}</td>
                 <td>${loc.option || ''}</td>
                 <td>${loc.stock || '0'}</td>
                 <td><button class="btn-del" onclick="deleteLoc('${loc.id}')">삭제</button></td>
             </tr>
         `;
     });
-    tbody.innerHTML = html || '<tr><td colspan="6">필터 조건에 맞는 데이터가 없습니다.</td></tr>';
+    tbody.innerHTML = html || '<tr><td colspan="6">데이터가 없습니다.</td></tr>';
 }
 
-// 5. 정렬 함수 (헤더 클릭 시 호출)
+// 5. 파일 업로드 및 데이터 매칭 (제공해주신 헤더 기준)
+const fileInput = document.getElementById('excel-upload');
+if (fileInput) {
+    fileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet);
+
+            if (json.length > 0) {
+                updateDatabase(json);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+// 6. DB 업데이트 로직 (Batch 사용)
+async function updateDatabase(rows) {
+    if (!confirm(`${rows.length}개의 데이터를 동기화하시겠습니까?`)) return;
+
+    const tbody = document.getElementById('location-list-body');
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 분석 및 동기화 중...</td></tr>';
+
+    try {
+        let batch = writeBatch(db);
+        let count = 0;
+        let batchCount = 0;
+
+        for (const row of rows) {
+            // 엑셀 헤더명과 정확히 매칭 (로케이션이 없는 행은 건너뜀)
+            const locId = row['로케이션']?.toString().trim();
+            if (!locId) continue;
+
+            // 로케이션 이름 정규화 (A-1-001 또는 ★★-01 형태만 추출)
+            const locMatch = locId.match(/([A-Z]-\d-\d{3}|★★-\d{2})/);
+            if (locMatch) {
+                const cleanLocId = locMatch[1];
+                const docRef = doc(db, LOC_COLLECTION, cleanLocId);
+
+                // 업로드할 데이터 구성
+                const updateData = {
+                    code: row['상품코드']?.toString().trim() || '',
+                    name: row['상품명']?.toString().trim() || '',
+                    option: row['옵션']?.toString().trim() || '',
+                    stock: row['정상재고']?.toString().trim() || '0',
+                    updatedAt: new Date()
+                };
+
+                batch.set(docRef, updateData, { merge: true });
+                count++;
+                batchCount++;
+
+                if (batchCount >= 400) {
+                    await batch.commit();
+                    batch = writeBatch(db);
+                    batchCount = 0;
+                }
+            }
+        }
+
+        if (batchCount > 0) await batch.commit();
+        alert(`✅ 동기화 완료! 총 ${count}개의 로케이션 정보가 업데이트되었습니다.`);
+        loadAndRender();
+    } catch (error) {
+        console.error("업데이트 실패:", error);
+        alert("저장 중 오류가 발생했습니다.");
+        loadAndRender();
+    }
+}
+
+// 정렬 및 삭제 전역 함수
 window.sortTable = (key) => {
     if (sortConfig.key === key) {
         sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
@@ -120,10 +186,12 @@ window.sortTable = (key) => {
     applyFiltersAndSort();
 };
 
-// 6. 필터 변경 이벤트 연결
-document.getElementById('filter-loc-prefix').addEventListener('change', applyFiltersAndSort);
-document.getElementById('filter-code-status').addEventListener('change', applyFiltersAndSort);
-document.getElementById('filter-stock-qty').addEventListener('change', applyFiltersAndSort);
+window.deleteLoc = async (id) => {
+    if(confirm(`${id}를 삭제하시겠습니까?`)) {
+        await deleteDoc(doc(db, LOC_COLLECTION, id));
+        loadAndRender();
+    }
+};
 
 window.resetFilters = () => {
     document.getElementById('filter-loc-prefix').value = 'all';
@@ -132,15 +200,9 @@ window.resetFilters = () => {
     applyFiltersAndSort();
 };
 
-// [파일 업로드 및 삭제 기능은 이전과 동일하게 유지...]
-// (코드 길이상 핵심 로직 위주로 정리하였으며, 5번 항목의 updateProductCodes에서 
-// 상품코드 외에 상품명, 옵션, 재고 데이터도 엑셀 구조에 맞게 매칭하여 batch.set 하시면 됩니다.)
-
-window.deleteLoc = async (id) => {
-    if(confirm(`${id}를 삭제하시겠습니까?`)) {
-        await deleteDoc(doc(db, LOC_COLLECTION, id));
-        loadAndRender();
-    }
-};
+// 필터 이벤트 바인딩
+document.getElementById('filter-loc-prefix').addEventListener('change', applyFiltersAndSort);
+document.getElementById('filter-code-status').addEventListener('change', applyFiltersAndSort);
+document.getElementById('filter-stock-qty').addEventListener('change', applyFiltersAndSort);
 
 window.onload = loadAndRender;
