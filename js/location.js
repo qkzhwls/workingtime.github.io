@@ -29,10 +29,13 @@ function setupFilterOptions() {
     const locSelect = document.getElementById('filter-loc-prefix');
     const stockSelect = document.getElementById('filter-stock-qty');
     
-    // ★을 포함한 모든 첫 글자 추출 및 정렬
-    const prefixes = [...new Set(originalData.map(d => d.id.charAt(0)))].sort((a, b) => {
-        if (a === '★') return 1; // ★을 목록 아래쪽으로 보냄 (원하시면 위로 조정 가능)
-        if (b === '★') return -1;
+    // 로케이션 첫 글자 추출 (★ 강제 포함)
+    let prefixSet = new Set(originalData.map(d => d.id.charAt(0)));
+    prefixSet.add('★'); 
+
+    const prefixes = [...prefixSet].sort((a, b) => {
+        if (a === '★') return -1; // ★을 최상단으로
+        if (b === '★') return 1;
         return a.localeCompare(b);
     });
 
