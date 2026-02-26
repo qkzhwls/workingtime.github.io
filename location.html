@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3층 로케이션 관리 시스템</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
     <style>
         :root { --primary: #3d5afe; --bg: #f8f9fa; --card: #ffffff; }
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
@@ -89,6 +90,9 @@
             padding: 8px 15px;
             font-size: 13px;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
         }
         .filter-option:hover { background: #f0f2ff; color: var(--primary); }
         .filter-option.selected { font-weight: bold; color: var(--primary); background: #eef1ff; }
@@ -118,7 +122,6 @@
         <div class="upload-compact">
             <strong>📄 데이터 동기화:</strong> 
             <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
-            <button onclick="resetAllFiltersAndSort()" style="margin-left:10px; font-size:12px; cursor:pointer;">필터 초기화</button>
         </div>
     </div>
 
