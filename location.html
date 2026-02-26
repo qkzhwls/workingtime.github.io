@@ -8,7 +8,6 @@
     <style>
         :root { --primary: #3d5afe; --bg: #f8f9fa; --card: #ffffff; }
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
-        .header { background: #fff; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ddd; }
         
         .controls-header { margin: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
         .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; }
@@ -18,7 +17,7 @@
         .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
         .upload-compact input { margin-left: 10px; font-size: 12px; }
 
-        /* 리스트 컨테이너 */
+        /* 리스트 컨테이너 (상단 타이틀 삭제로 세로 영역 더 넓게 확보) */
         .list-container { 
             overflow: auto; 
             background: white; 
@@ -26,7 +25,7 @@
             padding: 0; 
             border-radius: 12px; 
             border: 1px solid #ccc; 
-            height: calc(100vh - 160px);
+            height: calc(100vh - 100px);
         }
         .list-table { width: 100%; border-collapse: collapse; min-width: 900px; table-layout: fixed; }
         .list-table th, .list-table td { 
@@ -37,7 +36,7 @@
             word-break: break-all;
         }
         
-        /* 헤더 스타일: 클릭 정렬 방지 (cursor 기본값) */
+        /* 헤더 스타일 */
         .list-table th { 
             background: #f4f4f4; 
             position: sticky; 
@@ -100,16 +99,10 @@
         /* 팝업 내 구분선 */
         .filter-divider { height: 1px; background: #ddd; margin: 4px 0; }
 
-        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; }
         #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
     </style>
 </head>
 <body onclick="closeAllPopups()">
-    <div class="header">
-        <h1>📦 3층 로케이션 관리</h1>
-        <button class="tab-btn" style="background:#444; color:white;" onclick="window.close()">닫기</button>
-    </div>
-
     <div id="firebase-guide">
         <pre>match /Locations/{document=**} { allow read, write: if true; }</pre>
     </div>
@@ -160,11 +153,10 @@
                                 <span class="filter-btn" id="btn-filter-stock" onclick="toggleFilterPopup(event, 'pop-stock')">▼</span>
                             </div>
                         </th>
-                        <th style="width: 80px;"><span class="title-text">관리</span></th>
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
-                    <tr><td colspan="6" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
+                    <tr><td colspan="5" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
                 </tbody>
             </table>
         </div>
