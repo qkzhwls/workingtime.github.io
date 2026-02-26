@@ -36,7 +36,7 @@
             word-break: break-all;
         }
         
-        /* 헤더 스타일: 폰트 사이즈 업 & 엑셀식 필터 버튼 */
+        /* 헤더 스타일: 클릭 정렬 방지 (cursor 기본값) */
         .list-table th { 
             background: #f4f4f4; 
             position: sticky; 
@@ -55,10 +55,9 @@
             font-size: 16px; 
             font-weight: 800; 
             color: #222; 
-            cursor: pointer;
         }
         
-        /* 필터 아이콘 버튼 스타일 (텍스트 ▼ 기호 사용) */
+        /* 필터 아이콘 버튼 스타일 */
         .filter-btn {
             cursor: pointer;
             padding: 2px 6px;
@@ -71,7 +70,7 @@
         .filter-btn:hover { background: #d0d0d0; color: var(--primary); }
         .filter-btn.active { background: var(--primary); color: white; }
 
-        /* 필터 팝업 메뉴 (표 바깥으로 이동하여 절대좌표 사용) */
+        /* 필터 팝업 메뉴 */
         .filter-popup {
             display: none;
             position: absolute;
@@ -80,8 +79,8 @@
             border-radius: 6px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.2);
             z-index: 9999;
-            min-width: 150px;
-            max-height: 300px;
+            min-width: 160px;
+            max-height: 350px;
             overflow-y: auto;
             text-align: left;
             padding: 8px 0;
@@ -93,6 +92,9 @@
         }
         .filter-option:hover { background: #f0f2ff; color: var(--primary); }
         .filter-option.selected { font-weight: bold; color: var(--primary); background: #eef1ff; }
+        
+        /* 팝업 내 구분선 */
+        .filter-divider { height: 1px; background: #ddd; margin: 4px 0; }
 
         .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; }
         #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
@@ -127,29 +129,31 @@
                     <tr>
                         <th style="width: 150px;">
                             <div class="th-content">
-                                <span class="title-text" onclick="sortTable('id')">로케이션</span>
+                                <span class="title-text">로케이션</span>
                                 <span class="filter-btn" id="btn-filter-loc" onclick="toggleFilterPopup(event, 'pop-loc')">▼</span>
                             </div>
                         </th>
                         <th style="width: 150px;">
                             <div class="th-content">
-                                <span class="title-text" onclick="sortTable('code')">상품코드</span>
+                                <span class="title-text">상품코드</span>
                                 <span class="filter-btn" id="btn-filter-code" onclick="toggleFilterPopup(event, 'pop-code')">▼</span>
                             </div>
                         </th>
                         <th>
                             <div class="th-content">
-                                <span class="title-text" onclick="sortTable('name')">상품명</span>
+                                <span class="title-text">상품명</span>
+                                <span class="filter-btn" id="btn-filter-name" onclick="toggleFilterPopup(event, 'pop-name')">▼</span>
                             </div>
                         </th>
                         <th style="width: 180px;">
                             <div class="th-content">
-                                <span class="title-text" onclick="sortTable('option')">옵션</span>
+                                <span class="title-text">옵션</span>
+                                <span class="filter-btn" id="btn-filter-option" onclick="toggleFilterPopup(event, 'pop-option')">▼</span>
                             </div>
                         </th>
                         <th style="width: 130px;">
                             <div class="th-content">
-                                <span class="title-text" onclick="sortTable('stock')">정상재고</span>
+                                <span class="title-text">정상재고</span>
                                 <span class="filter-btn" id="btn-filter-stock" onclick="toggleFilterPopup(event, 'pop-stock')">▼</span>
                             </div>
                         </th>
@@ -170,11 +174,9 @@
     </div>
 
     <div id="pop-loc" class="filter-popup"></div>
-    <div id="pop-code" class="filter-popup">
-        <div class="filter-option" onclick="setFilter('code', 'all')">전체</div>
-        <div class="filter-option" onclick="setFilter('code', 'empty')">빈칸</div>
-        <div class="filter-option" onclick="setFilter('code', 'not-empty')">내용있음</div>
-    </div>
+    <div id="pop-code" class="filter-popup"></div>
+    <div id="pop-name" class="filter-popup"></div>
+    <div id="pop-option" class="filter-popup"></div>
     <div id="pop-stock" class="filter-popup"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -187,7 +189,6 @@
             event.currentTarget.classList.add('active');
         }
 
-        // 버튼 클릭 시 화면상 절대 좌표를 계산하여 팝업 띄우기
         function toggleFilterPopup(e, id) {
             e.stopPropagation();
             const pop = document.getElementById(id);
@@ -198,15 +199,14 @@
                 const rect = e.target.getBoundingClientRect();
                 pop.style.display = 'block';
                 pop.style.top = (rect.bottom + window.scrollY + 5) + 'px';
-                pop.style.left = (rect.left + window.scrollX - 50) + 'px'; // 버튼 기준 약간 왼쪽으로
+                pop.style.left = (rect.left + window.scrollX - 50) + 'px'; 
             }
         }
 
-        function closeAllPopups() {
+        window.closeAllPopups = function() {
             document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
         }
         
-        // 팝업 내부를 클릭했을 때 창이 닫히지 않도록 이벤트 전파 막기
         document.querySelectorAll('.filter-popup').forEach(p => {
             p.addEventListener('click', function(e) {
                 e.stopPropagation();
