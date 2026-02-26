@@ -10,37 +10,31 @@
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; }
         .header { background: #fff; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ddd; }
         
-        /* 파이어베이스 에러 안내문 스타일 */
-        #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
-        #firebase-guide h3 { color: #d32f2f; margin-top: 0; }
-        #firebase-guide pre { background: #fff; padding: 15px; border: 1px solid #ffccbc; border-radius: 4px; font-weight: bold; color: #d32f2f; font-size: 15px; overflow-x: auto; }
-
-        /* 상단 컨트롤 영역 (탭 메뉴 + 업로드 버튼을 한 줄로) */
-        .controls-header { display: flex; justify-content: space-between; align-items: center; margin: 20px; }
+        /* 컨트롤 영역: 필터와 업로드 */
+        .controls-header { margin: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .top-row { display: flex; justify-content: space-between; align-items: center; }
+        .filter-row { display: flex; gap: 10px; background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #ddd; align-items: center; flex-wrap: wrap; }
         
-        /* 상단 탭 메뉴 */
+        .filter-group { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+        select { padding: 6px 10px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; }
+
         .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; }
         .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
         .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 
-        /* 간소화된 업로드 영역 */
-        .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; box-shadow: 0 1px 3px rgba(0,0,0,0.05); font-size: 14px; }
-        .upload-compact input { margin-left: 10px; font-size: 13px; }
-
-        /* 콘텐츠 뷰 스타일 */
-        .content-view { padding: 0 20px; display: none; }
-        .content-view.active { display: block; }
+        .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
         
-        /* 리스트 뷰 전용 스타일 (엑셀 형태의 표 구조로 변경, 모든 테두리 추가) */
-        .list-container { overflow: auto; background: white; padding: 20px; border-radius: 12px; border: 1px solid #eee; height: 65vh; }
+        /* 테이블 스타일 */
+        .list-container { overflow: auto; background: white; padding: 20px; border-radius: 12px; border: 1px solid #eee; height: 60vh; }
         .list-table { width: 100%; border-collapse: collapse; min-width: 800px; }
         .list-table th, .list-table td { padding: 12px 15px; text-align: center; border: 1px solid #ccc; font-size: 14px; }
-        .list-table th { background: #f4f4f4; position: sticky; top: 0; z-index: 10; font-weight: bold; color: #333; }
+        .list-table th { background: #f4f4f4; position: sticky; top: 0; z-index: 10; cursor: pointer; user-select: none; }
+        .list-table th:hover { background: #e0e0e0; }
+        .list-table th i { margin-left: 5px; font-size: 12px; color: #888; }
         
-        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; padding: 5px 10px;}
-        .btn-del:hover { background: #ffebee; border-radius: 4px; }
-
-        .map-container { display: flex; justify-content: center; align-items: center; background: white; border-radius: 12px; border: 1px solid #eee; height: 65vh; color: #666; font-size: 18px; font-weight: bold; text-align: center; line-height: 1.6; }
+        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; }
+        
+        #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
     </style>
 </head>
 <body>
@@ -50,24 +44,45 @@
     </div>
 
     <div id="firebase-guide">
-        <h3>🚨 시스템 연동 안내: 파이어베이스 보안 규칙 업데이트 필요</h3>
-        <p style="color: #333; font-size: 15px;">이 페이지가 정상적으로 작동하려면 데이터베이스에 권한을 추가해야 합니다. 파이어베이스의 <strong>[Firestore Database] -> [Rules (규칙)]</strong> 탭에 아래 코드를 추가해 주세요.</p>
-        <pre>
-match /Locations/{document=**} {
-  allow read, write: if true; 
-}</pre>
-        <p style="font-size: 13px; color: #666; margin-bottom: 0;">※ 코드를 추가하고 [게시(Publish)]한 뒤, 이 페이지를 새로고침(Ctrl + Shift + R)하면 이 안내문은 자동으로 사라지고 시스템이 정상 가동됩니다.</p>
+        <h3>🚨 시스템 연동 안내</h3>
+        <pre>match /Locations/{document=**} { allow read, write: if true; }</pre>
     </div>
 
     <div class="controls-header">
-        <div class="tabs">
-            <button class="tab-btn active" onclick="switchView('list')"><i class="fas fa-list"></i> 데이터 리스트</button>
-            <button class="tab-btn" onclick="switchView('map')"><i class="fas fa-map"></i> 도면 보기</button>
+        <div class="top-row">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchView('list')"><i class="fas fa-list"></i> 데이터 리스트</button>
+                <button class="tab-btn" onclick="switchView('map')"><i class="fas fa-map"></i> 도면 보기</button>
+            </div>
+            <div class="upload-compact">
+                <strong>📄 데이터 동기화:</strong> 
+                <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
+            </div>
         </div>
-        
-        <div class="upload-compact">
-            <strong>📄 데이터 동기화:</strong> 
-            <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv,application/vnd.ms-excel">
+
+        <div class="filter-row">
+            <div class="filter-group">
+                <i class="fas fa-filter"></i>
+                <strong>로케이션:</strong>
+                <select id="filter-loc-prefix">
+                    <option value="all">전체(A-Z, ★)</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <strong>상품코드:</strong>
+                <select id="filter-code-status">
+                    <option value="all">전체</option>
+                    <option value="empty">빈칸</option>
+                    <option value="not-empty">빈칸 아님</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <strong>정상재고:</strong>
+                <select id="filter-stock-qty">
+                    <option value="all">전체</option>
+                    </select>
+            </div>
+            <button onclick="resetFilters()" style="margin-left:auto; padding:5px 10px; cursor:pointer;">필터 초기화</button>
         </div>
     </div>
 
@@ -76,12 +91,12 @@ match /Locations/{document=**} {
             <table class="list-table">
                 <thead>
                     <tr>
-                        <th style="width: 15%;">로케이션</th>
-                        <th style="width: 20%;">상품코드</th>
-                        <th style="width: 25%;">상품명</th>
-                        <th style="width: 15%;">옵션</th>
-                        <th style="width: 15%;">정상재고</th>
-                        <th style="width: 10%;">관리</th>
+                        <th onclick="sortTable('id')">로케이션 <i class="fas fa-sort"></i></th>
+                        <th onclick="sortTable('code')">상품코드 <i class="fas fa-sort"></i></th>
+                        <th onclick="sortTable('name')">상품명 <i class="fas fa-sort"></i></th>
+                        <th onclick="sortTable('option')">옵션 <i class="fas fa-sort"></i></th>
+                        <th onclick="sortTable('stock')">정상재고 <i class="fas fa-sort"></i></th>
+                        <th>관리</th>
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
@@ -92,9 +107,8 @@ match /Locations/{document=**} {
     </div>
 
     <div id="view-map" class="content-view">
-        <div class="map-container">
-            🚧 도면 보기 기능은 준비 중입니다.<br>
-            <span style="font-size:14px; font-weight:normal;">(리스트 데이터 동기화 및 안정화가 완료된 후 도면 형태를 지원할 예정입니다.)</span>
+        <div class="map-container" style="text-align:center; padding:100px; background:#fff; margin:20px; border-radius:12px; border:1px solid #ddd;">
+            🚧 도면 보기 기능 준비 중
         </div>
     </div>
 
