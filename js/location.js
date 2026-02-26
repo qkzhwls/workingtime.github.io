@@ -49,6 +49,13 @@ function renderList(data) {
 
     let html = '';
     data.forEach((loc, index) => {
+        
+        // 상품코드 표시 로직: 값이 없거나, 로케이션 이름과 완전히 동일하면 빈칸으로 처리
+        let displayCode = loc.code;
+        if (!displayCode || displayCode === loc.id) {
+            displayCode = '';
+        }
+
         html += `
             <tr>
                 <td>
@@ -56,7 +63,7 @@ function renderList(data) {
                         <div class="loc-info">
                             <span class="loc-num">${index + 1}.</span>
                             <span class="loc-name">${loc.id}</span>
-                            <span class="loc-code">${loc.code || '<span style="color:#ccc; font-weight:normal;">(상품 없음)</span>'}</span>
+                            <span class="loc-code">${displayCode}</span>
                         </div>
                         <button class="btn-del" onclick="deleteLoc('${loc.id}')">삭제</button>
                     </div>
@@ -139,7 +146,6 @@ async function updateProductCodes(rows) {
                 if (!val) continue;
 
                 // 정규식 1: 로케이션 번호만 완벽하게 추출 (예: A-1-002 또는 ★★-01)
-                // 괄호, 슬래시 등 불필요한 문자가 섞여 있어도 이 패턴만 오려냅니다.
                 const locMatch = val.match(/([A-Z]-\d-\d{3}|★★-\d{2})/);
                 
                 if (locMatch) {
