@@ -2,9 +2,10 @@ import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
-const LOC_COLLECTION = 'location_map_3f';
+// 기존에 존재하는 컬렉션 이름으로 완벽 매칭
+const LOC_COLLECTION = 'Locations';
 
-// 1. 데이터 로드 및 에러 감지
+// 1. 데이터 로드 및 에러 감지 (기존 Locations 캐비닛에서 가져오기)
 async function loadAndRender() {
     try {
         const querySnapshot = await getDocs(collection(db, LOC_COLLECTION));
@@ -21,7 +22,7 @@ async function loadAndRender() {
         
         if (data.length === 0) {
             if (tbody) {
-                tbody.innerHTML = '<tr><td style="text-align:center; padding: 50px; color:#666; font-size:16px;">등록된 데이터가 없습니다.<br>상단의 파일 선택을 통해 마스터 데이터를 업로드해 주세요.</td></tr>';
+                tbody.innerHTML = '<tr><td style="text-align:center; padding: 50px; color:#666; font-size:16px;">DB에 등록된 로케이션 뼈대가 없습니다.</td></tr>';
             }
             return;
         }
@@ -30,7 +31,7 @@ async function loadAndRender() {
     } catch (error) {
         console.error("데이터 로딩 실패:", error);
         
-        // 파이어베이스 권한 에러(보안 규칙 문제) 감지 시 안내문 표시
+        // 파이어베이스 권한 에러 감지 시 안내문 표시
         if (error.code === 'permission-denied' || (error.message && error.message.includes('permission'))) {
             document.getElementById('firebase-guide').style.display = 'block';
             
@@ -42,11 +43,12 @@ async function loadAndRender() {
     }
 }
 
-// 2. 리스트 뷰 렌더링 (7000 x 1 단일 열 구조)
+// 2. 리스트 뷰 렌더링
 function renderList(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
     
+    // 로케이션 아이디 순으로 정렬
     data.sort((a, b) => a.id.localeCompare(b.id));
 
     let html = '';
@@ -70,7 +72,7 @@ function renderList(data) {
     tbody.innerHTML = html;
 }
 
-// 3. 파일 업로드 및 인코딩 자동 감지 로직
+// 3. 파일 업로드 로직 (기존 뼈대에 상품코드만 동기화)
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -114,19 +116,19 @@ async function processText(content) {
     }
 
     if (rows && rows.length > 0) {
-        await buildMasterList(rows);
+        await updateProductCodes(rows);
     } else {
         alert("파일에서 데이터를 찾을 수 없습니다.");
     }
 }
 
-// 5. 대용량 데이터 추출 및 쪼개기 저장
-async function buildMasterList(rows) {
-    if (!confirm("업로드한 파일의 전체 로케이션을 시스템에 등록하시겠습니까?\n데이터가 많을 경우 약간의 시간이 소요될 수 있습니다.")) return;
+// 5. 알맹이(상품코드)만 추출하여 기존 DB 문서에 업데이트 (merge: true 적용)
+async function updateProductCodes(rows) {
+    if (!confirm("업로드한 파일의 데이터로 상품코드를 최신화하시겠습니까?\n(기존 로케이션 뼈대에 상품코드만 덮어씌워집니다.)")) return;
     
     const tbody = document.getElementById('location-list-body');
     if(tbody) {
-        tbody.innerHTML = '<tr><td style="text-align:center; padding: 50px; color:#3d5afe; font-size:18px; font-weight:bold;">🔥 수천 개의 데이터를 분석하고 저장하는 중입니다...<br>잠시만 기다려주세요!</td></tr>';
+        tbody.innerHTML = '<tr><td style="text-align:center; padding: 50px; color:#3d5afe; font-size:18px; font-weight:bold;">🔥 상품코드를 동기화하고 있습니다...<br>잠시만 기다려주세요!</td></tr>';
     }
     
     try {
@@ -138,6 +140,7 @@ async function buildMasterList(rows) {
             for (let c = 0; c < rows[r].length; c++) {
                 const val = rows[r][c]?.toString().trim();
                 
+                // ★★ 기호 또는 알파벳-숫자 조합 로케이션 확인
                 if (val && (val.includes('★★') || /^[A-Z]-\d+/.test(val))) {
                     const locId = val;
                     let productCode = '';
@@ -153,21 +156,22 @@ async function buildMasterList(rows) {
                         }
                     }
                     
-                    const docRef = doc(db, LOC_COLLECTION, locId);
-                    batch.set(docRef, {
-                        row: r + 1,
-                        col: c + 1,
-                        code: productCode,
-                        updatedAt: new Date()
-                    });
-                    
-                    count++;
-                    batchCount++;
-                    
-                    if (batchCount >= 400) {
-                        await batch.commit();
-                        batch = writeBatch(db); 
-                        batchCount = 0;
+                    // 기존 데이터에 상품코드 정보만 합치기 (merge: true)
+                    if (productCode) {
+                        const docRef = doc(db, LOC_COLLECTION, locId);
+                        batch.set(docRef, {
+                            code: productCode,
+                            updatedAt: new Date()
+                        }, { merge: true });
+                        
+                        count++;
+                        batchCount++;
+                        
+                        if (batchCount >= 400) {
+                            await batch.commit();
+                            batch = writeBatch(db); 
+                            batchCount = 0;
+                        }
                     }
                 }
             }
@@ -177,7 +181,7 @@ async function buildMasterList(rows) {
             await batch.commit();
         }
 
-        alert(`✅ 데이터 리스트 등록 완료!\n총 ${count}개의 로케이션이 시스템에 반영되었습니다.`);
+        alert(`✅ 동기화 완료!\n총 ${count}개의 로케이션에 상품코드가 업데이트되었습니다.`);
         document.getElementById('excel-upload').value = '';
         loadAndRender(); 
     } catch (error) {
@@ -191,9 +195,9 @@ async function buildMasterList(rows) {
     }
 }
 
-// 6. 개별 삭제 로직 (전역 설정)
+// 6. 개별 삭제 로직
 window.deleteLoc = async (id) => {
-    if(confirm(`${id} 로케이션 데이터를 영구적으로 삭제하시겠습니까?`)) {
+    if(confirm(`${id} 로케이션 자체를 DB에서 완전히 삭제하시겠습니까?`)) {
         try {
             await deleteDoc(doc(db, LOC_COLLECTION, id));
             loadAndRender();
