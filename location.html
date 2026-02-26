@@ -31,16 +31,11 @@
         .content-view { padding: 0 20px; display: none; }
         .content-view.active { display: block; }
         
-        /* 리스트 뷰 전용 스타일 (7000 x 1 형태 최적화) */
+        /* 리스트 뷰 전용 스타일 (엑셀 형태의 표 구조로 변경, 모든 테두리 추가) */
         .list-container { overflow: auto; background: white; padding: 20px; border-radius: 12px; border: 1px solid #eee; height: 65vh; }
-        .list-table { width: 100%; max-width: 600px; margin: 0 auto; border-collapse: collapse; }
-        .list-table th, .list-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
-        
-        .single-cell-content { display: flex; justify-content: space-between; align-items: center; }
-        .loc-info { font-size: 15px; }
-        .loc-num { display: inline-block; width: 50px; color: #888; font-size: 13px; }
-        .loc-name { font-weight: bold; color: #333; display: inline-block; width: 120px; }
-        .loc-code { color: #3d5afe; font-weight: bold; }
+        .list-table { width: 100%; border-collapse: collapse; min-width: 800px; }
+        .list-table th, .list-table td { padding: 12px 15px; text-align: center; border: 1px solid #ccc; font-size: 14px; }
+        .list-table th { background: #f4f4f4; position: sticky; top: 0; z-index: 10; font-weight: bold; color: #333; }
         
         .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; padding: 5px 10px;}
         .btn-del:hover { background: #ffebee; border-radius: 4px; }
@@ -79,8 +74,18 @@ match /Locations/{document=**} {
     <div id="view-list" class="content-view active">
         <div class="list-container">
             <table class="list-table">
+                <thead>
+                    <tr>
+                        <th style="width: 15%;">로케이션</th>
+                        <th style="width: 20%;">상품코드</th>
+                        <th style="width: 25%;">상품명</th>
+                        <th style="width: 15%;">옵션</th>
+                        <th style="width: 15%;">정상재고</th>
+                        <th style="width: 10%;">관리</th>
+                    </tr>
+                </thead>
                 <tbody id="location-list-body">
-                    <tr><td style="text-align:center; padding: 30px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
+                    <tr><td colspan="6" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
                 </tbody>
             </table>
         </div>
