@@ -10,9 +10,7 @@
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
         .header { background: #fff; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ddd; }
         
-        /* 컨트롤 영역 간소화 */
         .controls-header { margin: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
-        
         .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; }
         .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
         .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -20,7 +18,7 @@
         .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
         .upload-compact input { margin-left: 10px; font-size: 12px; }
 
-        /* 리스트 컨테이너 (필터바 삭제로 높이 확장) */
+        /* 리스트 컨테이너 */
         .list-container { 
             overflow: auto; 
             background: white; 
@@ -28,18 +26,18 @@
             padding: 0; 
             border-radius: 12px; 
             border: 1px solid #ccc; 
-            height: calc(100vh - 160px); /* 필터바 삭제로 더 넓게 확보 */
+            height: calc(100vh - 160px);
         }
         .list-table { width: 100%; border-collapse: collapse; min-width: 900px; table-layout: fixed; }
         .list-table th, .list-table td { 
-            padding: 10px 12px; 
+            padding: 12px 15px; 
             text-align: center; 
             border: 1px solid #ccc; 
             font-size: 14px; 
             word-break: break-all;
         }
         
-        /* 헤더 스타일: 제목 + 필터 통합 */
+        /* 헤더 스타일: 폰트 사이즈 업 & 엑셀식 필터 버튼 */
         .list-table th { 
             background: #f4f4f4; 
             position: sticky; 
@@ -47,36 +45,65 @@
             z-index: 10; 
             user-select: none;
             box-shadow: inset 0 -1px 0 #ccc, inset 0 1px 0 #ccc; 
-            padding-top: 8px;
-            padding-bottom: 8px;
         }
-        .th-content { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; }
-        .th-content:hover .title-text { color: var(--primary); }
-        .title-text { font-weight: bold; color: #333; font-size: 13px; }
+        .th-content { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            gap: 8px; 
+        }
+        .title-text { 
+            font-size: 16px; /* 폰트 사이즈 키움 */
+            font-weight: 800; 
+            color: #222; 
+            cursor: pointer;
+        }
         
-        /* 헤더 내 필터 드롭다운 스타일 */
-        .header-filter { 
-            width: 90%; 
-            font-size: 11px; 
-            padding: 2px; 
-            border: 1px solid #bbb; 
-            border-radius: 3px; 
-            background: #fff;
-            cursor: default;
+        /* 필터 아이콘 버튼 스타일 */
+        .filter-btn {
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            color: #888;
+            transition: 0.2s;
         }
+        .filter-btn:hover { background: #ddd; color: var(--primary); }
+        .filter-btn.active { color: var(--primary); }
 
-        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; font-size: 12px; }
+        /* 필터 팝업 메뉴 */
+        .filter-popup {
+            display: none;
+            position: absolute;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 100;
+            min-width: 150px;
+            max-height: 300px;
+            overflow-y: auto;
+            text-align: left;
+            padding: 8px 0;
+        }
+        .filter-option {
+            padding: 8px 15px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        .filter-option:hover { background: #f0f2ff; color: var(--primary); }
+        .filter-option.selected { font-weight: bold; color: var(--primary); background: #eef1ff; }
+
+        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; }
         #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
     </style>
 </head>
-<body>
+<body onclick="closeAllPopups()">
     <div class="header">
         <h1>📦 3층 로케이션 관리</h1>
         <button class="tab-btn" style="background:#444; color:white;" onclick="window.close()">닫기</button>
     </div>
 
     <div id="firebase-guide">
-        <h3>🚨 시스템 연동 안내</h3>
         <pre>match /Locations/{document=**} { allow read, write: if true; }</pre>
     </div>
 
@@ -88,7 +115,7 @@
         <div class="upload-compact">
             <strong>📄 데이터 동기화:</strong> 
             <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
-            <button onclick="resetAllFiltersAndSort()" style="margin-left:10px; font-size:12px; cursor:pointer;">초기화</button>
+            <button onclick="resetAllFiltersAndSort()" style="margin-left:10px; font-size:12px; cursor:pointer;">필터 초기화</button>
         </div>
     </div>
 
@@ -97,57 +124,48 @@
             <table class="list-table">
                 <thead>
                     <tr>
-                        <th style="width: 130px;">
-                            <div class="th-content" onclick="sortTable('id')">
-                                <span class="title-text">로케이션 <i class="fas fa-sort"></i></span>
+                        <th style="width: 150px;">
+                            <div class="th-content">
+                                <span class="title-text" onclick="sortTable('id')">로케이션</span>
+                                <i class="fas fa-filter filter-btn" id="btn-filter-loc" onclick="toggleFilterPopup(event, 'pop-loc')"></i>
                             </div>
-                            <select id="filter-loc-prefix" class="header-filter" onclick="event.stopPropagation()">
-                                <option value="all">(필터: 전체)</option>
-                            </select>
+                            <div id="pop-loc" class="filter-popup"></div>
                         </th>
-                        <th style="width: 130px;">
-                            <div class="th-content" onclick="sortTable('code')">
-                                <span class="title-text">상품코드 <i class="fas fa-sort"></i></span>
+                        <th style="width: 150px;">
+                            <div class="th-content">
+                                <span class="title-text" onclick="sortTable('code')">상품코드</span>
+                                <i class="fas fa-filter filter-btn" id="btn-filter-code" onclick="toggleFilterPopup(event, 'pop-code')"></i>
                             </div>
-                            <select id="filter-code-status" class="header-filter" onclick="event.stopPropagation()">
-                                <option value="all">(전체)</option>
-                                <option value="empty">빈칸</option>
-                                <option value="not-empty">내용있음</option>
-                            </select>
+                            <div id="pop-code" class="filter-popup">
+                                <div class="filter-option" onclick="setFilter('code', 'all')">전체</div>
+                                <div class="filter-option" onclick="setFilter('code', 'empty')">빈칸</div>
+                                <div class="filter-option" onclick="setFilter('code', 'not-empty')">내용있음</div>
+                            </div>
                         </th>
                         <th>
-                            <div class="th-content" onclick="sortTable('name')">
-                                <span class="title-text">상품명 <i class="fas fa-sort"></i></span>
+                            <div class="th-content">
+                                <span class="title-text" onclick="sortTable('name')">상품명</span>
                             </div>
                         </th>
                         <th style="width: 180px;">
-                            <div class="th-content" onclick="sortTable('option')">
-                                <span class="title-text">옵션 <i class="fas fa-sort"></i></span>
+                            <div class="th-content">
+                                <span class="title-text" onclick="sortTable('option')">옵션</span>
                             </div>
                         </th>
-                        <th style="width: 110px;">
-                            <div class="th-content" onclick="sortTable('stock')">
-                                <span class="title-text">정상재고 <i class="fas fa-sort"></i></span>
+                        <th style="width: 130px;">
+                            <div class="th-content">
+                                <span class="title-text" onclick="sortTable('stock')">정상재고</span>
+                                <i class="fas fa-filter filter-btn" id="btn-filter-stock" onclick="toggleFilterPopup(event, 'pop-stock')"></i>
                             </div>
-                            <select id="filter-stock-qty" class="header-filter" onclick="event.stopPropagation()">
-                                <option value="all">(전체)</option>
-                            </select>
+                            <div id="pop-stock" class="filter-popup"></div>
                         </th>
-                        <th style="width: 70px;">
-                            <span class="title-text">관리</span>
-                        </th>
+                        <th style="width: 80px;"><span class="title-text">관리</span></th>
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
                     <tr><td colspan="6" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
                 </tbody>
             </table>
-        </div>
-    </div>
-
-    <div id="view-map" class="content-view">
-        <div class="map-container" style="text-align:center; padding:100px; background:#fff; margin:20px; border-radius:12px; border:1px solid #ddd;">
-            🚧 도면 보기 기능 준비 중
         </div>
     </div>
 
@@ -159,6 +177,20 @@
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.getElementById('view-' + view).classList.add('active');
             event.currentTarget.classList.add('active');
+        }
+        function toggleFilterPopup(e, id) {
+            e.stopPropagation();
+            const pop = document.getElementById(id);
+            const isVisible = pop.style.display === 'block';
+            closeAllPopups();
+            if (!isVisible) {
+                pop.style.display = 'block';
+                pop.style.top = (e.target.offsetTop + 25) + 'px';
+                pop.style.left = e.target.offsetLeft + 'px';
+            }
+        }
+        function closeAllPopups() {
+            document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
         }
     </script>
 </body>
