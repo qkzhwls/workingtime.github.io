@@ -51,18 +51,18 @@
 
     <div id="firebase-guide">
         <h3>🚨 시스템 연동 안내: 파이어베이스 보안 규칙 업데이트 필요</h3>
-        <p style="color: #333; font-size: 15px;">이 페이지가 정상적으로 작동하려면 데이터베이스에 3층 로케이션을 위한 저장 공간 권한을 추가해야 합니다. 파이어베이스의 <strong>[Firestore Database] -> [Rules (규칙)]</strong> 탭에 아래 코드를 추가해 주세요.</p>
+        <p style="color: #333; font-size: 15px;">이 페이지가 정상적으로 작동하려면 데이터베이스에 권한을 추가해야 합니다. 파이어베이스의 <strong>[Firestore Database] -> [Rules (규칙)]</strong> 탭에 아래 코드를 추가해 주세요.</p>
         <pre>
-match /location_map_3f/{document=**} {
+match /Locations/{document=**} {
   allow read, write: if true; 
 }</pre>
         <p style="font-size: 13px; color: #666; margin-bottom: 0;">※ 코드를 추가하고 [게시(Publish)]한 뒤, 이 페이지를 새로고침(Ctrl + Shift + R)하면 이 안내문은 자동으로 사라지고 시스템이 정상 가동됩니다.</p>
     </div>
 
     <div class="upload-section">
-        <strong>📄 로케이션 데이터 (최초 등록/업데이트):</strong> 
+        <strong>📄 오늘자 판매현황 엑셀 업로드 (상품코드 업데이트):</strong> 
         <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv,application/vnd.ms-excel" style="margin-left:10px;">
-        <span style="font-size:12px; color:#666;">(대용량 데이터는 등록에 약 10~30초가 소요됩니다)</span>
+        <span style="font-size:12px; color:#666;">(업로드 시 기존 로케이션 뼈대에 상품코드만 동기화됩니다.)</span>
     </div>
 
     <div class="tabs">
