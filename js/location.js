@@ -6,7 +6,8 @@ const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
 let sortConfig = { key: 'id', direction: 'asc' }; 
-let filters = { loc: 'all', code: 'all', stock: 'all' };
+// loc는 다중 선택을 위해 빈 배열로 초기화합니다.
+let filters = { loc: [], code: 'all', stock: 'all' };
 
 async function loadAndRender() {
     try {
@@ -34,26 +35,40 @@ function getSortButtonsHtml(key) {
     `;
 }
 
-function setupFilterPopups() {
+// 로케이션 다중 필터 UI 업데이트
+function updateLocPopupUI() {
     const locPop = document.getElementById('pop-loc');
-    const codePop = document.getElementById('pop-code');
-    const namePop = document.getElementById('pop-name');
-    const optionPop = document.getElementById('pop-option');
-    const stockPop = document.getElementById('pop-stock');
+    if (!locPop) return;
 
-    // 1. 로케이션 (정렬 + 필터)
     let prefixSet = new Set(originalData.map(d => d.id.charAt(0)));
     prefixSet.add('★');
     const prefixes = [...prefixSet].sort((a, b) => (a === '★' ? -1 : (b === '★' ? 1 : a.localeCompare(b))));
 
     let locHtml = getSortButtonsHtml('id');
-    locHtml += '<div class="filter-option" onclick="setFilter(\'loc\', \'all\')">전체보기</div>';
+    const isAllSelected = filters.loc.length === 0;
+    locHtml += `<div class="filter-option ${isAllSelected ? 'selected' : ''}" onclick="toggleLocFilter('all')">
+        ${isAllSelected ? '✔️ ' : ''}전체보기
+    </div>`;
+    
     prefixes.forEach(p => {
-        locHtml += `<div class="filter-option" onclick="setFilter('loc', '${p}')">${p} 구역</div>`;
+        const isSelected = filters.loc.includes(p);
+        locHtml += `<div class="filter-option ${isSelected ? 'selected' : ''}" onclick="toggleLocFilter('${p}')">
+            ${isSelected ? '✔️ ' : ''}${p} 구역
+        </div>`;
     });
-    if(locPop) locPop.innerHTML = locHtml;
+    locPop.innerHTML = locHtml;
+}
 
-    // 2. 상품코드 (정렬 + 필터)
+function setupFilterPopups() {
+    const codePop = document.getElementById('pop-code');
+    const namePop = document.getElementById('pop-name');
+    const optionPop = document.getElementById('pop-option');
+    const stockPop = document.getElementById('pop-stock');
+
+    // 1. 로케이션 (정렬 + 다중 필터)
+    updateLocPopupUI();
+
+    // 2. 상품코드 (정렬 + 단일 필터)
     let codeHtml = getSortButtonsHtml('code');
     codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'all\')">전체보기</div>';
     codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'empty\')">빈칸</div>';
@@ -66,7 +81,7 @@ function setupFilterPopups() {
     // 4. 옵션 (정렬 전용)
     if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
 
-    // 5. 정상재고 (정렬 + 필터)
+    // 5. 정상재고 (정렬 + 단일 필터)
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
     let stockHtml = getSortButtonsHtml('stock');
     stockHtml += '<div class="filter-option" onclick="setFilter(\'stock\', \'all\')">전체보기</div>';
@@ -76,7 +91,7 @@ function setupFilterPopups() {
     if(stockPop) stockPop.innerHTML = stockHtml;
 }
 
-// 정렬 실행 함수
+// 정렬 실행 함수 (클릭 시 팝업 닫힘)
 window.executeSort = (key, direction) => {
     sortConfig = { key: key, direction: direction };
     applyFiltersAndSort();
@@ -85,11 +100,35 @@ window.executeSort = (key, direction) => {
     }
 };
 
-// 필터 실행 함수
+// 로케이션 다중 선택 실행 함수 (클릭 시 팝업 안 닫힘)
+window.toggleLocFilter = (val) => {
+    if (val === 'all') {
+        filters.loc = [];
+    } else {
+        if (filters.loc.includes(val)) {
+            filters.loc = filters.loc.filter(v => v !== val);
+        } else {
+            filters.loc.push(val);
+        }
+    }
+    
+    // UI 체크마크 갱신
+    updateLocPopupUI();
+
+    // 헤더 버튼 활성화 색상 변경
+    const btn = document.getElementById('btn-filter-loc');
+    if (btn) {
+        if (filters.loc.length === 0) btn.classList.remove('active');
+        else btn.classList.add('active');
+    }
+
+    applyFiltersAndSort();
+};
+
+// 단일 필터 실행 함수 (클릭 시 팝업 닫힘)
 window.setFilter = (type, value) => {
     filters[type] = value;
     
-    // 버튼 활성화 색상 변경
     const btnId = `btn-filter-${type}`;
     const btn = document.getElementById(btnId);
     if (btn) {
@@ -105,7 +144,8 @@ window.setFilter = (type, value) => {
 
 function applyFiltersAndSort() {
     let filtered = originalData.filter(item => {
-        if (filters.loc !== 'all' && item.id.charAt(0) !== filters.loc) return false;
+        // 로케이션 다중 필터 적용
+        if (filters.loc.length > 0 && !filters.loc.includes(item.id.charAt(0))) return false;
         
         const hasCode = item.code && item.code !== item.id && item.code.trim() !== "";
         if (filters.code === 'empty' && hasCode) return false;
@@ -204,13 +244,6 @@ async function updateDatabase(rows) {
 
 window.deleteLoc = async (id) => {
     if(confirm(`${id}를 삭제하시겠습니까?`)) { await deleteDoc(doc(db, LOC_COLLECTION, id)); loadAndRender(); }
-};
-
-window.resetAllFiltersAndSort = () => {
-    filters = { loc: 'all', code: 'all', stock: 'all' };
-    sortConfig = { key: 'id', direction: 'asc' };
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    applyFiltersAndSort();
 };
 
 window.onload = loadAndRender;
