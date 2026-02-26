@@ -4,12 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3층 로케이션 관리 시스템</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/all.min.css">
     <style>
         :root { --primary: #3d5afe; --bg: #f8f9fa; --card: #ffffff; }
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
         
-        .controls-header { margin: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .controls-header { margin: 15px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; }
         .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; }
         .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
         .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -17,7 +16,15 @@
         .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
         .upload-compact input { margin-left: 10px; font-size: 12px; }
 
-        /* 리스트 컨테이너 (상단 타이틀 삭제로 세로 영역 더 넓게 확보) */
+        /* 로케이션 추가/삭제 액션 바 */
+        .action-bar { margin: 0 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; background: white; padding: 10px 15px; border-radius: 8px; border: 1px solid #ddd; }
+        .action-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 150px; }
+        .btn-add { padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .btn-add:hover { background: #324ee0; }
+        .btn-delete-bulk { padding: 6px 12px; background: #ff5252; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .btn-delete-bulk:hover { background: #e04848; }
+
+        /* 리스트 컨테이너 */
         .list-container { 
             overflow: auto; 
             background: white; 
@@ -25,7 +32,7 @@
             padding: 0; 
             border-radius: 12px; 
             border: 1px solid #ccc; 
-            height: calc(100vh - 100px);
+            height: calc(100vh - 170px);
         }
         .list-table { width: 100%; border-collapse: collapse; min-width: 900px; table-layout: fixed; }
         .list-table th, .list-table td { 
@@ -95,9 +102,10 @@
         }
         .filter-option:hover { background: #f0f2ff; color: var(--primary); }
         .filter-option.selected { font-weight: bold; color: var(--primary); background: #eef1ff; }
-        
-        /* 팝업 내 구분선 */
         .filter-divider { height: 1px; background: #ddd; margin: 4px 0; }
+
+        .checkbox-cell { width: 40px; }
+        .loc-check { cursor: pointer; width: 16px; height: 16px; }
 
         #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
     </style>
@@ -113,8 +121,18 @@
             <button class="tab-btn" onclick="switchView('map')">도면 보기</button>
         </div>
         <div class="upload-compact">
-            <strong>📄 데이터 동기화:</strong> 
+            <strong>📄 엑셀 동기화(내용 업데이트):</strong> 
             <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
+        </div>
+    </div>
+
+    <div class="action-bar" id="action-bar">
+        <div>
+            <input type="text" id="new-loc-id" class="action-input" placeholder="예: A-1-001" onkeypress="if(event.key === 'Enter') addSingleLocation()">
+            <button class="btn-add" onclick="addSingleLocation()">➕ 빈 로케이션 추가</button>
+        </div>
+        <div>
+            <button class="btn-delete-bulk" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
         </div>
     </div>
 
@@ -123,6 +141,9 @@
             <table class="list-table">
                 <thead>
                     <tr>
+                        <th class="checkbox-cell">
+                            <input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)">
+                        </th>
                         <th style="width: 150px;">
                             <div class="th-content">
                                 <span class="title-text">로케이션</span>
@@ -156,7 +177,7 @@
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
-                    <tr><td colspan="5" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
+                    <tr><td colspan="6" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -179,6 +200,7 @@
     <script>
         function switchView(view) {
             document.getElementById('view-list').style.display = view === 'list' ? 'block' : 'none';
+            document.getElementById('action-bar').style.display = view === 'list' ? 'flex' : 'none';
             document.getElementById('view-map').style.display = view === 'map' ? 'block' : 'none';
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             event.currentTarget.classList.add('active');
