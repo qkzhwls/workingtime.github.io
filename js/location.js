@@ -18,6 +18,10 @@ async function loadAndRender() {
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
 
+        // 데이터 갱신 시 전체 선택 체크박스 초기화
+        const checkAllBtn = document.getElementById('check-all');
+        if(checkAllBtn) checkAllBtn.checked = false;
+
         setupFilterPopups();
         applyFiltersAndSort();
     } catch (error) {
@@ -25,7 +29,6 @@ async function loadAndRender() {
     }
 }
 
-// 정렬 버튼 HTML 템플릿 생성 함수
 function getSortButtonsHtml(key) {
     return `
         <div class="filter-option" onclick="executeSort('${key}', 'asc')">⬆️ 오름차순 정렬</div>
@@ -34,7 +37,6 @@ function getSortButtonsHtml(key) {
     `;
 }
 
-// 로케이션 다중 필터 UI 업데이트
 function updateLocPopupUI() {
     const locPop = document.getElementById('pop-loc');
     if (!locPop) return;
@@ -64,23 +66,17 @@ function setupFilterPopups() {
     const optionPop = document.getElementById('pop-option');
     const stockPop = document.getElementById('pop-stock');
 
-    // 1. 로케이션 (정렬 + 다중 필터)
     updateLocPopupUI();
 
-    // 2. 상품코드 (정렬 + 단일 필터)
     let codeHtml = getSortButtonsHtml('code');
     codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'all\')">전체보기</div>';
     codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'empty\')">빈칸</div>';
     codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'not-empty\')">내용있음</div>';
     if(codePop) codePop.innerHTML = codeHtml;
 
-    // 3. 상품명 (정렬 전용)
     if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
-
-    // 4. 옵션 (정렬 전용)
     if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
 
-    // 5. 정상재고 (정렬 + 단일 필터)
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
     let stockHtml = getSortButtonsHtml('stock');
     stockHtml += '<div class="filter-option" onclick="setFilter(\'stock\', \'all\')">전체보기</div>';
@@ -90,7 +86,6 @@ function setupFilterPopups() {
     if(stockPop) stockPop.innerHTML = stockHtml;
 }
 
-// 정렬 실행 함수 (클릭 시 팝업 닫힘)
 window.executeSort = (key, direction) => {
     sortConfig = { key: key, direction: direction };
     applyFiltersAndSort();
@@ -99,7 +94,6 @@ window.executeSort = (key, direction) => {
     }
 };
 
-// 로케이션 다중 선택 실행 함수 (클릭 시 팝업 안 닫힘)
 window.toggleLocFilter = (val) => {
     if (val === 'all') {
         filters.loc = [];
@@ -111,10 +105,8 @@ window.toggleLocFilter = (val) => {
         }
     }
     
-    // UI 체크마크 갱신
     updateLocPopupUI();
 
-    // 헤더 버튼 활성화 색상 변경
     const btn = document.getElementById('btn-filter-loc');
     if (btn) {
         if (filters.loc.length === 0) btn.classList.remove('active');
@@ -124,7 +116,6 @@ window.toggleLocFilter = (val) => {
     applyFiltersAndSort();
 };
 
-// 단일 필터 실행 함수 (클릭 시 팝업 닫힘)
 window.setFilter = (type, value) => {
     filters[type] = value;
     
@@ -143,7 +134,6 @@ window.setFilter = (type, value) => {
 
 function applyFiltersAndSort() {
     let filtered = originalData.filter(item => {
-        // 로케이션 다중 필터 적용
         if (filters.loc.length > 0 && !filters.loc.includes(item.id.charAt(0))) return false;
         
         const hasCode = item.code && item.code !== item.id && item.code.trim() !== "";
@@ -177,6 +167,7 @@ function renderTable(data) {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
         html += `
             <tr>
+                <td><input type="checkbox" class="loc-check" value="${loc.id}"></td>
                 <td style="font-weight:bold; font-size:15px;">${loc.id}</td>
                 <td style="color:#3d5afe; font-weight:bold;">${displayCode}</td>
                 <td style="text-align:left;">${loc.name || ''}</td>
@@ -185,9 +176,98 @@ function renderTable(data) {
             </tr>
         `;
     });
-    tbody.innerHTML = html || '<tr><td colspan="5" style="padding:50px;">데이터가 없습니다.</td></tr>';
+    tbody.innerHTML = html || '<tr><td colspan="6" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
+// 전체 선택 체크박스 로직
+window.toggleAllCheckboxes = (source) => {
+    const checkboxes = document.querySelectorAll('.loc-check');
+    checkboxes.forEach(cb => cb.checked = source.checked);
+};
+
+// 수동 로케이션 단일 추가 로직
+window.addSingleLocation = async () => {
+    const inputObj = document.getElementById('new-loc-id');
+    const newId = inputObj.value.trim().toUpperCase(); // 소문자 입력해도 대문자로 변환
+
+    if (!newId) {
+        alert("추가할 로케이션 번호를 입력해주세요. (예: A-1-001)");
+        inputObj.focus();
+        return;
+    }
+
+    try {
+        const docRef = doc(db, LOC_COLLECTION, newId);
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists()) {
+            alert(`[${newId}] 로케이션은 이미 존재합니다.`);
+            inputObj.focus();
+            return;
+        }
+
+        await setDoc(docRef, {
+            code: '',
+            name: '',
+            option: '',
+            stock: '0',
+            updatedAt: new Date()
+        });
+
+        inputObj.value = '';
+        alert(`✅ [${newId}] 로케이션이 성공적으로 추가되었습니다.`);
+        loadAndRender();
+    } catch (error) {
+        console.error("추가 실패:", error);
+        alert("로케이션 추가 중 오류가 발생했습니다.");
+    }
+};
+
+// 선택된 로케이션 일괄 삭제 로직
+window.deleteSelectedLocations = async () => {
+    const checkedBoxes = document.querySelectorAll('.loc-check:checked');
+    if (checkedBoxes.length === 0) {
+        alert("삭제할 로케이션을 체크박스에서 선택해주세요.");
+        return;
+    }
+
+    if (!confirm(`선택한 ${checkedBoxes.length}개의 로케이션을 정말로 일괄 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
+        return;
+    }
+
+    try {
+        let batch = writeBatch(db);
+        let batchCount = 0;
+        let totalDeleted = 0;
+
+        for (let i = 0; i < checkedBoxes.length; i++) {
+            const locId = checkedBoxes[i].value;
+            batch.delete(doc(db, LOC_COLLECTION, locId));
+            
+            batchCount++;
+            totalDeleted++;
+
+            // 파이어베이스 Batch 최대 제한(500)을 고려하여 400개 단위로 끊어서 실행
+            if (batchCount >= 400) {
+                await batch.commit();
+                batch = writeBatch(db);
+                batchCount = 0;
+            }
+        }
+
+        if (batchCount > 0) {
+            await batch.commit();
+        }
+
+        alert(`🗑️ 총 ${totalDeleted}개의 로케이션이 정상적으로 삭제되었습니다.`);
+        loadAndRender();
+    } catch (error) {
+        console.error("삭제 실패:", error);
+        alert("일괄 삭제 처리 중 오류가 발생했습니다.");
+    }
+};
+
+// 엑셀 업로드 로직 (데이터 갱신용)
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -205,9 +285,9 @@ if (fileInput) {
 }
 
 async function updateDatabase(rows) {
-    if (!confirm(`${rows.length}개 데이터를 동기화하시겠습니까?`)) return;
+    if (!confirm(`${rows.length}개 데이터를 바탕으로 내용을 갱신하시겠습니까?`)) return;
     const tbody = document.getElementById('location-list-body');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
     try {
         let batch = writeBatch(db);
         let count = 0;
@@ -233,6 +313,8 @@ async function updateDatabase(rows) {
         }
         if (batchCount > 0) await batch.commit();
         alert(`✅ 완료! ${count}개 정보가 업데이트되었습니다.`);
+        // 파일 입력 초기화
+        document.getElementById('excel-upload').value = '';
         loadAndRender();
     } catch (error) {
         console.error("실패:", error);
