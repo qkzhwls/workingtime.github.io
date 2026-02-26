@@ -18,7 +18,6 @@ async function loadAndRender() {
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
 
-        // 데이터 갱신 시 전체 선택 체크박스 초기화
         const checkAllBtn = document.getElementById('check-all');
         if(checkAllBtn) checkAllBtn.checked = false;
 
@@ -179,16 +178,14 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="6" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 전체 선택 체크박스 로직
 window.toggleAllCheckboxes = (source) => {
     const checkboxes = document.querySelectorAll('.loc-check');
     checkboxes.forEach(cb => cb.checked = source.checked);
 };
 
-// 수동 로케이션 단일 추가 로직
 window.addSingleLocation = async () => {
     const inputObj = document.getElementById('new-loc-id');
-    const newId = inputObj.value.trim().toUpperCase(); // 소문자 입력해도 대문자로 변환
+    const newId = inputObj.value.trim().toUpperCase();
 
     if (!newId) {
         alert("추가할 로케이션 번호를 입력해주세요. (예: A-1-001)");
@@ -223,7 +220,6 @@ window.addSingleLocation = async () => {
     }
 };
 
-// 선택된 로케이션 일괄 삭제 로직
 window.deleteSelectedLocations = async () => {
     const checkedBoxes = document.querySelectorAll('.loc-check:checked');
     if (checkedBoxes.length === 0) {
@@ -247,7 +243,6 @@ window.deleteSelectedLocations = async () => {
             batchCount++;
             totalDeleted++;
 
-            // 파이어베이스 Batch 최대 제한(500)을 고려하여 400개 단위로 끊어서 실행
             if (batchCount >= 400) {
                 await batch.commit();
                 batch = writeBatch(db);
@@ -267,7 +262,6 @@ window.deleteSelectedLocations = async () => {
     }
 };
 
-// 엑셀 업로드 로직 (데이터 갱신용)
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -284,40 +278,69 @@ if (fileInput) {
     });
 }
 
+// 엑셀 업로드 데이터 파싱 로직 변경 (( 기준 앞뒤 추출 )
 async function updateDatabase(rows) {
     if (!confirm(`${rows.length}개 데이터를 바탕으로 내용을 갱신하시겠습니까?`)) return;
     const tbody = document.getElementById('location-list-body');
     if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
+    
     try {
         let batch = writeBatch(db);
         let count = 0;
         let batchCount = 0;
+        
         for (const row of rows) {
-            const locId = row['로케이션']?.toString().trim();
-            if (!locId) continue;
-            const locMatch = locId.match(/([A-Z]-\d-\d{3}|★★-\d{2})/);
-            if (locMatch) {
-                const cleanLocId = locMatch[1];
-                const docRef = doc(db, LOC_COLLECTION, cleanLocId);
-                batch.set(docRef, {
-                    code: row['상품코드']?.toString().trim() || '',
-                    name: row['상품명']?.toString().trim() || '',
-                    option: row['옵션']?.toString().trim() || '',
-                    stock: row['정상재고']?.toString().trim() || '0',
-                    updatedAt: new Date()
-                }, { merge: true });
-                count++;
-                batchCount++;
-                if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
+            const rawLoc = row['로케이션']?.toString().trim();
+            if (!rawLoc) continue;
+
+            let cleanLocId = '';
+            let extractedCode = '';
+
+            // 1. ( 기준으로 로케이션과 상품코드 추출
+            if (rawLoc.includes('(')) {
+                cleanLocId = rawLoc.split('(')[0].trim(); // ( 앞부분 로케이션
+                const afterParen = rawLoc.substring(rawLoc.indexOf('('));
+                const sIndex = afterParen.indexOf('S');
+                if (sIndex !== -1) {
+                    extractedCode = afterParen.substring(sIndex).trim(); // ( 뒷부분의 S부터 상품코드
+                }
+            } else {
+                cleanLocId = rawLoc; // ( 가 없으면 전체를 로케이션으로 사용
+            }
+
+            if (!cleanLocId) continue;
+
+            // 엑셀의 '상품코드' 열 데이터보다 추출된 코드를 우선 적용, 둘 다 없으면 빈칸
+            const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
+            const docRef = doc(db, LOC_COLLECTION, cleanLocId);
+
+            batch.set(docRef, {
+                code: finalCode,
+                name: row['상품명']?.toString().trim() || '',
+                option: row['옵션']?.toString().trim() || '',
+                stock: row['정상재고']?.toString().trim() || '0',
+                updatedAt: new Date()
+            }, { merge: true });
+
+            count++;
+            batchCount++;
+            
+            if (batchCount >= 400) { 
+                await batch.commit(); 
+                batch = writeBatch(db); 
+                batchCount = 0; 
             }
         }
+        
         if (batchCount > 0) await batch.commit();
+        
         alert(`✅ 완료! ${count}개 정보가 업데이트되었습니다.`);
-        // 파일 입력 초기화
         document.getElementById('excel-upload').value = '';
         loadAndRender();
+        
     } catch (error) {
         console.error("실패:", error);
+        document.getElementById('excel-upload').value = '';
         loadAndRender();
     }
 }
