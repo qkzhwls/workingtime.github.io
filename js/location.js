@@ -2,7 +2,6 @@ import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
-// 기존에 존재하는 컬렉션 이름으로 완벽 매칭
 const LOC_COLLECTION = 'Locations';
 
 // 1. 데이터 로드 및 에러 감지 (기존 Locations 캐비닛에서 가져오기)
@@ -10,7 +9,6 @@ async function loadAndRender() {
     try {
         const querySnapshot = await getDocs(collection(db, LOC_COLLECTION));
         
-        // 에러 없이 통과했다면, 파이어베이스 규칙 경고창 숨김
         document.getElementById('firebase-guide').style.display = 'none';
 
         const data = [];
@@ -31,7 +29,6 @@ async function loadAndRender() {
     } catch (error) {
         console.error("데이터 로딩 실패:", error);
         
-        // 파이어베이스 권한 에러 감지 시 안내문 표시
         if (error.code === 'permission-denied' || (error.message && error.message.includes('permission'))) {
             document.getElementById('firebase-guide').style.display = 'block';
             
@@ -48,7 +45,6 @@ function renderList(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
     
-    // 로케이션 아이디 순으로 정렬
     data.sort((a, b) => a.id.localeCompare(b.id));
 
     let html = '';
@@ -72,7 +68,7 @@ function renderList(data) {
     tbody.innerHTML = html;
 }
 
-// 3. 파일 업로드 로직 (기존 뼈대에 상품코드만 동기화)
+// 3. 파일 업로드 로직
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -122,7 +118,7 @@ async function processText(content) {
     }
 }
 
-// 5. 알맹이(상품코드)만 추출하여 기존 DB 문서에 업데이트 (merge: true 적용)
+// 5. 알맹이(상품코드)만 추출하여 기존 DB 문서에 업데이트 (정규식 필터링 적용)
 async function updateProductCodes(rows) {
     if (!confirm("업로드한 파일의 데이터로 상품코드를 최신화하시겠습니까?\n(기존 로케이션 뼈대에 상품코드만 덮어씌워집니다.)")) return;
     
@@ -140,23 +136,38 @@ async function updateProductCodes(rows) {
             for (let c = 0; c < rows[r].length; c++) {
                 const val = rows[r][c]?.toString().trim();
                 
-                // ★★ 기호 또는 알파벳-숫자 조합 로케이션 확인
-                if (val && (val.includes('★★') || /^[A-Z]-\d+/.test(val))) {
-                    const locId = val;
+                if (!val) continue;
+
+                // 정규식 1: 로케이션 번호만 완벽하게 추출 (예: A-1-002 또는 ★★-01)
+                // 괄호, 슬래시 등 불필요한 문자가 섞여 있어도 이 패턴만 오려냅니다.
+                const locMatch = val.match(/([A-Z]-\d-\d{3}|★★-\d{2})/);
+                
+                if (locMatch) {
+                    const locId = locMatch[1]; // 오려낸 깔끔한 로케이션 이름
                     let productCode = '';
                     
-                    if (rows[r + 1]) {
+                    // 정규식 2: 현재 칸 안에 S+숫자6자리가 같이 있는지 검사 (예: A-1-002(4)/ S441820)
+                    const prodMatchInSameCell = val.match(/S\d{6}/);
+                    
+                    if (prodMatchInSameCell) {
+                        productCode = prodMatchInSameCell[0]; // S+6자리 숫자만 추출
+                    } 
+                    // 현재 칸에 없다면 아래 칸이나 아래-오른쪽 칸에서 S+숫자6자리 검사
+                    else if (rows[r + 1]) {
                         const cellBelow = rows[r + 1][c]?.toString().trim() || '';
                         const cellBelowRight = rows[r + 1][c + 1]?.toString().trim() || '';
                         
-                        if (cellBelow === '상품코드' && cellBelowRight) {
-                            productCode = cellBelowRight;
-                        } else if (cellBelow && cellBelow !== '상품코드' && !cellBelow.includes('#N/A') && !cellBelow.includes('지정옵션') && !cellBelow.includes('입고대기') && !cellBelow.includes('현재고')) {
-                            productCode = cellBelow.replace('상품코드', '').trim();
+                        const matchBelow = cellBelow.match(/S\d{6}/);
+                        const matchBelowRight = cellBelowRight.match(/S\d{6}/);
+
+                        if (matchBelow) {
+                            productCode = matchBelow[0];
+                        } else if (matchBelowRight) {
+                            productCode = matchBelowRight[0];
                         }
                     }
                     
-                    // 기존 데이터에 상품코드 정보만 합치기 (merge: true)
+                    // 추출한 상품코드가 있을 때만 업데이트 반영
                     if (productCode) {
                         const docRef = doc(db, LOC_COLLECTION, locId);
                         batch.set(docRef, {
