@@ -25,7 +25,6 @@ async function loadAndRender() {
     }
 }
 
-// 팝업 메뉴 안의 옵션들을 동적으로 생성
 function setupFilterPopups() {
     const locPop = document.getElementById('pop-loc');
     const stockPop = document.getElementById('pop-stock');
@@ -39,7 +38,7 @@ function setupFilterPopups() {
     prefixes.forEach(p => {
         locHtml += `<div class="filter-option" onclick="setFilter('loc', '${p}')">${p} 구역</div>`;
     });
-    locPop.innerHTML = locHtml;
+    if(locPop) locPop.innerHTML = locHtml;
 
     // 2. 재고 필터 생성
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
@@ -47,20 +46,27 @@ function setupFilterPopups() {
     stocks.forEach(s => {
         stockHtml += `<div class="filter-option" onclick="setFilter('stock', '${s}')">${s}</div>`;
     });
-    stockPop.innerHTML = stockHtml;
+    if(stockPop) stockPop.innerHTML = stockHtml;
 }
 
-// 필터 변경 함수 (HTML에서 호출됨)
+// 옵션 클릭 시 필터 적용 및 팝업창 닫기
 window.setFilter = (type, value) => {
     filters[type] = value;
     
-    // 활성화 표시 (색상 변경)
+    // 버튼 활성화 색상 변경
     const btnId = `btn-filter-${type}`;
     const btn = document.getElementById(btnId);
-    if (value === 'all') btn.classList.remove('active');
-    else btn.classList.add('active');
+    if (btn) {
+        if (value === 'all') btn.classList.remove('active');
+        else btn.classList.add('active');
+    }
 
     applyFiltersAndSort();
+    
+    // 선택 후 팝업 닫기
+    if (typeof window.closeAllPopups === 'function') {
+        window.closeAllPopups();
+    }
 };
 
 function applyFiltersAndSort() {
@@ -110,7 +116,6 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="6" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 업로드 로직
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -130,7 +135,7 @@ if (fileInput) {
 async function updateDatabase(rows) {
     if (!confirm(`${rows.length}개 데이터를 동기화하시겠습니까?`)) return;
     const tbody = document.getElementById('location-list-body');
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
     try {
         let batch = writeBatch(db);
         let count = 0;
