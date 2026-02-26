@@ -10,20 +10,17 @@
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
         .header { background: #fff; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ddd; }
         
-        .controls-header { margin: 20px; display: flex; flex-direction: column; gap: 15px; }
-        .top-row { display: flex; justify-content: space-between; align-items: center; }
-        .filter-row { display: flex; gap: 10px; background: #fff; padding: 15px; border-radius: 8px; border: 1px solid #ddd; align-items: center; flex-wrap: wrap; }
+        /* 컨트롤 영역 간소화 */
+        .controls-header { margin: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
         
-        .filter-group { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-        select { padding: 6px 10px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; }
-
         .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; }
         .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
         .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 
         .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
-        
-        /* 리스트 컨테이너 및 헤더 고정 (틈새 제거) */
+        .upload-compact input { margin-left: 10px; font-size: 12px; }
+
+        /* 리스트 컨테이너 (필터바 삭제로 높이 확장) */
         .list-container { 
             overflow: auto; 
             background: white; 
@@ -31,28 +28,44 @@
             padding: 0; 
             border-radius: 12px; 
             border: 1px solid #ccc; 
-            height: calc(100vh - 250px); 
+            height: calc(100vh - 160px); /* 필터바 삭제로 더 넓게 확보 */
         }
-        .list-table { width: 100%; border-collapse: collapse; min-width: 800px; table-layout: fixed; }
+        .list-table { width: 100%; border-collapse: collapse; min-width: 900px; table-layout: fixed; }
         .list-table th, .list-table td { 
-            padding: 12px 15px; 
+            padding: 10px 12px; 
             text-align: center; 
             border: 1px solid #ccc; 
             font-size: 14px; 
             word-break: break-all;
         }
+        
+        /* 헤더 스타일: 제목 + 필터 통합 */
         .list-table th { 
             background: #f4f4f4; 
             position: sticky; 
-            top: -1px; /* 틈새 방지를 위해 살짝 위로 밀착 */
+            top: -1px; 
             z-index: 10; 
-            cursor: pointer; 
             user-select: none;
             box-shadow: inset 0 -1px 0 #ccc, inset 0 1px 0 #ccc; 
+            padding-top: 8px;
+            padding-bottom: 8px;
         }
-        .list-table th:hover { background: #e0e0e0; }
+        .th-content { display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; }
+        .th-content:hover .title-text { color: var(--primary); }
+        .title-text { font-weight: bold; color: #333; font-size: 13px; }
         
-        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; }
+        /* 헤더 내 필터 드롭다운 스타일 */
+        .header-filter { 
+            width: 90%; 
+            font-size: 11px; 
+            padding: 2px; 
+            border: 1px solid #bbb; 
+            border-radius: 3px; 
+            background: #fff;
+            cursor: default;
+        }
+
+        .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; font-size: 12px; }
         #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
     </style>
 </head>
@@ -68,40 +81,14 @@
     </div>
 
     <div class="controls-header">
-        <div class="top-row">
-            <div class="tabs">
-                <button class="tab-btn active" onclick="switchView('list')"><i class="fas fa-list"></i> 데이터 리스트</button>
-                <button class="tab-btn" onclick="switchView('map')"><i class="fas fa-map"></i> 도면 보기</button>
-            </div>
-            <div class="upload-compact">
-                <strong>📄 데이터 동기화:</strong> 
-                <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
-            </div>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchView('list')"><i class="fas fa-list"></i> 데이터 리스트</button>
+            <button class="tab-btn" onclick="switchView('map')"><i class="fas fa-map"></i> 도면 보기</button>
         </div>
-
-        <div class="filter-row">
-            <div class="filter-group">
-                <i class="fas fa-filter"></i>
-                <strong>로케이션:</strong>
-                <select id="filter-loc-prefix">
-                    <option value="all">전체</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <strong>상품코드:</strong>
-                <select id="filter-code-status">
-                    <option value="all">전체</option>
-                    <option value="empty">빈칸</option>
-                    <option value="not-empty">빈칸 아님</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <strong>정상재고:</strong>
-                <select id="filter-stock-qty">
-                    <option value="all">전체</option>
-                </select>
-            </div>
-            <button onclick="resetFilters()" style="margin-left:auto; padding:5px 10px; cursor:pointer;">필터 초기화</button>
+        <div class="upload-compact">
+            <strong>📄 데이터 동기화:</strong> 
+            <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
+            <button onclick="resetAllFiltersAndSort()" style="margin-left:10px; font-size:12px; cursor:pointer;">초기화</button>
         </div>
     </div>
 
@@ -110,12 +97,45 @@
             <table class="list-table">
                 <thead>
                     <tr>
-                        <th onclick="sortTable('id')" style="width: 120px;">로케이션 <i class="fas fa-sort"></i></th>
-                        <th onclick="sortTable('code')" style="width: 120px;">상품코드 <i class="fas fa-sort"></i></th>
-                        <th onclick="sortTable('name')">상품명 <i class="fas fa-sort"></i></th>
-                        <th onclick="sortTable('option')" style="width: 150px;">옵션 <i class="fas fa-sort"></i></th>
-                        <th onclick="sortTable('stock')" style="width: 100px;">정상재고 <i class="fas fa-sort"></i></th>
-                        <th style="width: 80px;">관리</th>
+                        <th style="width: 130px;">
+                            <div class="th-content" onclick="sortTable('id')">
+                                <span class="title-text">로케이션 <i class="fas fa-sort"></i></span>
+                            </div>
+                            <select id="filter-loc-prefix" class="header-filter" onclick="event.stopPropagation()">
+                                <option value="all">(필터: 전체)</option>
+                            </select>
+                        </th>
+                        <th style="width: 130px;">
+                            <div class="th-content" onclick="sortTable('code')">
+                                <span class="title-text">상품코드 <i class="fas fa-sort"></i></span>
+                            </div>
+                            <select id="filter-code-status" class="header-filter" onclick="event.stopPropagation()">
+                                <option value="all">(전체)</option>
+                                <option value="empty">빈칸</option>
+                                <option value="not-empty">내용있음</option>
+                            </select>
+                        </th>
+                        <th>
+                            <div class="th-content" onclick="sortTable('name')">
+                                <span class="title-text">상품명 <i class="fas fa-sort"></i></span>
+                            </div>
+                        </th>
+                        <th style="width: 180px;">
+                            <div class="th-content" onclick="sortTable('option')">
+                                <span class="title-text">옵션 <i class="fas fa-sort"></i></span>
+                            </div>
+                        </th>
+                        <th style="width: 110px;">
+                            <div class="th-content" onclick="sortTable('stock')">
+                                <span class="title-text">정상재고 <i class="fas fa-sort"></i></span>
+                            </div>
+                            <select id="filter-stock-qty" class="header-filter" onclick="event.stopPropagation()">
+                                <option value="all">(전체)</option>
+                            </select>
+                        </th>
+                        <th style="width: 70px;">
+                            <span class="title-text">관리</span>
+                        </th>
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
