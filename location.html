@@ -10,6 +10,11 @@
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; }
         .header { background: #fff; padding: 15px 25px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ddd; }
         
+        /* 파이어베이스 에러 안내문 스타일 */
+        #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
+        #firebase-guide h3 { color: #d32f2f; margin-top: 0; }
+        #firebase-guide pre { background: #fff; padding: 15px; border: 1px solid #ffccbc; border-radius: 4px; font-weight: bold; color: #d32f2f; font-size: 15px; overflow-x: auto; }
+
         /* 상단 탭 메뉴 */
         .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; margin: 20px; width: fit-content; }
         .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
@@ -20,12 +25,11 @@
         .content-view.active { display: block; }
         
         /* 리스트 뷰 전용 스타일 (7000 x 1 형태 최적화) */
-        .list-container { overflow: auto; background: white; padding: 20px; border-radius: 12px; border: 1px solid #eee; height: 70vh; }
+        .list-container { overflow: auto; background: white; padding: 20px; border-radius: 12px; border: 1px solid #eee; height: 60vh; }
         .list-table { width: 100%; max-width: 600px; margin: 0 auto; border-collapse: collapse; }
         .list-table th, .list-table td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #eee; }
         .list-table th { background: #f4f4f4; position: sticky; top: 0; z-index: 10; font-size: 16px; text-align: center;}
         
-        /* 1개의 셀 안에 로케이션 정보와 삭제 버튼을 양끝으로 배치 */
         .single-cell-content { display: flex; justify-content: space-between; align-items: center; }
         .loc-info { font-size: 15px; }
         .loc-num { display: inline-block; width: 50px; color: #888; font-size: 13px; }
@@ -35,10 +39,7 @@
         .btn-del { color: #ff5252; cursor: pointer; border: none; background: none; font-weight: bold; padding: 5px 10px;}
         .btn-del:hover { background: #ffebee; border-radius: 4px; }
 
-        /* 도면 뷰 임시 스타일 */
-        .map-container { display: flex; justify-content: center; align-items: center; background: white; border-radius: 12px; border: 1px solid #eee; height: 70vh; color: #666; font-size: 18px; font-weight: bold; text-align: center; line-height: 1.6; }
-
-        /* 업로드 영역 */
+        .map-container { display: flex; justify-content: center; align-items: center; background: white; border-radius: 12px; border: 1px solid #eee; height: 60vh; color: #666; font-size: 18px; font-weight: bold; text-align: center; line-height: 1.6; }
         .upload-section { margin: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; border: 1px dashed #2196f3; text-align: center; }
     </style>
 </head>
@@ -46,6 +47,16 @@
     <div class="header">
         <h1>📦 3층 로케이션 관리</h1>
         <button class="tab-btn" style="background:#444; color:white;" onclick="window.close()">닫기</button>
+    </div>
+
+    <div id="firebase-guide">
+        <h3>🚨 시스템 연동 안내: 파이어베이스 보안 규칙 업데이트 필요</h3>
+        <p style="color: #333; font-size: 15px;">이 페이지가 정상적으로 작동하려면 데이터베이스에 3층 로케이션을 위한 저장 공간 권한을 추가해야 합니다. 파이어베이스의 <strong>[Firestore Database] -> [Rules (규칙)]</strong> 탭에 아래 코드를 추가해 주세요.</p>
+        <pre>
+match /location_map_3f/{document=**} {
+  allow read, write: if true; 
+}</pre>
+        <p style="font-size: 13px; color: #666; margin-bottom: 0;">※ 코드를 추가하고 [게시(Publish)]한 뒤, 이 페이지를 새로고침(Ctrl + Shift + R)하면 이 안내문은 자동으로 사라지고 시스템이 정상 가동됩니다.</p>
     </div>
 
     <div class="upload-section">
