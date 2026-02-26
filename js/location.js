@@ -25,31 +25,67 @@ async function loadAndRender() {
     }
 }
 
+// 정렬 버튼 HTML 템플릿 생성 함수
+function getSortButtonsHtml(key) {
+    return `
+        <div class="filter-option" onclick="executeSort('${key}', 'asc')">⬆️ 오름차순 정렬</div>
+        <div class="filter-option" onclick="executeSort('${key}', 'desc')">⬇️ 내림차순 정렬</div>
+        <div class="filter-divider"></div>
+    `;
+}
+
 function setupFilterPopups() {
     const locPop = document.getElementById('pop-loc');
+    const codePop = document.getElementById('pop-code');
+    const namePop = document.getElementById('pop-name');
+    const optionPop = document.getElementById('pop-option');
     const stockPop = document.getElementById('pop-stock');
 
-    // 1. 로케이션 필터 생성
+    // 1. 로케이션 (정렬 + 필터)
     let prefixSet = new Set(originalData.map(d => d.id.charAt(0)));
     prefixSet.add('★');
     const prefixes = [...prefixSet].sort((a, b) => (a === '★' ? -1 : (b === '★' ? 1 : a.localeCompare(b))));
 
-    let locHtml = '<div class="filter-option" onclick="setFilter(\'loc\', \'all\')">전체</div>';
+    let locHtml = getSortButtonsHtml('id');
+    locHtml += '<div class="filter-option" onclick="setFilter(\'loc\', \'all\')">전체보기</div>';
     prefixes.forEach(p => {
         locHtml += `<div class="filter-option" onclick="setFilter('loc', '${p}')">${p} 구역</div>`;
     });
     if(locPop) locPop.innerHTML = locHtml;
 
-    // 2. 재고 필터 생성
+    // 2. 상품코드 (정렬 + 필터)
+    let codeHtml = getSortButtonsHtml('code');
+    codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'all\')">전체보기</div>';
+    codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'empty\')">빈칸</div>';
+    codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'not-empty\')">내용있음</div>';
+    if(codePop) codePop.innerHTML = codeHtml;
+
+    // 3. 상품명 (정렬 전용)
+    if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
+
+    // 4. 옵션 (정렬 전용)
+    if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
+
+    // 5. 정상재고 (정렬 + 필터)
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
-    let stockHtml = '<div class="filter-option" onclick="setFilter(\'stock\', \'all\')">전체</div>';
+    let stockHtml = getSortButtonsHtml('stock');
+    stockHtml += '<div class="filter-option" onclick="setFilter(\'stock\', \'all\')">전체보기</div>';
     stocks.forEach(s => {
         stockHtml += `<div class="filter-option" onclick="setFilter('stock', '${s}')">${s}</div>`;
     });
     if(stockPop) stockPop.innerHTML = stockHtml;
 }
 
-// 옵션 클릭 시 필터 적용 및 팝업창 닫기
+// 정렬 실행 함수
+window.executeSort = (key, direction) => {
+    sortConfig = { key: key, direction: direction };
+    applyFiltersAndSort();
+    if (typeof window.closeAllPopups === 'function') {
+        window.closeAllPopups();
+    }
+};
+
+// 필터 실행 함수
 window.setFilter = (type, value) => {
     filters[type] = value;
     
@@ -62,8 +98,6 @@ window.setFilter = (type, value) => {
     }
 
     applyFiltersAndSort();
-    
-    // 선택 후 팝업 닫기
     if (typeof window.closeAllPopups === 'function') {
         window.closeAllPopups();
     }
@@ -167,12 +201,6 @@ async function updateDatabase(rows) {
         loadAndRender();
     }
 }
-
-window.sortTable = (key) => {
-    if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
-    else { sortConfig.key = key; sortConfig.direction = 'asc'; }
-    applyFiltersAndSort();
-};
 
 window.deleteLoc = async (id) => {
     if(confirm(`${id}를 삭제하시겠습니까?`)) { await deleteDoc(doc(db, LOC_COLLECTION, id)); loadAndRender(); }
