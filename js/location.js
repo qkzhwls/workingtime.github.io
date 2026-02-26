@@ -4,7 +4,7 @@ import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, writ
 const { db } = initializeFirebase();
 const LOC_COLLECTION = 'Locations';
 
-// 1. 데이터 로드 및 에러 감지 (기존 Locations 캐비닛에서 가져오기)
+// 1. 데이터 로드 및 에러 감지
 async function loadAndRender() {
     try {
         const querySnapshot = await getDocs(collection(db, LOC_COLLECTION));
@@ -20,7 +20,7 @@ async function loadAndRender() {
         
         if (data.length === 0) {
             if (tbody) {
-                tbody.innerHTML = '<tr><td style="text-align:center; padding: 50px; color:#666; font-size:16px;">DB에 등록된 로케이션 뼈대가 없습니다.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 50px; color:#666; font-size:16px;">DB에 등록된 로케이션 뼈대가 없습니다.</td></tr>';
             }
             return;
         }
@@ -34,13 +34,13 @@ async function loadAndRender() {
             
             const tbody = document.getElementById('location-list-body');
             if (tbody) {
-                tbody.innerHTML = '<tr><td style="text-align:center; padding: 50px; color:#ff5252; font-weight:bold; font-size:16px;">보안 규칙 설정이 필요합니다.<br>상단의 안내문을 확인해 주세요.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 50px; color:#ff5252; font-weight:bold; font-size:16px;">보안 규칙 설정이 필요합니다.<br>상단의 안내문을 확인해 주세요.</td></tr>';
             }
         }
     }
 }
 
-// 2. 리스트 뷰 렌더링
+// 2. 리스트 뷰 렌더링 (다중 컬럼 형태로 변경)
 function renderList(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
@@ -48,7 +48,7 @@ function renderList(data) {
     data.sort((a, b) => a.id.localeCompare(b.id));
 
     let html = '';
-    data.forEach((loc, index) => {
+    data.forEach((loc) => {
         
         // 상품코드 표시 로직: 값이 없거나, 로케이션 이름과 완전히 동일하면 빈칸으로 처리
         let displayCode = loc.code;
@@ -56,18 +56,19 @@ function renderList(data) {
             displayCode = '';
         }
 
+        // 추후 추가될 데이터 (현재 없으면 빈칸)
+        let name = loc.name || '';
+        let option = loc.option || '';
+        let stock = loc.stock || '';
+
         html += `
             <tr>
-                <td>
-                    <div class="single-cell-content">
-                        <div class="loc-info">
-                            <span class="loc-num">${index + 1}.</span>
-                            <span class="loc-name">${loc.id}</span>
-                            <span class="loc-code">${displayCode}</span>
-                        </div>
-                        <button class="btn-del" onclick="deleteLoc('${loc.id}')">삭제</button>
-                    </div>
-                </td>
+                <td style="font-weight: bold; color: #333;">${loc.id}</td>
+                <td style="color: #3d5afe; font-weight: bold;">${displayCode}</td>
+                <td>${name}</td>
+                <td>${option}</td>
+                <td>${stock}</td>
+                <td><button class="btn-del" onclick="deleteLoc('${loc.id}')">삭제</button></td>
             </tr>
         `;
     });
@@ -125,13 +126,13 @@ async function processText(content) {
     }
 }
 
-// 5. 알맹이(상품코드)만 추출하여 기존 DB 문서에 업데이트 (정규식 필터링 적용)
+// 5. 알맹이(상품코드) 추출 및 업데이트
 async function updateProductCodes(rows) {
     if (!confirm("업로드한 파일의 데이터로 상품코드를 최신화하시겠습니까?\n(기존 로케이션 뼈대에 상품코드만 덮어씌워집니다.)")) return;
     
     const tbody = document.getElementById('location-list-body');
     if(tbody) {
-        tbody.innerHTML = '<tr><td style="text-align:center; padding: 50px; color:#3d5afe; font-size:18px; font-weight:bold;">🔥 상품코드를 동기화하고 있습니다...<br>잠시만 기다려주세요!</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 50px; color:#3d5afe; font-size:18px; font-weight:bold;">🔥 상품코드를 동기화하고 있습니다...<br>잠시만 기다려주세요!</td></tr>';
     }
     
     try {
@@ -145,20 +146,20 @@ async function updateProductCodes(rows) {
                 
                 if (!val) continue;
 
-                // 정규식 1: 로케이션 번호만 완벽하게 추출 (예: A-1-002 또는 ★★-01)
+                // 정규식 1: 로케이션 번호 추출
                 const locMatch = val.match(/([A-Z]-\d-\d{3}|★★-\d{2})/);
                 
                 if (locMatch) {
-                    const locId = locMatch[1]; // 오려낸 깔끔한 로케이션 이름
+                    const locId = locMatch[1]; 
                     let productCode = '';
                     
-                    // 정규식 2: 현재 칸 안에 S+숫자6자리가 같이 있는지 검사 (예: A-1-002(4)/ S441820)
+                    // 정규식 2: 현재 칸에서 상품코드 추출
                     const prodMatchInSameCell = val.match(/S\d{6}/);
                     
                     if (prodMatchInSameCell) {
-                        productCode = prodMatchInSameCell[0]; // S+6자리 숫자만 추출
+                        productCode = prodMatchInSameCell[0]; 
                     } 
-                    // 현재 칸에 없다면 아래 칸이나 아래-오른쪽 칸에서 S+숫자6자리 검사
+                    // 아래 칸 또는 우측 아래 칸 검사
                     else if (rows[r + 1]) {
                         const cellBelow = rows[r + 1][c]?.toString().trim() || '';
                         const cellBelowRight = rows[r + 1][c + 1]?.toString().trim() || '';
@@ -173,7 +174,6 @@ async function updateProductCodes(rows) {
                         }
                     }
                     
-                    // 추출한 상품코드가 있을 때만 업데이트 반영
                     if (productCode) {
                         const docRef = doc(db, LOC_COLLECTION, locId);
                         batch.set(docRef, {
