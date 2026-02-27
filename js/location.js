@@ -1,12 +1,29 @@
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+// 메인 앱의 로그인 정보를 가져오기 위해 Firebase Auth 추가
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const { db } = initializeFirebase();
+const auth = getAuth(); // 메인 앱의 로그인 세션을 그대로 이어받음
 const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
 let sortConfig = { key: 'id', direction: 'asc' }; 
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
+
+// 현재 로그인한 작업자 이름 (기본값 설정)
+let currentUserName = "비로그인 작업자";
+
+// Firebase Auth를 통해 현재 접속자 추적
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        // 이메일의 앞부분(ID)이나 등록된 이름을 작업자 이름으로 사용
+        currentUserName = user.displayName || user.email.split('@')[0];
+    }
+});
+
+// 예약 만료 기준 시간 (30분 = 1800000 밀리초) - 시스템 마비 방지용 
+const RESERVE_EXPIRE_MS = 1800000; 
 
 async function loadAndRender() {
     try {
@@ -76,19 +93,16 @@ function setupFilterPopups() {
     if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
     if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
 
-    // 동 필터
     const dongs = [...new Set(originalData.map(d => (d.dong || '').toString()))].filter(Boolean).sort();
     let dongHtml = getSortButtonsHtml('dong') + `<div class="filter-option" onclick="setFilter('dong', 'all')">전체보기</div>`;
     dongs.forEach(d => { dongHtml += `<div class="filter-option" onclick="setFilter('dong', '${d}')">${d}</div>`; });
     if(document.getElementById('pop-dong')) document.getElementById('pop-dong').innerHTML = dongHtml;
 
-    // 위치 필터
     const poses = [...new Set(originalData.map(d => (d.pos || '').toString()))].filter(Boolean).sort();
     let posHtml = getSortButtonsHtml('pos') + `<div class="filter-option" onclick="setFilter('pos', 'all')">전체보기</div>`;
     poses.forEach(p => { posHtml += `<div class="filter-option" onclick="setFilter('pos', '${p}')">${p}</div>`; });
     if(document.getElementById('pop-pos')) document.getElementById('pop-pos').innerHTML = posHtml;
 
-    // 정상재고 필터
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
     let stockHtml = getSortButtonsHtml('stock');
     stockHtml += `<div class="filter-option" onclick="setFilter(\'stock\', \'all\')">전체보기</div>`;
@@ -101,47 +115,34 @@ function setupFilterPopups() {
 window.executeSort = (key, direction) => {
     sortConfig = { key: key, direction: direction };
     applyFiltersAndSort();
-    if (typeof window.closeAllPopups === 'function') {
-        window.closeAllPopups();
-    }
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
 };
 
 window.toggleLocFilter = (val) => {
-    if (val === 'all') {
-        filters.loc = [];
-    } else {
-        if (filters.loc.includes(val)) {
-            filters.loc = filters.loc.filter(v => v !== val);
-        } else {
-            filters.loc.push(val);
-        }
+    if (val === 'all') filters.loc = [];
+    else {
+        if (filters.loc.includes(val)) filters.loc = filters.loc.filter(v => v !== val);
+        else filters.loc.push(val);
     }
-    
     updateLocPopupUI();
-
     const btn = document.getElementById('btn-filter-loc');
     if (btn) {
         if (filters.loc.length === 0) btn.classList.remove('active');
         else btn.classList.add('active');
     }
-
     applyFiltersAndSort();
 };
 
 window.setFilter = (type, value) => {
     filters[type] = value;
-    
     const btnId = `btn-filter-${type}`;
     const btn = document.getElementById(btnId);
     if (btn) {
         if (value === 'all') btn.classList.remove('active');
         else btn.classList.add('active');
     }
-
     applyFiltersAndSort();
-    if (typeof window.closeAllPopups === 'function') {
-        window.closeAllPopups();
-    }
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
 };
 
 function applyFiltersAndSort() {
@@ -177,16 +178,29 @@ function renderTable(data) {
     if (!tbody) return;
 
     let html = '';
+    const now = new Date().getTime();
+
     data.forEach(loc => {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
+        
+        // 30분 만료 체크
+        let isReserved = loc.reserved === true && (now - (loc.reservedAt || 0) <= RESERVE_EXPIRE_MS);
+        
+        // 예약 정보 표시 (노란 배경, 뱃지에 작업자 이름)
+        let rowStyle = isReserved ? 'background-color: #fffde7;' : '';
+        let reserverName = loc.reservedBy || '누군가';
+        let badgeHtml = isReserved ? `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>` : '';
+
         html += `
-            <tr onclick="if(event.target.tagName !== 'INPUT') openEditModal('${loc.id}')">
+            <tr onclick="if(event.target.tagName !== 'INPUT') openEditModal('${loc.id}')" style="${rowStyle}">
                 <td onclick="event.stopPropagation()">
                     <input type="checkbox" class="loc-check" value="${loc.id}">
                 </td>
                 <td style="color:#666;">${loc.dong || ''}</td>
                 <td style="color:#666;">${loc.pos || ''}</td>
-                <td class="loc-copy-cell" onclick="copyLocationToClipboard(event, '${loc.id}')" title="클릭하여 복사">${loc.id}</td>
+                <td class="loc-copy-cell" onclick="copyLocationToClipboard(event, '${loc.id}')" title="클릭하여 복사 및 예약">
+                    ${loc.id} ${badgeHtml}
+                </td>
                 <td style="color:#3d5afe; font-weight:bold;">${displayCode}</td>
                 <td style="text-align:left;">${loc.name || ''}</td>
                 <td style="text-align:left; font-size:12px;">${loc.option || ''}</td>
@@ -197,15 +211,67 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="8" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 클립보드 복사 함수 및 토스트 알림 제어
-window.copyLocationToClipboard = (event, text) => {
-    event.stopPropagation(); // 행 클릭으로 인한 모달 오픈 방지
-    navigator.clipboard.writeText(text).then(() => {
-        showToast(`[${text}] 복사 완료!`);
-    }).catch(err => {
-        console.error('복사 실패:', err);
-        alert('복사 기능을 지원하지 않는 브라우저입니다.');
-    });
+// 클릭 복사 시 예약 로직 처리 (이름과 시간 포함)
+window.copyLocationToClipboard = async (event, locId) => {
+    event.stopPropagation(); // 모달 오픈 방지
+    
+    try {
+        const docRef = doc(db, LOC_COLLECTION, locId);
+        const snap = await getDoc(docRef);
+        
+        if (snap.exists()) {
+            const data = snap.data();
+            const now = new Date().getTime();
+            
+            const isReserved = data.reserved === true;
+            const reservedTime = data.reservedAt || 0;
+            const reserverName = data.reservedBy || '다른 작업자';
+            const isExpired = (now - reservedTime) > RESERVE_EXPIRE_MS;
+
+            // 본인이 예약한 건 그냥 복사만 진행 (중복 알림창 안 띄움)
+            if (isReserved && !isExpired && reserverName === currentUserName) {
+                navigator.clipboard.writeText(locId);
+                showToast(`[${locId}] 내 예약 복사 완료!`);
+                return;
+            }
+
+            // 남이 예약했고 시간이 남은 경우: 구체적인 경고창 띄우기
+            if (isReserved && !isExpired) {
+                // 시간 포맷팅 (예: 14:30)
+                const rTime = new Date(reservedTime);
+                const timeStr = `${rTime.getHours()}:${String(rTime.getMinutes()).padStart(2, '0')}`;
+
+                if (confirm(`[${locId}] 로케이션은 현재 [${reserverName}]님이 ${timeStr}부터 사용(예약) 중입니다.\n강제로 예약을 뺏어오시겠습니까?`)) {
+                    // 강제 해제 및 내 이름으로 덮어쓰기
+                    await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
+                    navigator.clipboard.writeText(locId);
+                    showToast(`[${locId}] 예약을 뺏어와 복사했습니다.`);
+                    
+                    const target = originalData.find(d => d.id === locId);
+                    if (target) { target.reserved = true; target.reservedAt = now; target.reservedBy = currentUserName; }
+                    applyFiltersAndSort();
+                }
+                return; 
+            }
+
+            // 빈자리일 경우 정상 예약 진행 (내 이름 기록)
+            await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
+            
+            navigator.clipboard.writeText(locId).then(() => {
+                showToast(`[${locId}] 복사 및 예약 완료!`);
+            }).catch(err => {
+                alert('복사 기능을 지원하지 않는 브라우저입니다.');
+            });
+
+            // 즉각적인 화면 갱신
+            const target = originalData.find(d => d.id === locId);
+            if (target) { target.reserved = true; target.reservedAt = now; target.reservedBy = currentUserName; }
+            applyFiltersAndSort();
+        }
+    } catch (error) {
+        console.error('복사/예약 실패:', error);
+        alert('예약 처리 중 오류가 발생했습니다. (파이어베이스 한도 초과 등)');
+    }
 };
 
 function showToast(message) {
@@ -213,9 +279,7 @@ function showToast(message) {
     if(toast) {
         toast.innerText = message;
         toast.classList.add("show");
-        setTimeout(() => {
-            toast.classList.remove("show");
-        }, 1500);
+        setTimeout(() => { toast.classList.remove("show"); }, 1500);
     }
 }
 
@@ -228,81 +292,38 @@ window.addSingleLocation = async () => {
     const inputObj = document.getElementById('new-loc-id');
     const newId = inputObj.value.trim().toUpperCase();
 
-    if (!newId) {
-        alert("추가할 로케이션 번호를 입력해주세요. (예: A-1-001)");
-        inputObj.focus();
-        return;
-    }
+    if (!newId) return alert("추가할 로케이션 번호를 입력해주세요.");
 
     try {
         const docRef = doc(db, LOC_COLLECTION, newId);
         const docSnap = await getDoc(docRef);
 
-        if (docSnap.exists()) {
-            alert(`[${newId}] 로케이션은 이미 존재합니다.`);
-            inputObj.focus();
-            return;
-        }
+        if (docSnap.exists()) return alert(`[${newId}] 로케이션은 이미 존재합니다.`);
 
         await setDoc(docRef, {
-            dong: '',
-            pos: '',
-            code: '',
-            name: '',
-            option: '',
-            stock: '0',
-            updatedAt: new Date()
+            dong: '', pos: '', code: '', name: '', option: '', stock: '0', 
+            reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date()
         });
 
-        inputObj.value = '';
-        alert(`✅ [${newId}] 로케이션이 성공적으로 추가되었습니다.`);
-        loadAndRender();
-    } catch (error) {
-        console.error("추가 실패:", error);
-        alert("로케이션 추가 중 오류가 발생했습니다.");
-    }
+        inputObj.value = ''; alert(`✅ [${newId}] 로케이션 추가 완료`); loadAndRender();
+    } catch (error) { console.error("추가 실패:", error); }
 };
 
 window.deleteSelectedLocations = async () => {
     const checkedBoxes = document.querySelectorAll('.loc-check:checked');
-    if (checkedBoxes.length === 0) {
-        alert("삭제할 로케이션을 체크박스에서 선택해주세요.");
-        return;
-    }
-
-    if (!confirm(`선택한 ${checkedBoxes.length}개의 로케이션을 정말로 일괄 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
-        return;
-    }
+    if (checkedBoxes.length === 0) return alert("삭제할 로케이션을 선택해주세요.");
+    if (!confirm(`선택한 ${checkedBoxes.length}개의 로케이션을 정말 삭제하시겠습니까?`)) return;
 
     try {
-        let batch = writeBatch(db);
-        let batchCount = 0;
-        let totalDeleted = 0;
-
+        let batch = writeBatch(db); let batchCount = 0; let totalDeleted = 0;
         for (let i = 0; i < checkedBoxes.length; i++) {
-            const locId = checkedBoxes[i].value;
-            batch.delete(doc(db, LOC_COLLECTION, locId));
-            
-            batchCount++;
-            totalDeleted++;
-
-            if (batchCount >= 400) {
-                await batch.commit();
-                batch = writeBatch(db);
-                batchCount = 0;
-            }
+            batch.delete(doc(db, LOC_COLLECTION, checkedBoxes[i].value));
+            batchCount++; totalDeleted++;
+            if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
         }
-
-        if (batchCount > 0) {
-            await batch.commit();
-        }
-
-        alert(`🗑️ 총 ${totalDeleted}개의 로케이션이 정상적으로 삭제되었습니다.`);
-        loadAndRender();
-    } catch (error) {
-        console.error("삭제 실패:", error);
-        alert("일괄 삭제 처리 중 오류가 발생했습니다.");
-    }
+        if (batchCount > 0) await batch.commit();
+        alert(`🗑️ 총 ${totalDeleted}개 로케이션 삭제 완료`); loadAndRender();
+    } catch (error) { console.error("삭제 실패:", error); }
 };
 
 window.openEditModal = (id) => {
@@ -329,17 +350,14 @@ window.saveManualEdit = async () => {
         name: document.getElementById('modal-name').value.trim(),
         option: document.getElementById('modal-option').value.trim(),
         stock: document.getElementById('modal-stock').value.trim(),
+        reserved: false, reservedAt: 0, reservedBy: '', // 저장 시 예약 지움
         updatedAt: new Date()
     };
 
     try {
         await setDoc(doc(db, LOC_COLLECTION, id), updateData, { merge: true });
-        document.getElementById('edit-modal').style.display = 'none';
-        loadAndRender(); 
-    } catch (error) {
-        console.error("수정 실패:", error);
-        alert("정보 수정 중 오류가 발생했습니다.");
-    }
+        document.getElementById('edit-modal').style.display = 'none'; loadAndRender(); 
+    } catch (error) { console.error("수정 실패:", error); }
 };
 
 const fileInput = document.getElementById('excel-upload');
@@ -363,17 +381,11 @@ async function updateDatabase(rows) {
     if (totalRows === 0) return;
 
     const tbody = document.getElementById('location-list-body');
-    if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe; font-size:16px;">데이터 검증 및 동기화 중입니다... 잠시만 기다려주세요.</td></tr>`;
-    }
-    
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중... 잠시만 기다려주세요.</td></tr>`;
     await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
-        let batch = writeBatch(db);
-        let updateCount = 0;
-        let batchCount = 0;
-        
+        let batch = writeBatch(db); let updateCount = 0; let batchCount = 0;
         let notFoundLocs = new Set(); 
         const validLocIds = new Set(originalData.map(d => d.id));
 
@@ -382,19 +394,13 @@ async function updateDatabase(rows) {
             const rawLoc = row['로케이션']?.toString().trim();
             
             if (rawLoc) {
-                let cleanLocId = '';
-                let extractedCode = '';
-
+                let cleanLocId = ''; let extractedCode = '';
                 if (rawLoc.includes('(')) {
                     cleanLocId = rawLoc.split('(')[0].trim();
                     const afterParen = rawLoc.substring(rawLoc.indexOf('('));
                     const sIndex = afterParen.indexOf('S');
-                    if (sIndex !== -1) {
-                        extractedCode = afterParen.substring(sIndex).trim();
-                    }
-                } else {
-                    cleanLocId = rawLoc;
-                }
+                    if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
+                } else { cleanLocId = rawLoc; }
 
                 if (cleanLocId) {
                     if (!validLocIds.has(cleanLocId)) {
@@ -410,17 +416,12 @@ async function updateDatabase(rows) {
                             name: row['상품명']?.toString().trim() || '',
                             option: row['옵션']?.toString().trim() || '',
                             stock: row['정상재고']?.toString().trim() || '0',
+                            reserved: false, reservedAt: 0, reservedBy: '', // 동기화 시 예약 초기화
                             updatedAt: new Date()
                         }, { merge: true });
 
-                        updateCount++;
-                        batchCount++;
-                        
-                        if (batchCount >= 400) { 
-                            await batch.commit(); 
-                            batch = writeBatch(db); 
-                            batchCount = 0; 
-                        }
+                        updateCount++; batchCount++;
+                        if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
                     }
                 }
             }
@@ -428,23 +429,16 @@ async function updateDatabase(rows) {
         
         if (batchCount > 0) await batch.commit();
         
-        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션이 정상적으로 갱신되었습니다.`;
-        
-        if (notFoundLocs.size > 0) {
-            const notFoundArray = Array.from(notFoundLocs);
-            resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.size}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundArray.join(', ')}]\n\n※ 먼저 화면에서 빈 로케이션을 추가해주세요.`;
-        }
-        
+        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션이 갱신되었습니다.`;
+        if (notFoundLocs.size > 0) resultMessage += `\n\n⚠️ ${notFoundLocs.size}개 제외됨 (시스템에 없는 번호)`;
         alert(resultMessage);
         
-        document.getElementById('excel-upload').value = '';
-        loadAndRender();
+        document.getElementById('excel-upload').value = ''; loadAndRender();
         
     } catch (error) {
         console.error("실패:", error);
         alert("업데이트 중 오류가 발생했습니다.");
-        document.getElementById('excel-upload').value = '';
-        loadAndRender();
+        document.getElementById('excel-upload').value = ''; loadAndRender();
     }
 }
 
