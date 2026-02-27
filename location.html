@@ -68,9 +68,15 @@
         .checkbox-cell { width: 40px; }
         .loc-check { cursor: pointer; width: 16px; height: 16px; }
 
-        /* 수동 수정 모달 */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center; }
-        .modal-content { background: white; padding: 25px; border-radius: 10px; width: 350px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        /* 수동 수정 모달 스타일 */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: white; padding: 25px; border-radius: 10px; width: 350px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
         .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #333; }
         .modal-body { display: flex; flex-direction: column; gap: 12px; }
         .modal-body label { font-size: 13px; font-weight: bold; color: #555; margin-bottom: -5px; }
@@ -79,16 +85,56 @@
         .modal-footer { margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px; }
         .btn-modal-save { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
         .btn-modal-cancel { padding: 8px 16px; background: #888; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+
+        #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
+
+        /* 로케이션 복사 스타일 및 토스트 알림 */
+        .loc-copy-cell {
+            cursor: copy;
+            font-weight: bold;
+            font-size: 15px;
+            transition: color 0.2s;
+        }
+        .loc-copy-cell:hover {
+            color: var(--primary);
+            text-decoration: underline;
+        }
+        #toast {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 8px;
+            padding: 12px;
+            position: fixed;
+            z-index: 10001;
+            left: 50%;
+            bottom: 30px;
+            transform: translateX(-50%);
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s, bottom 0.3s;
+        }
+        #toast.show {
+            visibility: visible;
+            opacity: 1;
+            bottom: 50px;
+        }
     </style>
 </head>
 <body onclick="closeAllPopups()">
+    <div id="firebase-guide">
+        <pre>match /Locations/{document=**} { allow read, write: if true; }</pre>
+    </div>
+
     <div class="controls-header">
         <div class="tabs">
             <button class="tab-btn active" onclick="switchView('list')">데이터 리스트</button>
             <button class="tab-btn" onclick="switchView('map')">도면 보기</button>
         </div>
         <div class="upload-compact">
-            <strong>📄 엑셀 동기화(전체 덮어쓰기):</strong> 
+            <strong>📄 엑셀 동기화(내용 업데이트):</strong> 
             <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
         </div>
     </div>
@@ -104,24 +150,67 @@
     </div>
 
     <div id="view-list" class="content-view active">
-        <div class="list-container">
+        <div class="list-container" id="list-container">
             <table class="list-table">
                 <thead>
                     <tr>
-                        <th class="checkbox-cell"><input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)"></th>
-                        <th style="width: 80px;"><div class="th-content"><span class="title-text">동</span><span class="filter-btn" id="btn-filter-dong" onclick="toggleFilterPopup(event, 'pop-dong')">▼</span></div></th>
-                        <th style="width: 80px;"><div class="th-content"><span class="title-text">위치</span><span class="filter-btn" id="btn-filter-pos" onclick="toggleFilterPopup(event, 'pop-pos')">▼</span></div></th>
-                        <th style="width: 150px;"><div class="th-content"><span class="title-text">로케이션</span><span class="filter-btn" id="btn-filter-loc" onclick="toggleFilterPopup(event, 'pop-loc')">▼</span></div></th>
-                        <th style="width: 150px;"><div class="th-content"><span class="title-text">상품코드</span><span class="filter-btn" id="btn-filter-code" onclick="toggleFilterPopup(event, 'pop-code')">▼</span></div></th>
-                        <th><div class="th-content"><span class="title-text">상품명</span><span class="filter-btn" id="btn-filter-name" onclick="toggleFilterPopup(event, 'pop-name')">▼</span></div></th>
-                        <th style="width: 180px;"><div class="th-content"><span class="title-text">옵션</span><span class="filter-btn" id="btn-filter-option" onclick="toggleFilterPopup(event, 'pop-option')">▼</span></div></th>
-                        <th style="width: 130px;"><div class="th-content"><span class="title-text">정상재고</span><span class="filter-btn" id="btn-filter-stock" onclick="toggleFilterPopup(event, 'pop-stock')">▼</span></div></th>
+                        <th class="checkbox-cell">
+                            <input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)">
+                        </th>
+                        <th style="width: 80px;">
+                            <div class="th-content">
+                                <span class="title-text">동</span>
+                                <span class="filter-btn" id="btn-filter-dong" onclick="toggleFilterPopup(event, 'pop-dong')">▼</span>
+                            </div>
+                        </th>
+                        <th style="width: 80px;">
+                            <div class="th-content">
+                                <span class="title-text">위치</span>
+                                <span class="filter-btn" id="btn-filter-pos" onclick="toggleFilterPopup(event, 'pop-pos')">▼</span>
+                            </div>
+                        </th>
+                        <th style="width: 150px;">
+                            <div class="th-content">
+                                <span class="title-text">로케이션</span>
+                                <span class="filter-btn" id="btn-filter-loc" onclick="toggleFilterPopup(event, 'pop-loc')">▼</span>
+                            </div>
+                        </th>
+                        <th style="width: 150px;">
+                            <div class="th-content">
+                                <span class="title-text">상품코드</span>
+                                <span class="filter-btn" id="btn-filter-code" onclick="toggleFilterPopup(event, 'pop-code')">▼</span>
+                            </div>
+                        </th>
+                        <th>
+                            <div class="th-content">
+                                <span class="title-text">상품명</span>
+                                <span class="filter-btn" id="btn-filter-name" onclick="toggleFilterPopup(event, 'pop-name')">▼</span>
+                            </div>
+                        </th>
+                        <th style="width: 180px;">
+                            <div class="th-content">
+                                <span class="title-text">옵션</span>
+                                <span class="filter-btn" id="btn-filter-option" onclick="toggleFilterPopup(event, 'pop-option')">▼</span>
+                            </div>
+                        </th>
+                        <th style="width: 130px;">
+                            <div class="th-content">
+                                <span class="title-text">정상재고</span>
+                                <span class="filter-btn" id="btn-filter-stock" onclick="toggleFilterPopup(event, 'pop-stock')">▼</span>
+                            </div>
+                        </th>
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
-                    <tr><td colspan="8" style="padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
+                    <tr><td colspan="8" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+
+    <div id="view-map" class="content-view" style="display:none;">
+        <div class="map-container" style="text-align:center; padding:100px; background:#fff; margin:20px; border-radius:12px; border:1px solid #ddd;">
+            🚧 도면 보기 기능 준비 중
         </div>
     </div>
 
@@ -137,13 +226,26 @@
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">상품 정보 수동 수정</div>
             <div class="modal-body">
-                <label>로케이션 (수정 불가)</label><input type="text" id="modal-id" readonly>
-                <label>동</label><input type="text" id="modal-dong" placeholder="예: 1">
-                <label>위치</label><input type="text" id="modal-pos" placeholder="예: 1">
-                <label>상품코드</label><input type="text" id="modal-code">
-                <label>상품명</label><input type="text" id="modal-name">
-                <label>옵션</label><input type="text" id="modal-option">
-                <label>정상재고</label><input type="number" id="modal-stock">
+                <label>로케이션 (수정 불가)</label>
+                <input type="text" id="modal-id" readonly>
+                
+                <label>동</label>
+                <input type="text" id="modal-dong" placeholder="예: 1">
+                
+                <label>위치</label>
+                <input type="text" id="modal-pos" placeholder="예: 1">
+                
+                <label>상품코드</label>
+                <input type="text" id="modal-code" placeholder="상품코드 입력">
+                
+                <label>상품명</label>
+                <input type="text" id="modal-name" placeholder="상품명 입력">
+                
+                <label>옵션</label>
+                <input type="text" id="modal-option" placeholder="옵션 입력">
+                
+                <label>정상재고</label>
+                <input type="number" id="modal-stock" placeholder="0">
             </div>
             <div class="modal-footer">
                 <button class="btn-modal-cancel" onclick="closeEditModal()">취소</button>
@@ -151,6 +253,8 @@
             </div>
         </div>
     </div>
+
+    <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script type="module" src="js/location.js"></script>
@@ -162,11 +266,13 @@
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             event.currentTarget.classList.add('active');
         }
+
         function toggleFilterPopup(e, id) {
             e.stopPropagation();
             const pop = document.getElementById(id);
             const isVisible = pop.style.display === 'block';
             closeAllPopups();
+            
             if (!isVisible) {
                 const rect = e.target.getBoundingClientRect();
                 pop.style.display = 'block';
@@ -174,8 +280,23 @@
                 pop.style.left = (rect.left + window.scrollX - 50) + 'px'; 
             }
         }
-        window.closeAllPopups = () => document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
-        window.closeEditModal = (e) => { if (!e || e.target.id === 'edit-modal') document.getElementById('edit-modal').style.display = 'none'; };
+
+        window.closeAllPopups = function() {
+            document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
+        }
+        
+        document.querySelectorAll('.filter-popup').forEach(p => {
+            p.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+        });
+
+        // 모달 닫기
+        window.closeEditModal = function(e) {
+            if (!e || e.target.id === 'edit-modal') {
+                document.getElementById('edit-modal').style.display = 'none';
+            }
+        }
     </script>
 </body>
 </html>
