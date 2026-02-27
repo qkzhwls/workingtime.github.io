@@ -42,7 +42,7 @@
         }
         
         .list-table tbody tr { cursor: pointer; transition: background 0.2s; }
-        .list-table tbody tr:hover { background-color: #f0f4ff; }
+        .list-table tbody tr:hover { background-color: #f0f4ff !important; }
         
         .list-table th { 
             background: #f4f4f4; 
@@ -98,6 +98,17 @@
         .loc-copy-cell:hover {
             color: var(--primary);
             text-decoration: underline;
+        }
+        .badge-reserved {
+            display: inline-block;
+            background: #ff9800; /* 주황색 뱃지로 변경하여 가시성 확보 */
+            color: white;
+            font-weight: bold;
+            font-size: 11px;
+            padding: 3px 6px;
+            border-radius: 4px;
+            margin-top: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         #toast {
             visibility: hidden;
@@ -291,7 +302,6 @@
             });
         });
 
-        // 모달 닫기
         window.closeEditModal = function(e) {
             if (!e || e.target.id === 'edit-modal') {
                 document.getElementById('edit-modal').style.display = 'none';
