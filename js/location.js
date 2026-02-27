@@ -1,6 +1,5 @@
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-// 메인 앱의 로그인 정보를 가져오기 위해 Firebase Auth 추가
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const { db } = initializeFirebase();
@@ -22,7 +21,7 @@ onAuthStateChanged(auth, (user) => {
     }
 });
 
-// 예약 만료 기준 시간 (30분 = 1800000 밀리초) - 시스템 마비 방지용 
+// 예약 만료 기준 시간 (30분 = 1800000 밀리초)
 const RESERVE_EXPIRE_MS = 1800000; 
 
 async function loadAndRender() {
@@ -211,7 +210,7 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="8" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 클릭 복사 시 예약 로직 처리 (이름과 시간 포함)
+// 클릭 복사 시 예약 로직 처리 (자신의 예약 취소 기능 포함)
 window.copyLocationToClipboard = async (event, locId) => {
     event.stopPropagation(); // 모달 오픈 방지
     
@@ -228,16 +227,26 @@ window.copyLocationToClipboard = async (event, locId) => {
             const reserverName = data.reservedBy || '다른 작업자';
             const isExpired = (now - reservedTime) > RESERVE_EXPIRE_MS;
 
-            // 본인이 예약한 건 그냥 복사만 진행 (중복 알림창 안 띄움)
+            // 1. 본인이 예약했고 시간이 남은 경우: 해제 여부 묻기
             if (isReserved && !isExpired && reserverName === currentUserName) {
-                navigator.clipboard.writeText(locId);
-                showToast(`[${locId}] 내 예약 복사 완료!`);
+                if (confirm(`[${locId}] 내가 예약한 자리입니다.\n예약을 해제(취소)하시겠습니까?`)) {
+                    // 예약 해제
+                    await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '' }, { merge: true });
+                    showToast(`[${locId}] 예약 해제 완료`);
+                    
+                    const target = originalData.find(d => d.id === locId);
+                    if (target) { target.reserved = false; target.reservedAt = 0; target.reservedBy = ''; }
+                    applyFiltersAndSort();
+                } else {
+                    // 취소를 누르면 그냥 복사만 한 번 더 해줌
+                    navigator.clipboard.writeText(locId);
+                    showToast(`[${locId}] 내 예약 복사 완료!`);
+                }
                 return;
             }
 
-            // 남이 예약했고 시간이 남은 경우: 구체적인 경고창 띄우기
+            // 2. 남이 예약했고 시간이 남은 경우: 구체적인 경고창 띄우기
             if (isReserved && !isExpired) {
-                // 시간 포맷팅 (예: 14:30)
                 const rTime = new Date(reservedTime);
                 const timeStr = `${rTime.getHours()}:${String(rTime.getMinutes()).padStart(2, '0')}`;
 
@@ -254,7 +263,7 @@ window.copyLocationToClipboard = async (event, locId) => {
                 return; 
             }
 
-            // 빈자리일 경우 정상 예약 진행 (내 이름 기록)
+            // 3. 빈자리일 경우 정상 예약 진행 (내 이름 기록)
             await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
             
             navigator.clipboard.writeText(locId).then(() => {
@@ -323,7 +332,7 @@ window.deleteSelectedLocations = async () => {
         }
         if (batchCount > 0) await batch.commit();
         alert(`🗑️ 총 ${totalDeleted}개 로케이션 삭제 완료`); loadAndRender();
-    } catch (error) { console.error("삭제 실패:", error); }
+    } catch (error) { console.error("삭제 실패:", error); alert("삭제 중 오류가 발생했습니다."); }
 };
 
 window.openEditModal = (id) => {
