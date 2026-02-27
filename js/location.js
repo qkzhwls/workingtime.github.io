@@ -164,7 +164,6 @@ function renderTable(data) {
     let html = '';
     data.forEach(loc => {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
-        // 행 전체를 클릭하면 수정 모달 오픈 (단, 체크박스 클릭 시에는 무시)
         html += `
             <tr onclick="if(event.target.tagName !== 'INPUT') openEditModal('${loc.id}')">
                 <td onclick="event.stopPropagation()">
@@ -265,7 +264,6 @@ window.deleteSelectedLocations = async () => {
     }
 };
 
-// 수동 정보 수정(모달) 로직
 window.openEditModal = (id) => {
     const targetData = originalData.find(d => d.id === id);
     if (!targetData) return;
@@ -292,14 +290,14 @@ window.saveManualEdit = async () => {
     try {
         await setDoc(doc(db, LOC_COLLECTION, id), updateData, { merge: true });
         document.getElementById('edit-modal').style.display = 'none';
-        loadAndRender(); // 변경된 내용 갱신
+        loadAndRender(); 
     } catch (error) {
         console.error("수정 실패:", error);
         alert("정보 수정 중 오류가 발생했습니다.");
     }
 };
 
-// 엑셀 업로드 처리 로직 (진행률 UI 업데이트 포함)
+// 엑셀 업로드 처리 및 고속 최적화 로직
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -322,7 +320,6 @@ async function updateDatabase(rows) {
 
     const tbody = document.getElementById('location-list-body');
     if (tbody) {
-        // 진행 상태를 보여줄 id="sync-status" 추가
         tbody.innerHTML = `<tr><td colspan="6" id="sync-status" style="padding:50px; font-weight:bold; color:#3d5afe; font-size:16px;">데이터 검증 및 동기화 중... 0%</td></tr>`;
     }
     
@@ -330,8 +327,9 @@ async function updateDatabase(rows) {
         let batch = writeBatch(db);
         let updateCount = 0;
         let batchCount = 0;
-        let notFoundLocs = []; 
         
+        // 검색 속도를 획기적으로 높이기 위해 Set 사용
+        let notFoundLocs = new Set(); 
         const validLocIds = new Set(originalData.map(d => d.id));
 
         for (let i = 0; i < totalRows; i++) {
@@ -354,10 +352,9 @@ async function updateDatabase(rows) {
                 }
 
                 if (cleanLocId) {
+                    // 고속 대조 (0.001초 이내 처리)
                     if (!validLocIds.has(cleanLocId)) {
-                        if (!notFoundLocs.includes(cleanLocId)) {
-                            notFoundLocs.push(cleanLocId); 
-                        }
+                        notFoundLocs.add(cleanLocId); 
                     } else {
                         const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                         const docRef = doc(db, LOC_COLLECTION, cleanLocId);
@@ -382,14 +379,13 @@ async function updateDatabase(rows) {
                 }
             }
 
-            // UI 멈춤 현상(프리징)을 방지하고 퍼센트를 화면에 실시간 업데이트 (50개마다 갱신)
-            if (i % 50 === 0 || i === totalRows - 1) {
+            // UI 새로고침 주기를 500 단위로 늘려 멈춤(프리징) 최소화 및 속도 향상
+            if (i % 500 === 0 || i === totalRows - 1) {
                 const percent = Math.round(((i + 1) / totalRows) * 100);
                 const statusCell = document.getElementById('sync-status');
                 if (statusCell) {
                     statusCell.innerText = `데이터 검증 및 동기화 중... ${percent}%`;
                 }
-                // 브라우저 렌더링에 잠시 여유를 주어 화면이 갱신되도록 함
                 await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
@@ -398,8 +394,9 @@ async function updateDatabase(rows) {
         
         let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션이 정상적으로 갱신되었습니다.`;
         
-        if (notFoundLocs.length > 0) {
-            resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.length}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundLocs.join(', ')}]\n\n※ 먼저 화면에서 빈 로케이션을 추가해주세요.`;
+        if (notFoundLocs.size > 0) {
+            const notFoundArray = Array.from(notFoundLocs);
+            resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.size}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundArray.join(', ')}]\n\n※ 먼저 화면에서 빈 로케이션을 추가해주세요.`;
         }
         
         alert(resultMessage);
