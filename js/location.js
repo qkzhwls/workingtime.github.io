@@ -297,7 +297,7 @@ window.saveManualEdit = async () => {
     }
 };
 
-// 엑셀 업로드 처리 및 고속 최적화 로직
+// 엑셀 업로드 처리 로직 (속도 최적화: 시각적 퍼센트 업데이트 제거, 내부 고속 검증만 진행)
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -320,9 +320,12 @@ async function updateDatabase(rows) {
 
     const tbody = document.getElementById('location-list-body');
     if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="6" id="sync-status" style="padding:50px; font-weight:bold; color:#3d5afe; font-size:16px;">데이터 검증 및 동기화 중... 0%</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe; font-size:16px;">데이터 검증 및 동기화 중입니다... 잠시만 기다려주세요.</td></tr>`;
     }
     
+    // 브라우저 화면이 "동기화 중..."으로 바뀔 수 있는 시간을 아주 잠깐 줍니다.
+    await new Promise(resolve => setTimeout(resolve, 50));
+
     try {
         let batch = writeBatch(db);
         let updateCount = 0;
@@ -352,10 +355,11 @@ async function updateDatabase(rows) {
                 }
 
                 if (cleanLocId) {
-                    // 고속 대조 (0.001초 이내 처리)
+                    // 고속 검증: 시스템에 없는 로케이션은 업데이트하지 않고 기록만 함
                     if (!validLocIds.has(cleanLocId)) {
                         notFoundLocs.add(cleanLocId); 
                     } else {
+                        // 시스템에 존재하는 로케이션만 업데이트 진행
                         const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                         const docRef = doc(db, LOC_COLLECTION, cleanLocId);
 
@@ -370,6 +374,7 @@ async function updateDatabase(rows) {
                         updateCount++;
                         batchCount++;
                         
+                        // 파이어베이스 최대 제한(500)을 고려하여 400 단위로 전송
                         if (batchCount >= 400) { 
                             await batch.commit(); 
                             batch = writeBatch(db); 
@@ -377,16 +382,6 @@ async function updateDatabase(rows) {
                         }
                     }
                 }
-            }
-
-            // UI 새로고침 주기를 500 단위로 늘려 멈춤(프리징) 최소화 및 속도 향상
-            if (i % 500 === 0 || i === totalRows - 1) {
-                const percent = Math.round(((i + 1) / totalRows) * 100);
-                const statusCell = document.getElementById('sync-status');
-                if (statusCell) {
-                    statusCell.innerText = `데이터 검증 및 동기화 중... ${percent}%`;
-                }
-                await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
         
