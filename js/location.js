@@ -1,5 +1,5 @@
 import { initializeFirebase } from './config.js';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const { db } = initializeFirebase();
@@ -16,7 +16,6 @@ let currentUserName = "비로그인 작업자";
 // Firebase Auth를 통해 현재 접속자 추적
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        // 이메일의 앞부분(ID)이나 등록된 이름을 작업자 이름으로 사용
         currentUserName = user.displayName || user.email.split('@')[0];
     }
 });
@@ -24,24 +23,24 @@ onAuthStateChanged(auth, (user) => {
 // 예약 만료 기준 시간 (30분 = 1800000 밀리초)
 const RESERVE_EXPIRE_MS = 1800000; 
 
-async function loadAndRender() {
-    try {
-        const querySnapshot = await getDocs(collection(db, LOC_COLLECTION));
+// [업그레이드] 실시간 데이터 동기화 리스너 (onSnapshot)
+function setupRealtimeListener() {
+    const q = collection(db, LOC_COLLECTION);
+    
+    // 서버에 데이터가 변경될 때마다 자동으로 이 함수가 실행됩니다.
+    onSnapshot(q, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
-
+        
         originalData = [];
-        querySnapshot.forEach(docSnap => {
+        snapshot.forEach(docSnap => {
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
 
-        const checkAllBtn = document.getElementById('check-all');
-        if(checkAllBtn) checkAllBtn.checked = false;
-
         setupFilterPopups();
         applyFiltersAndSort();
-    } catch (error) {
-        console.error("로딩 실패:", error);
-    }
+    }, (error) => {
+        console.error("실시간 동기화 오류:", error);
+    });
 }
 
 function getSortButtonsHtml(key) {
@@ -176,6 +175,10 @@ function renderTable(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
 
+    // 실시간 동기화 중 화면이 갱신되어도 사용자가 체크한 박스가 풀리지 않도록 기존 상태 기억
+    const checkedBoxes = document.querySelectorAll('.loc-check:checked');
+    const checkedIds = new Set(Array.from(checkedBoxes).map(cb => cb.value));
+
     let html = '';
     const now = new Date().getTime();
 
@@ -185,15 +188,16 @@ function renderTable(data) {
         // 30분 만료 체크
         let isReserved = loc.reserved === true && (now - (loc.reservedAt || 0) <= RESERVE_EXPIRE_MS);
         
-        // 예약 정보 표시 (노란 배경, 뱃지에 작업자 이름)
         let rowStyle = isReserved ? 'background-color: #fffde7;' : '';
         let reserverName = loc.reservedBy || '누군가';
         let badgeHtml = isReserved ? `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>` : '';
+        
+        let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
 
         html += `
             <tr onclick="if(event.target.tagName !== 'INPUT') openEditModal('${loc.id}')" style="${rowStyle}">
                 <td onclick="event.stopPropagation()">
-                    <input type="checkbox" class="loc-check" value="${loc.id}">
+                    <input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked}>
                 </td>
                 <td style="color:#666;">${loc.dong || ''}</td>
                 <td style="color:#666;">${loc.pos || ''}</td>
@@ -207,12 +211,19 @@ function renderTable(data) {
             </tr>
         `;
     });
+    
     tbody.innerHTML = html || '<tr><td colspan="8" style="padding:50px;">데이터가 없습니다.</td></tr>';
+
+    // 전체선택 체크박스 상태 복구
+    const checkAllBtn = document.getElementById('check-all');
+    const allCheckboxes = document.querySelectorAll('.loc-check');
+    if (checkAllBtn && allCheckboxes.length > 0) {
+        checkAllBtn.checked = document.querySelectorAll('.loc-check:checked').length === allCheckboxes.length;
+    }
 }
 
-// 클릭 복사 시 예약 로직 처리 (자신의 예약 취소 기능 포함)
 window.copyLocationToClipboard = async (event, locId) => {
-    event.stopPropagation(); // 모달 오픈 방지
+    event.stopPropagation(); 
     
     try {
         const docRef = doc(db, LOC_COLLECTION, locId);
@@ -227,43 +238,32 @@ window.copyLocationToClipboard = async (event, locId) => {
             const reserverName = data.reservedBy || '다른 작업자';
             const isExpired = (now - reservedTime) > RESERVE_EXPIRE_MS;
 
-            // 1. 본인이 예약했고 시간이 남은 경우: 해제 여부 묻기
+            // 1. 본인이 예약했고 시간이 남은 경우: 해제
             if (isReserved && !isExpired && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n예약을 해제(취소)하시겠습니까?`)) {
-                    // 예약 해제
                     await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '' }, { merge: true });
                     showToast(`[${locId}] 예약 해제 완료`);
-                    
-                    const target = originalData.find(d => d.id === locId);
-                    if (target) { target.reserved = false; target.reservedAt = 0; target.reservedBy = ''; }
-                    applyFiltersAndSort();
                 } else {
-                    // 취소를 누르면 그냥 복사만 한 번 더 해줌
                     navigator.clipboard.writeText(locId);
                     showToast(`[${locId}] 내 예약 복사 완료!`);
                 }
                 return;
             }
 
-            // 2. 남이 예약했고 시간이 남은 경우: 구체적인 경고창 띄우기
+            // 2. 남이 예약했고 시간이 남은 경우: 강제 뺏기
             if (isReserved && !isExpired) {
                 const rTime = new Date(reservedTime);
                 const timeStr = `${rTime.getHours()}:${String(rTime.getMinutes()).padStart(2, '0')}`;
 
                 if (confirm(`[${locId}] 로케이션은 현재 [${reserverName}]님이 ${timeStr}부터 사용(예약) 중입니다.\n강제로 예약을 뺏어오시겠습니까?`)) {
-                    // 강제 해제 및 내 이름으로 덮어쓰기
                     await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
                     navigator.clipboard.writeText(locId);
                     showToast(`[${locId}] 예약을 뺏어와 복사했습니다.`);
-                    
-                    const target = originalData.find(d => d.id === locId);
-                    if (target) { target.reserved = true; target.reservedAt = now; target.reservedBy = currentUserName; }
-                    applyFiltersAndSort();
                 }
                 return; 
             }
 
-            // 3. 빈자리일 경우 정상 예약 진행 (내 이름 기록)
+            // 3. 빈자리일 경우 정상 예약
             await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
             
             navigator.clipboard.writeText(locId).then(() => {
@@ -271,11 +271,7 @@ window.copyLocationToClipboard = async (event, locId) => {
             }).catch(err => {
                 alert('복사 기능을 지원하지 않는 브라우저입니다.');
             });
-
-            // 즉각적인 화면 갱신
-            const target = originalData.find(d => d.id === locId);
-            if (target) { target.reserved = true; target.reservedAt = now; target.reservedBy = currentUserName; }
-            applyFiltersAndSort();
+            // onSnapshot이 작동 중이므로 loadAndRender나 applyFiltersAndSort를 호출할 필요가 없습니다. 자동으로 화면이 바뀝니다.
         }
     } catch (error) {
         console.error('복사/예약 실패:', error);
@@ -314,7 +310,8 @@ window.addSingleLocation = async () => {
             reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date()
         });
 
-        inputObj.value = ''; alert(`✅ [${newId}] 로케이션 추가 완료`); loadAndRender();
+        inputObj.value = ''; 
+        alert(`✅ [${newId}] 로케이션 추가 완료`); 
     } catch (error) { console.error("추가 실패:", error); }
 };
 
@@ -331,7 +328,7 @@ window.deleteSelectedLocations = async () => {
             if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
         }
         if (batchCount > 0) await batch.commit();
-        alert(`🗑️ 총 ${totalDeleted}개 로케이션 삭제 완료`); loadAndRender();
+        alert(`🗑️ 총 ${totalDeleted}개 로케이션 삭제 완료`); 
     } catch (error) { console.error("삭제 실패:", error); alert("삭제 중 오류가 발생했습니다."); }
 };
 
@@ -359,13 +356,13 @@ window.saveManualEdit = async () => {
         name: document.getElementById('modal-name').value.trim(),
         option: document.getElementById('modal-option').value.trim(),
         stock: document.getElementById('modal-stock').value.trim(),
-        reserved: false, reservedAt: 0, reservedBy: '', // 저장 시 예약 지움
+        reserved: false, reservedAt: 0, reservedBy: '', 
         updatedAt: new Date()
     };
 
     try {
         await setDoc(doc(db, LOC_COLLECTION, id), updateData, { merge: true });
-        document.getElementById('edit-modal').style.display = 'none'; loadAndRender(); 
+        document.getElementById('edit-modal').style.display = 'none'; 
     } catch (error) { console.error("수정 실패:", error); }
 };
 
@@ -390,7 +387,10 @@ async function updateDatabase(rows) {
     if (totalRows === 0) return;
 
     const tbody = document.getElementById('location-list-body');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중... 잠시만 기다려주세요.</td></tr>`;
+    if (tbody) {
+        // onSnapshot이 작동하여 실시간으로 덮어쓸 수 있지만, 업로드 시작 안내용으로 삽입합니다.
+        tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 검증 및 동기화 중입니다... 잠시만 기다려주세요.</td></tr>`;
+    }
     await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
@@ -425,7 +425,7 @@ async function updateDatabase(rows) {
                             name: row['상품명']?.toString().trim() || '',
                             option: row['옵션']?.toString().trim() || '',
                             stock: row['정상재고']?.toString().trim() || '0',
-                            reserved: false, reservedAt: 0, reservedBy: '', // 동기화 시 예약 초기화
+                            reserved: false, reservedAt: 0, reservedBy: '', 
                             updatedAt: new Date()
                         }, { merge: true });
 
@@ -439,16 +439,20 @@ async function updateDatabase(rows) {
         if (batchCount > 0) await batch.commit();
         
         let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션이 갱신되었습니다.`;
-        if (notFoundLocs.size > 0) resultMessage += `\n\n⚠️ ${notFoundLocs.size}개 제외됨 (시스템에 없는 번호)`;
-        alert(resultMessage);
+        if (notFoundLocs.size > 0) {
+            const notFoundArray = Array.from(notFoundLocs);
+            resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.size}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundArray.join(', ')}]`;
+        }
         
-        document.getElementById('excel-upload').value = ''; loadAndRender();
+        alert(resultMessage);
+        document.getElementById('excel-upload').value = ''; 
         
     } catch (error) {
         console.error("실패:", error);
         alert("업데이트 중 오류가 발생했습니다.");
-        document.getElementById('excel-upload').value = ''; loadAndRender();
+        document.getElementById('excel-upload').value = ''; 
     }
 }
 
-window.onload = loadAndRender;
+// 기존 loadAndRender() 대신 실시간 리스너를 시작합니다.
+window.onload = setupRealtimeListener;
