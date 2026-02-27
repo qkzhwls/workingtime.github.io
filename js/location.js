@@ -164,9 +164,12 @@ function renderTable(data) {
     let html = '';
     data.forEach(loc => {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
+        // 행 전체를 클릭하면 수정 모달 오픈 (단, 체크박스 클릭 시에는 무시)
         html += `
-            <tr>
-                <td><input type="checkbox" class="loc-check" value="${loc.id}"></td>
+            <tr onclick="if(event.target.tagName !== 'INPUT') openEditModal('${loc.id}')">
+                <td onclick="event.stopPropagation()">
+                    <input type="checkbox" class="loc-check" value="${loc.id}">
+                </td>
                 <td style="font-weight:bold; font-size:15px;">${loc.id}</td>
                 <td style="color:#3d5afe; font-weight:bold;">${displayCode}</td>
                 <td style="text-align:left;">${loc.name || ''}</td>
@@ -262,6 +265,41 @@ window.deleteSelectedLocations = async () => {
     }
 };
 
+// 수동 정보 수정(모달) 로직
+window.openEditModal = (id) => {
+    const targetData = originalData.find(d => d.id === id);
+    if (!targetData) return;
+
+    document.getElementById('modal-id').value = targetData.id;
+    document.getElementById('modal-code').value = targetData.code || '';
+    document.getElementById('modal-name').value = targetData.name || '';
+    document.getElementById('modal-option').value = targetData.option || '';
+    document.getElementById('modal-stock').value = targetData.stock || '0';
+
+    document.getElementById('edit-modal').style.display = 'flex';
+};
+
+window.saveManualEdit = async () => {
+    const id = document.getElementById('modal-id').value;
+    const updateData = {
+        code: document.getElementById('modal-code').value.trim(),
+        name: document.getElementById('modal-name').value.trim(),
+        option: document.getElementById('modal-option').value.trim(),
+        stock: document.getElementById('modal-stock').value.trim(),
+        updatedAt: new Date()
+    };
+
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, id), updateData, { merge: true });
+        document.getElementById('edit-modal').style.display = 'none';
+        loadAndRender(); // 변경된 내용 갱신
+    } catch (error) {
+        console.error("수정 실패:", error);
+        alert("정보 수정 중 오류가 발생했습니다.");
+    }
+};
+
+// 엑셀 업로드 시 없는 로케이션 필터링 및 동기화
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -278,17 +316,19 @@ if (fileInput) {
     });
 }
 
-// 엑셀 업로드 데이터 파싱 로직 변경 (( 기준 앞뒤 추출 )
 async function updateDatabase(rows) {
-    if (!confirm(`${rows.length}개 데이터를 바탕으로 내용을 갱신하시겠습니까?`)) return;
     const tbody = document.getElementById('location-list-body');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 동기화 중...</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 검증 및 동기화 중...</td></tr>';
     
     try {
         let batch = writeBatch(db);
         let count = 0;
         let batchCount = 0;
+        let notFoundLocs = []; // 존재하지 않는 로케이션을 담을 배열
         
+        // 현재 시스템에 등록된 로케이션 ID 리스트 추출 (비교용)
+        const validLocIds = new Set(originalData.map(d => d.id));
+
         for (const row of rows) {
             const rawLoc = row['로케이션']?.toString().trim();
             if (!rawLoc) continue;
@@ -296,21 +336,29 @@ async function updateDatabase(rows) {
             let cleanLocId = '';
             let extractedCode = '';
 
-            // 1. ( 기준으로 로케이션과 상품코드 추출
+            // ( 기준으로 로케이션과 상품코드 추출
             if (rawLoc.includes('(')) {
-                cleanLocId = rawLoc.split('(')[0].trim(); // ( 앞부분 로케이션
+                cleanLocId = rawLoc.split('(')[0].trim();
                 const afterParen = rawLoc.substring(rawLoc.indexOf('('));
                 const sIndex = afterParen.indexOf('S');
                 if (sIndex !== -1) {
-                    extractedCode = afterParen.substring(sIndex).trim(); // ( 뒷부분의 S부터 상품코드
+                    extractedCode = afterParen.substring(sIndex).trim();
                 }
             } else {
-                cleanLocId = rawLoc; // ( 가 없으면 전체를 로케이션으로 사용
+                cleanLocId = rawLoc;
             }
 
             if (!cleanLocId) continue;
 
-            // 엑셀의 '상품코드' 열 데이터보다 추출된 코드를 우선 적용, 둘 다 없으면 빈칸
+            // [검증 로직] 시스템에 해당 로케이션이 있는지 확인
+            if (!validLocIds.has(cleanLocId)) {
+                if (!notFoundLocs.includes(cleanLocId)) {
+                    notFoundLocs.push(cleanLocId); // 없는 로케이션 목록에 추가
+                }
+                continue; // 업데이트하지 않고 건너뜀
+            }
+
+            // 존재하는 로케이션일 경우에만 업데이트 실행
             const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
             const docRef = doc(db, LOC_COLLECTION, cleanLocId);
 
@@ -334,12 +382,22 @@ async function updateDatabase(rows) {
         
         if (batchCount > 0) await batch.commit();
         
-        alert(`✅ 완료! ${count}개 정보가 업데이트되었습니다.`);
+        // 결과 알림창 구성
+        let resultMessage = `✅ 완료! 총 ${count}개의 로케이션이 정상적으로 갱신되었습니다.`;
+        
+        // 찾지 못한 로케이션이 있다면 추가 알림
+        if (notFoundLocs.length > 0) {
+            resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.length}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundLocs.join(', ')}]\n\n※ 먼저 화면에서 빈 로케이션을 추가해주세요.`;
+        }
+        
+        alert(resultMessage);
+        
         document.getElementById('excel-upload').value = '';
         loadAndRender();
         
     } catch (error) {
         console.error("실패:", error);
+        alert("업데이트 중 오류가 발생했습니다.");
         document.getElementById('excel-upload').value = '';
         loadAndRender();
     }
