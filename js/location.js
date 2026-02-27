@@ -299,7 +299,7 @@ window.saveManualEdit = async () => {
     }
 };
 
-// 엑셀 업로드 시 없는 로케이션 필터링 및 동기화
+// 엑셀 업로드 처리 로직 (진행률 UI 업데이트 포함)
 const fileInput = document.getElementById('excel-upload');
 if (fileInput) {
     fileInput.addEventListener('change', function(e) {
@@ -317,75 +317,87 @@ if (fileInput) {
 }
 
 async function updateDatabase(rows) {
+    const totalRows = rows.length;
+    if (totalRows === 0) return;
+
     const tbody = document.getElementById('location-list-body');
-    if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 검증 및 동기화 중...</td></tr>';
+    if (tbody) {
+        // 진행 상태를 보여줄 id="sync-status" 추가
+        tbody.innerHTML = `<tr><td colspan="6" id="sync-status" style="padding:50px; font-weight:bold; color:#3d5afe; font-size:16px;">데이터 검증 및 동기화 중... 0%</td></tr>`;
+    }
     
     try {
         let batch = writeBatch(db);
-        let count = 0;
+        let updateCount = 0;
         let batchCount = 0;
-        let notFoundLocs = []; // 존재하지 않는 로케이션을 담을 배열
+        let notFoundLocs = []; 
         
-        // 현재 시스템에 등록된 로케이션 ID 리스트 추출 (비교용)
         const validLocIds = new Set(originalData.map(d => d.id));
 
-        for (const row of rows) {
+        for (let i = 0; i < totalRows; i++) {
+            const row = rows[i];
             const rawLoc = row['로케이션']?.toString().trim();
-            if (!rawLoc) continue;
-
-            let cleanLocId = '';
-            let extractedCode = '';
-
-            // ( 기준으로 로케이션과 상품코드 추출
-            if (rawLoc.includes('(')) {
-                cleanLocId = rawLoc.split('(')[0].trim();
-                const afterParen = rawLoc.substring(rawLoc.indexOf('('));
-                const sIndex = afterParen.indexOf('S');
-                if (sIndex !== -1) {
-                    extractedCode = afterParen.substring(sIndex).trim();
-                }
-            } else {
-                cleanLocId = rawLoc;
-            }
-
-            if (!cleanLocId) continue;
-
-            // [검증 로직] 시스템에 해당 로케이션이 있는지 확인
-            if (!validLocIds.has(cleanLocId)) {
-                if (!notFoundLocs.includes(cleanLocId)) {
-                    notFoundLocs.push(cleanLocId); // 없는 로케이션 목록에 추가
-                }
-                continue; // 업데이트하지 않고 건너뜀
-            }
-
-            // 존재하는 로케이션일 경우에만 업데이트 실행
-            const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
-            const docRef = doc(db, LOC_COLLECTION, cleanLocId);
-
-            batch.set(docRef, {
-                code: finalCode,
-                name: row['상품명']?.toString().trim() || '',
-                option: row['옵션']?.toString().trim() || '',
-                stock: row['정상재고']?.toString().trim() || '0',
-                updatedAt: new Date()
-            }, { merge: true });
-
-            count++;
-            batchCount++;
             
-            if (batchCount >= 400) { 
-                await batch.commit(); 
-                batch = writeBatch(db); 
-                batchCount = 0; 
+            if (rawLoc) {
+                let cleanLocId = '';
+                let extractedCode = '';
+
+                if (rawLoc.includes('(')) {
+                    cleanLocId = rawLoc.split('(')[0].trim();
+                    const afterParen = rawLoc.substring(rawLoc.indexOf('('));
+                    const sIndex = afterParen.indexOf('S');
+                    if (sIndex !== -1) {
+                        extractedCode = afterParen.substring(sIndex).trim();
+                    }
+                } else {
+                    cleanLocId = rawLoc;
+                }
+
+                if (cleanLocId) {
+                    if (!validLocIds.has(cleanLocId)) {
+                        if (!notFoundLocs.includes(cleanLocId)) {
+                            notFoundLocs.push(cleanLocId); 
+                        }
+                    } else {
+                        const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
+                        const docRef = doc(db, LOC_COLLECTION, cleanLocId);
+
+                        batch.set(docRef, {
+                            code: finalCode,
+                            name: row['상품명']?.toString().trim() || '',
+                            option: row['옵션']?.toString().trim() || '',
+                            stock: row['정상재고']?.toString().trim() || '0',
+                            updatedAt: new Date()
+                        }, { merge: true });
+
+                        updateCount++;
+                        batchCount++;
+                        
+                        if (batchCount >= 400) { 
+                            await batch.commit(); 
+                            batch = writeBatch(db); 
+                            batchCount = 0; 
+                        }
+                    }
+                }
+            }
+
+            // UI 멈춤 현상(프리징)을 방지하고 퍼센트를 화면에 실시간 업데이트 (50개마다 갱신)
+            if (i % 50 === 0 || i === totalRows - 1) {
+                const percent = Math.round(((i + 1) / totalRows) * 100);
+                const statusCell = document.getElementById('sync-status');
+                if (statusCell) {
+                    statusCell.innerText = `데이터 검증 및 동기화 중... ${percent}%`;
+                }
+                // 브라우저 렌더링에 잠시 여유를 주어 화면이 갱신되도록 함
+                await new Promise(resolve => setTimeout(resolve, 0));
             }
         }
         
         if (batchCount > 0) await batch.commit();
         
-        // 결과 알림창 구성
-        let resultMessage = `✅ 완료! 총 ${count}개의 로케이션이 정상적으로 갱신되었습니다.`;
+        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션이 정상적으로 갱신되었습니다.`;
         
-        // 찾지 못한 로케이션이 있다면 추가 알림
         if (notFoundLocs.length > 0) {
             resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.length}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundLocs.join(', ')}]\n\n※ 먼저 화면에서 빈 로케이션을 추가해주세요.`;
         }
