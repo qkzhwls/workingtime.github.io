@@ -101,7 +101,7 @@
         }
         .badge-reserved {
             display: inline-block;
-            background: #ff9800; /* 주황색 뱃지로 변경하여 가시성 확보 */
+            background: #ff9800; 
             color: white;
             font-weight: bold;
             font-size: 11px;
@@ -152,11 +152,11 @@
 
     <div class="action-bar" id="action-bar">
         <div>
-            <input type="text" id="new-loc-id" class="action-input" placeholder="예: A-1-001" onkeypress="if(event.key === 'Enter') addSingleLocation()">
-            <button class="btn-add" onclick="addSingleLocation()">➕ 빈 로케이션 추가</button>
+            <button class="btn-delete-bulk" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
         </div>
         <div>
-            <button class="btn-delete-bulk" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
+            <input type="text" id="new-loc-id" class="action-input" placeholder="예: A-1-001" onkeypress="if(event.key === 'Enter') addSingleLocation()">
+            <button class="btn-add" onclick="addSingleLocation()">➕ 빈 로케이션 추가</button>
         </div>
     </div>
 
