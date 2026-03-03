@@ -3,36 +3,60 @@ import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch }
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const { db } = initializeFirebase();
-const auth = getAuth(); // 메인 앱의 로그인 세션을 그대로 이어받음
+const auth = getAuth();
 const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
 let sortConfig = { key: 'id', direction: 'asc' }; 
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
 
-// 현재 로그인한 작업자 이름 (기본값 설정)
 let currentUserName = "비로그인 작업자";
 
-// Firebase Auth를 통해 현재 접속자 추적
 onAuthStateChanged(auth, (user) => {
     if (user) {
         currentUserName = user.displayName || user.email.split('@')[0];
     }
 });
 
-// 예약 만료 기준 시간 (30분 = 1800000 밀리초)
 const RESERVE_EXPIRE_MS = 1800000; 
 
-// [업그레이드] 실시간 데이터 동기화 리스너 (onSnapshot)
+// 사용률 팝업 렌더링 함수
+function renderUsagePopup(jsonString) {
+    const popup = document.getElementById('usage-popup');
+    if (!popup) return;
+    try {
+        const data = JSON.parse(jsonString);
+        let html = '<table class="usage-table">';
+        data.forEach(row => {
+            // 완전히 빈 줄은 건너뛰어 시각적으로 깔끔하게 유지
+            if (row.every(cell => !cell || cell.toString().trim() === '')) return;
+            
+            html += '<tr>';
+            row.forEach(cell => {
+                html += `<td>${cell || ''}</td>`;
+            });
+            html += '</tr>';
+        });
+        html += '</table>';
+        popup.innerHTML = html;
+    } catch(e) {
+        console.error("사용률 데이터 파싱 오류", e);
+    }
+}
+
 function setupRealtimeListener() {
     const q = collection(db, LOC_COLLECTION);
     
-    // 서버에 데이터가 변경될 때마다 자동으로 이 함수가 실행됩니다.
     onSnapshot(q, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
         
         originalData = [];
         snapshot.forEach(docSnap => {
+            // 특별 식별자인 INFO_USAGE_STATS는 리스트에 넣지 않고 팝업만 업데이트합니다.
+            if (docSnap.id === 'INFO_USAGE_STATS') {
+                renderUsagePopup(docSnap.data().data);
+                return;
+            }
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
 
@@ -175,7 +199,6 @@ function renderTable(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
 
-    // 실시간 동기화 중 화면이 갱신되어도 사용자가 체크한 박스가 풀리지 않도록 기존 상태 기억
     const checkedBoxes = document.querySelectorAll('.loc-check:checked');
     const checkedIds = new Set(Array.from(checkedBoxes).map(cb => cb.value));
 
@@ -185,7 +208,6 @@ function renderTable(data) {
     data.forEach(loc => {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
         
-        // 30분 만료 체크
         let isReserved = loc.reserved === true && (now - (loc.reservedAt || 0) <= RESERVE_EXPIRE_MS);
         
         let rowStyle = isReserved ? 'background-color: #fffde7;' : '';
@@ -214,7 +236,6 @@ function renderTable(data) {
     
     tbody.innerHTML = html || '<tr><td colspan="8" style="padding:50px;">데이터가 없습니다.</td></tr>';
 
-    // 전체선택 체크박스 상태 복구
     const checkAllBtn = document.getElementById('check-all');
     const allCheckboxes = document.querySelectorAll('.loc-check');
     if (checkAllBtn && allCheckboxes.length > 0) {
@@ -238,7 +259,6 @@ window.copyLocationToClipboard = async (event, locId) => {
             const reserverName = data.reservedBy || '다른 작업자';
             const isExpired = (now - reservedTime) > RESERVE_EXPIRE_MS;
 
-            // 1. 본인이 예약했고 시간이 남은 경우: 해제
             if (isReserved && !isExpired && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n예약을 해제(취소)하시겠습니까?`)) {
                     await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '' }, { merge: true });
@@ -250,7 +270,6 @@ window.copyLocationToClipboard = async (event, locId) => {
                 return;
             }
 
-            // 2. 남이 예약했고 시간이 남은 경우: 강제 뺏기
             if (isReserved && !isExpired) {
                 const rTime = new Date(reservedTime);
                 const timeStr = `${rTime.getHours()}:${String(rTime.getMinutes()).padStart(2, '0')}`;
@@ -263,7 +282,6 @@ window.copyLocationToClipboard = async (event, locId) => {
                 return; 
             }
 
-            // 3. 빈자리일 경우 정상 예약
             await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
             
             navigator.clipboard.writeText(locId).then(() => {
@@ -374,17 +392,42 @@ if (fileInput) {
         reader.onload = function(e) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
+            
+            // 1. 기존 데이터 시트 파싱
             const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-            if (json.length > 0) updateDatabase(json);
+            
+            // 2. 사용률 시트 추출 로직 (J1:T39)
+            let usageDataString = null;
+            const usageSheetName = workbook.SheetNames.find(n => n.includes('사용률'));
+            
+            if (usageSheetName) {
+                const usageSheet = workbook.Sheets[usageSheetName];
+                const usageDataFull = XLSX.utils.sheet_to_json(usageSheet, { header: 1, defval: "" });
+                const extractedTable = [];
+                
+                // J열(index 9) 부터 T열(index 19) 까지 추출, 최대 39행
+                for (let i = 0; i < Math.min(39, usageDataFull.length); i++) {
+                    const row = usageDataFull[i] || [];
+                    const slicedRow = row.slice(9, 20);
+                    // 빈 칸 채우기 (11칸)
+                    while(slicedRow.length < 11) slicedRow.push("");
+                    extractedTable.push(slicedRow);
+                }
+                usageDataString = JSON.stringify(extractedTable);
+            }
+            
+            if (json.length > 0 || usageDataString) {
+                updateDatabase(json, usageDataString);
+            }
         };
         reader.readAsArrayBuffer(file);
     });
 }
 
-async function updateDatabase(rows) {
-    const totalRows = rows.length;
-    if (totalRows === 0) return;
-
+// updateDatabase 함수에 매개변수 추가 (usageDataString)
+async function updateDatabase(rows, usageDataString) {
+    const totalRows = rows ? rows.length : 0;
+    
     const tbody = document.getElementById('location-list-body');
     if (tbody) {
         tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 검증 및 동기화 중입니다... 잠시만 기다려주세요.</td></tr>`;
@@ -396,62 +439,65 @@ async function updateDatabase(rows) {
         let notFoundLocs = new Set(); 
         const validLocIds = new Set(originalData.map(d => d.id));
 
-        // [핵심 로직 추가] 엑셀 첫 번째 줄을 읽어 '동'과 '위치' 헤더(칸)가 있는지 확인합니다.
-        const hasDongColumn = ('동' in rows[0] || 'dong' in rows[0]);
-        const hasPosColumn = ('위치' in rows[0] || 'pos' in rows[0]);
+        // 메인 데이터(로케이션)가 있을 경우에만 실행 (무적 방어막 로직 포함)
+        if (totalRows > 0) {
+            const hasDongColumn = ('동' in rows[0] || 'dong' in rows[0]);
+            const hasPosColumn = ('위치' in rows[0] || 'pos' in rows[0]);
+            const hasNameColumn = ('상품명' in rows[0]);
+            const hasStockColumn = ('정상재고' in rows[0]);
+            const hasOptionColumn = ('옵션' in rows[0]);
 
-        for (let i = 0; i < totalRows; i++) {
-            const row = rows[i];
-            const rawLoc = row['로케이션']?.toString().trim();
-            
-            if (rawLoc) {
-                let cleanLocId = ''; let extractedCode = '';
-                if (rawLoc.includes('(')) {
-                    cleanLocId = rawLoc.split('(')[0].trim();
-                    const afterParen = rawLoc.substring(rawLoc.indexOf('('));
-                    const sIndex = afterParen.indexOf('S');
-                    if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
-                } else { cleanLocId = rawLoc; }
+            for (let i = 0; i < totalRows; i++) {
+                const row = rows[i];
+                const rawLoc = row['로케이션']?.toString().trim();
+                
+                if (rawLoc) {
+                    let cleanLocId = ''; let extractedCode = '';
+                    if (rawLoc.includes('(')) {
+                        cleanLocId = rawLoc.split('(')[0].trim();
+                        const afterParen = rawLoc.substring(rawLoc.indexOf('('));
+                        const sIndex = afterParen.indexOf('S');
+                        if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
+                    } else { cleanLocId = rawLoc; }
 
-                if (cleanLocId) {
-                    if (!validLocIds.has(cleanLocId)) {
-                        notFoundLocs.add(cleanLocId); 
-                    } else {
-                        const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
-                        const docRef = doc(db, LOC_COLLECTION, cleanLocId);
+                    if (cleanLocId) {
+                        if (!validLocIds.has(cleanLocId)) {
+                            notFoundLocs.add(cleanLocId); 
+                        } else {
+                            const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
+                            const docRef = doc(db, LOC_COLLECTION, cleanLocId);
 
-                        // 업데이트할 뼈대 객체 (동, 위치는 일단 뺍니다)
-                        let updateData = {
-                            code: finalCode,
-                            name: row['상품명']?.toString().trim() || '',
-                            option: row['옵션']?.toString().trim() || '',
-                            stock: row['정상재고']?.toString().trim() || '0',
-                            reserved: false, reservedAt: 0, reservedBy: '', 
-                            updatedAt: new Date()
-                        };
+                            let updateData = { 
+                                reserved: false, reservedAt: 0, reservedBy: '', 
+                                updatedAt: new Date()
+                            };
 
-                        // 엑셀 파일에 '동' 헤더가 있을 때만 업데이트 객체에 추가합니다.
-                        if (hasDongColumn) {
-                            updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
+                            if (finalCode) updateData.code = finalCode;
+                            if (hasNameColumn) updateData.name = row['상품명']?.toString().trim() || '';
+                            if (hasOptionColumn) updateData.option = row['옵션']?.toString().trim() || '';
+                            if (hasStockColumn) updateData.stock = row['정상재고']?.toString().trim() || '0';
+                            if (hasDongColumn) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
+                            if (hasPosColumn) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
+
+                            batch.set(docRef, updateData, { merge: true });
+
+                            updateCount++; batchCount++;
+                            if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
                         }
-                        // 엑셀 파일에 '위치' 헤더가 있을 때만 업데이트 객체에 추가합니다.
-                        if (hasPosColumn) {
-                            updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
-                        }
-
-                        // merge: true 설정으로 인해 updateData에 없는 항목(동, 위치)은 파이어베이스 서버에서 덮어쓰이지 않고 기존 값이 유지됩니다!
-                        batch.set(docRef, updateData, { merge: true });
-
-                        updateCount++; batchCount++;
-                        if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
                     }
                 }
             }
         }
         
+        // 사용률 데이터가 추출되었을 경우 배치에 추가
+        if (usageDataString) {
+            batch.set(doc(db, LOC_COLLECTION, 'INFO_USAGE_STATS'), { data: usageDataString, updatedAt: new Date() }, { merge: true });
+            batchCount++;
+        }
+        
         if (batchCount > 0) await batch.commit();
         
-        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션이 갱신되었습니다.`;
+        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션 정보와 사용률이 갱신되었습니다.`;
         if (notFoundLocs.size > 0) {
             const notFoundArray = Array.from(notFoundLocs);
             resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.size}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundArray.join(', ')}]`;
@@ -468,10 +514,6 @@ async function updateDatabase(rows) {
 }
 
 window.onload = setupRealtimeListener;
-
-// =========================================================================
-// [안전장치] 요금 폭탄 방지용 새로고침(F5) 및 창 닫기 차단 로직
-// =========================================================================
 
 window.addEventListener('keydown', function(e) {
     if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
