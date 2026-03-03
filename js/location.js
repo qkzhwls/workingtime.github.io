@@ -20,13 +20,53 @@ onAuthStateChanged(auth, (user) => {
 
 const RESERVE_EXPIRE_MS = 1800000; 
 
-// [신규] 실시간 현재 데이터 기반 사용률 계산 함수
+// [신규] 팝업의 숫자를 클릭했을 때 메인 화면 필터를 적용하는 함수
+window.applyUsageFilter = function(zone, state) {
+    // 1. 구역(loc) 필터 설정
+    if (zone === 'all') {
+        filters.loc = [];
+    } else {
+        filters.loc = [zone];
+    }
+    
+    // 2. 사용/빈칸(code) 필터 설정
+    if (state === 'used') {
+        filters.code = 'not-empty';
+    } else if (state === 'empty') {
+        filters.code = 'empty';
+    } else {
+        filters.code = 'all';
+    }
+    
+    // 3. UI 버튼 불 들어오게 업데이트
+    updateLocPopupUI();
+    const btnLoc = document.getElementById('btn-filter-loc');
+    if (btnLoc) {
+        if (filters.loc.length === 0) btnLoc.classList.remove('active');
+        else btnLoc.classList.add('active');
+    }
+    
+    const btnCode = document.getElementById('btn-filter-code');
+    if (btnCode) {
+        if (filters.code === 'all') btnCode.classList.remove('active');
+        else btnCode.classList.add('active');
+    }
+    
+    // 4. 화면에 실제 적용하고 팝업 닫기
+    applyFiltersAndSort();
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+};
+
 window.calculateAndRenderUsage = function() {
     const popup = document.getElementById('usage-popup');
     if (!popup) return;
 
-    // 과거 시스템용 데이터 제외하고 실제 로케이션만 필터링
-    const locations = originalData.filter(d => d.id !== 'INFO_USAGE_STATS');
+    // [변경점] K구역 데이터는 계산에서 완전 제외
+    const locations = originalData.filter(d => {
+        if (d.id === 'INFO_USAGE_STATS') return false;
+        if (d.id.charAt(0).toUpperCase() === 'K') return false;
+        return true;
+    });
     
     let total = locations.length;
     if (total === 0) {
@@ -38,11 +78,9 @@ window.calculateAndRenderUsage = function() {
     let zoneStats = {};
 
     locations.forEach(loc => {
-        // 상품코드나 상품명이 존재하면 '사용 중(채워짐)'으로 간주합니다.
         const isUsed = (loc.code && loc.code.trim() !== '' && loc.code !== loc.id) || (loc.name && loc.name.trim() !== '');
         if (isUsed) used++;
 
-        // 로케이션 첫 글자를 '구역'으로 판별 (예: A-1-001 -> A구역)
         const zone = loc.id.charAt(0).toUpperCase();
         if (!zoneStats[zone]) {
             zoneStats[zone] = { total: 0, used: 0 };
@@ -53,10 +91,12 @@ window.calculateAndRenderUsage = function() {
 
     const usageRate = ((used / total) * 100).toFixed(1);
 
+    // [변경점] 사용중, 빈칸 숫자에 클릭 이벤트 추가
     let html = `
-        <div style="font-size:15px; font-weight:bold; margin-bottom:10px; color:var(--primary); text-align:center;">
+        <div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">
             📊 전체 창고 사용률: ${usageRate}%
         </div>
+        <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 표의 숫자를 클릭하면 해당 구역으로 필터링됩니다.</div>
         <table class="usage-table" style="width:100%;">
             <thead>
                 <tr>
@@ -71,13 +111,12 @@ window.calculateAndRenderUsage = function() {
                 <tr>
                     <td style="font-weight:bold; color:#d32f2f;">전체 합계</td>
                     <td style="font-weight:bold;">${total}</td>
-                    <td style="font-weight:bold; color:var(--primary);">${used}</td>
-                    <td style="font-weight:bold; color:#ff5252;">${total - used}</td>
+                    <td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')" title="전체 사용중 보기">${used}</td>
+                    <td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')" title="전체 빈칸 보기">${total - used}</td>
                     <td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td>
                 </tr>
     `;
 
-    // 구역별 통계 정렬 (★를 제일 위로)
     const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
     zones.forEach(z => {
         const zTotal = zoneStats[z].total;
@@ -89,8 +128,8 @@ window.calculateAndRenderUsage = function() {
             <tr>
                 <td><strong>${z}</strong> 구역</td>
                 <td>${zTotal}</td>
-                <td>${zUsed}</td>
-                <td>${zEmpty}</td>
+                <td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')" title="${z}구역 사용중 보기">${zUsed}</td>
+                <td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')" title="${z}구역 빈칸 보기">${zEmpty}</td>
                 <td>${zRate}%</td>
             </tr>
         `;
@@ -100,7 +139,6 @@ window.calculateAndRenderUsage = function() {
     popup.innerHTML = html;
 };
 
-// [신규] 사용률 버튼 클릭 시 팝업 열기/닫기
 window.toggleUsagePopup = function(e) {
     e.stopPropagation();
     const pop = document.getElementById('usage-popup');
@@ -112,7 +150,7 @@ window.toggleUsagePopup = function(e) {
     
     if (!isVisible) {
         pop.style.display = 'block';
-        window.calculateAndRenderUsage(); // 열릴 때마다 실시간 계산 실행
+        window.calculateAndRenderUsage();
     }
 };
 
@@ -124,7 +162,6 @@ function setupRealtimeListener() {
         
         originalData = [];
         snapshot.forEach(docSnap => {
-            // 구버전 사용률 데이터 무시
             if (docSnap.id === 'INFO_USAGE_STATS') return;
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
@@ -132,7 +169,6 @@ function setupRealtimeListener() {
         setupFilterPopups();
         applyFiltersAndSort();
         
-        // 데이터가 실시간으로 바뀔 때 만약 사용률 팝업이 켜져있다면 다시 계산해서 업데이트
         const pop = document.getElementById('usage-popup');
         if (pop && pop.style.display === 'block') {
             window.calculateAndRenderUsage();
@@ -248,7 +284,9 @@ function applyFiltersAndSort() {
         if (filters.dong !== 'all' && (item.dong || '').toString() !== filters.dong) return false;
         if (filters.pos !== 'all' && (item.pos || '').toString() !== filters.pos) return false;
         
-        const hasCode = item.code && item.code !== item.id && item.code.trim() !== "";
+        // [변경점] 사용률 계산 기준과 동일하게 상품코드나 상품명 둘 중 하나라도 있으면 '내용있음'으로 통일
+        const hasCode = (item.code && item.code !== item.id && item.code.trim() !== "") || (item.name && item.name.trim() !== "");
+        
         if (filters.code === 'empty' && hasCode) return false;
         if (filters.code === 'not-empty' && !hasCode) return false;
 
@@ -468,7 +506,6 @@ if (fileInput) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
             
-            // 더 이상 복잡하게 다른 시트를 찾을 필요 없이 첫 번째(메인) 데이터만 가볍게 파싱합니다.
             const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
             
             if (json.length > 0) {
@@ -479,7 +516,6 @@ if (fileInput) {
     });
 }
 
-// 추출 로직이 사라졌으므로 함수 구조를 다시 원래대로 가볍게 되돌립니다.
 async function updateDatabase(rows) {
     const totalRows = rows.length;
     
