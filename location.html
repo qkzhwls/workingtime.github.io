@@ -9,9 +9,23 @@
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
         
         .controls-header { margin: 15px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; }
-        .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; }
+        .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; align-items: center; }
         .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
         .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+        /* 사용률 버튼 및 팝업 스타일 */
+        .usage-container { position: relative; display: inline-block; margin-left: 10px; }
+        .btn-usage { padding: 8px 15px; background: #ff9800; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: default; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .usage-popup { 
+            display: none; position: absolute; top: 100%; left: 0; 
+            background: white; border: 1px solid #ccc; border-radius: 8px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); padding: 15px; z-index: 10000; 
+            width: max-content; margin-top: 5px; max-height: 70vh; overflow-y: auto;
+        }
+        .usage-container:hover .usage-popup { display: block; }
+        .usage-table { border-collapse: collapse; background: white; font-size: 12px; color: #333; }
+        .usage-table td { padding: 5px 10px; border: 1px solid #ddd; text-align: center; white-space: nowrap; }
+        .usage-table tr:nth-child(even) { background-color: #f9f9f9; }
 
         .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
         .upload-compact input { margin-left: 10px; font-size: 12px; }
@@ -143,7 +157,15 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchView('list')">데이터 리스트</button>
             <button class="tab-btn" onclick="switchView('map')">도면 보기</button>
+            
+            <div class="usage-container">
+                <button class="btn-usage">📊 사용률</button>
+                <div class="usage-popup" id="usage-popup">
+                    <div style="padding: 10px; color: #888;">엑셀을 업로드하면 사용률 데이터가 표시됩니다.</div>
+                </div>
+            </div>
         </div>
+        
         <div class="upload-compact">
             <strong>📄 엑셀 동기화(내용 업데이트):</strong> 
             <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
