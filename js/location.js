@@ -20,29 +20,101 @@ onAuthStateChanged(auth, (user) => {
 
 const RESERVE_EXPIRE_MS = 1800000; 
 
-// 사용률 팝업 렌더링 함수
-function renderUsagePopup(jsonString) {
+// [신규] 실시간 현재 데이터 기반 사용률 계산 함수
+window.calculateAndRenderUsage = function() {
     const popup = document.getElementById('usage-popup');
     if (!popup) return;
-    try {
-        const data = JSON.parse(jsonString);
-        let html = '<table class="usage-table">';
-        data.forEach(row => {
-            // 완전히 빈 줄은 건너뛰어 시각적으로 깔끔하게 유지
-            if (row.every(cell => !cell || cell.toString().trim() === '')) return;
-            
-            html += '<tr>';
-            row.forEach(cell => {
-                html += `<td>${cell || ''}</td>`;
-            });
-            html += '</tr>';
-        });
-        html += '</table>';
-        popup.innerHTML = html;
-    } catch(e) {
-        console.error("사용률 데이터 파싱 오류", e);
+
+    // 과거 시스템용 데이터 제외하고 실제 로케이션만 필터링
+    const locations = originalData.filter(d => d.id !== 'INFO_USAGE_STATS');
+    
+    let total = locations.length;
+    if (total === 0) {
+        popup.innerHTML = '<div style="padding: 10px;">데이터가 없습니다.</div>';
+        return;
     }
-}
+
+    let used = 0;
+    let zoneStats = {};
+
+    locations.forEach(loc => {
+        // 상품코드나 상품명이 존재하면 '사용 중(채워짐)'으로 간주합니다.
+        const isUsed = (loc.code && loc.code.trim() !== '' && loc.code !== loc.id) || (loc.name && loc.name.trim() !== '');
+        if (isUsed) used++;
+
+        // 로케이션 첫 글자를 '구역'으로 판별 (예: A-1-001 -> A구역)
+        const zone = loc.id.charAt(0).toUpperCase();
+        if (!zoneStats[zone]) {
+            zoneStats[zone] = { total: 0, used: 0 };
+        }
+        zoneStats[zone].total++;
+        if (isUsed) zoneStats[zone].used++;
+    });
+
+    const usageRate = ((used / total) * 100).toFixed(1);
+
+    let html = `
+        <div style="font-size:15px; font-weight:bold; margin-bottom:10px; color:var(--primary); text-align:center;">
+            📊 전체 창고 사용률: ${usageRate}%
+        </div>
+        <table class="usage-table" style="width:100%;">
+            <thead>
+                <tr>
+                    <th>구역명</th>
+                    <th>총 칸수</th>
+                    <th>사용중</th>
+                    <th>빈칸</th>
+                    <th>사용률</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="font-weight:bold; color:#d32f2f;">전체 합계</td>
+                    <td style="font-weight:bold;">${total}</td>
+                    <td style="font-weight:bold; color:var(--primary);">${used}</td>
+                    <td style="font-weight:bold; color:#ff5252;">${total - used}</td>
+                    <td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td>
+                </tr>
+    `;
+
+    // 구역별 통계 정렬 (★를 제일 위로)
+    const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
+    zones.forEach(z => {
+        const zTotal = zoneStats[z].total;
+        const zUsed = zoneStats[z].used;
+        const zEmpty = zTotal - zUsed;
+        const zRate = ((zUsed / zTotal) * 100).toFixed(1);
+
+        html += `
+            <tr>
+                <td><strong>${z}</strong> 구역</td>
+                <td>${zTotal}</td>
+                <td>${zUsed}</td>
+                <td>${zEmpty}</td>
+                <td>${zRate}%</td>
+            </tr>
+        `;
+    });
+
+    html += `</tbody></table>`;
+    popup.innerHTML = html;
+};
+
+// [신규] 사용률 버튼 클릭 시 팝업 열기/닫기
+window.toggleUsagePopup = function(e) {
+    e.stopPropagation();
+    const pop = document.getElementById('usage-popup');
+    const isVisible = pop.style.display === 'block';
+    
+    if (typeof window.closeAllPopups === 'function') {
+        window.closeAllPopups();
+    }
+    
+    if (!isVisible) {
+        pop.style.display = 'block';
+        window.calculateAndRenderUsage(); // 열릴 때마다 실시간 계산 실행
+    }
+};
 
 function setupRealtimeListener() {
     const q = collection(db, LOC_COLLECTION);
@@ -52,16 +124,19 @@ function setupRealtimeListener() {
         
         originalData = [];
         snapshot.forEach(docSnap => {
-            // 특별 식별자인 INFO_USAGE_STATS는 리스트에 넣지 않고 팝업만 업데이트합니다.
-            if (docSnap.id === 'INFO_USAGE_STATS') {
-                renderUsagePopup(docSnap.data().data);
-                return;
-            }
+            // 구버전 사용률 데이터 무시
+            if (docSnap.id === 'INFO_USAGE_STATS') return;
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
 
         setupFilterPopups();
         applyFiltersAndSort();
+        
+        // 데이터가 실시간으로 바뀔 때 만약 사용률 팝업이 켜져있다면 다시 계산해서 업데이트
+        const pop = document.getElementById('usage-popup');
+        if (pop && pop.style.display === 'block') {
+            window.calculateAndRenderUsage();
+        }
     }, (error) => {
         console.error("실시간 동기화 오류:", error);
     });
@@ -393,40 +468,20 @@ if (fileInput) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
             
-            // 1. 기존 데이터 시트 파싱
+            // 더 이상 복잡하게 다른 시트를 찾을 필요 없이 첫 번째(메인) 데이터만 가볍게 파싱합니다.
             const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
             
-            // 2. 사용률 시트 추출 로직 (J1:T39)
-            let usageDataString = null;
-            const usageSheetName = workbook.SheetNames.find(n => n.includes('사용률'));
-            
-            if (usageSheetName) {
-                const usageSheet = workbook.Sheets[usageSheetName];
-                const usageDataFull = XLSX.utils.sheet_to_json(usageSheet, { header: 1, defval: "" });
-                const extractedTable = [];
-                
-                // J열(index 9) 부터 T열(index 19) 까지 추출, 최대 39행
-                for (let i = 0; i < Math.min(39, usageDataFull.length); i++) {
-                    const row = usageDataFull[i] || [];
-                    const slicedRow = row.slice(9, 20);
-                    // 빈 칸 채우기 (11칸)
-                    while(slicedRow.length < 11) slicedRow.push("");
-                    extractedTable.push(slicedRow);
-                }
-                usageDataString = JSON.stringify(extractedTable);
-            }
-            
-            if (json.length > 0 || usageDataString) {
-                updateDatabase(json, usageDataString);
+            if (json.length > 0) {
+                updateDatabase(json);
             }
         };
         reader.readAsArrayBuffer(file);
     });
 }
 
-// updateDatabase 함수에 매개변수 추가 (usageDataString)
-async function updateDatabase(rows, usageDataString) {
-    const totalRows = rows ? rows.length : 0;
+// 추출 로직이 사라졌으므로 함수 구조를 다시 원래대로 가볍게 되돌립니다.
+async function updateDatabase(rows) {
+    const totalRows = rows.length;
     
     const tbody = document.getElementById('location-list-body');
     if (tbody) {
@@ -439,65 +494,56 @@ async function updateDatabase(rows, usageDataString) {
         let notFoundLocs = new Set(); 
         const validLocIds = new Set(originalData.map(d => d.id));
 
-        // 메인 데이터(로케이션)가 있을 경우에만 실행 (무적 방어막 로직 포함)
-        if (totalRows > 0) {
-            const hasDongColumn = ('동' in rows[0] || 'dong' in rows[0]);
-            const hasPosColumn = ('위치' in rows[0] || 'pos' in rows[0]);
-            const hasNameColumn = ('상품명' in rows[0]);
-            const hasStockColumn = ('정상재고' in rows[0]);
-            const hasOptionColumn = ('옵션' in rows[0]);
+        const hasDongColumn = ('동' in rows[0] || 'dong' in rows[0]);
+        const hasPosColumn = ('위치' in rows[0] || 'pos' in rows[0]);
+        const hasNameColumn = ('상품명' in rows[0]);
+        const hasStockColumn = ('정상재고' in rows[0]);
+        const hasOptionColumn = ('옵션' in rows[0]);
 
-            for (let i = 0; i < totalRows; i++) {
-                const row = rows[i];
-                const rawLoc = row['로케이션']?.toString().trim();
-                
-                if (rawLoc) {
-                    let cleanLocId = ''; let extractedCode = '';
-                    if (rawLoc.includes('(')) {
-                        cleanLocId = rawLoc.split('(')[0].trim();
-                        const afterParen = rawLoc.substring(rawLoc.indexOf('('));
-                        const sIndex = afterParen.indexOf('S');
-                        if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
-                    } else { cleanLocId = rawLoc; }
+        for (let i = 0; i < totalRows; i++) {
+            const row = rows[i];
+            const rawLoc = row['로케이션']?.toString().trim();
+            
+            if (rawLoc) {
+                let cleanLocId = ''; let extractedCode = '';
+                if (rawLoc.includes('(')) {
+                    cleanLocId = rawLoc.split('(')[0].trim();
+                    const afterParen = rawLoc.substring(rawLoc.indexOf('('));
+                    const sIndex = afterParen.indexOf('S');
+                    if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
+                } else { cleanLocId = rawLoc; }
 
-                    if (cleanLocId) {
-                        if (!validLocIds.has(cleanLocId)) {
-                            notFoundLocs.add(cleanLocId); 
-                        } else {
-                            const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
-                            const docRef = doc(db, LOC_COLLECTION, cleanLocId);
+                if (cleanLocId) {
+                    if (!validLocIds.has(cleanLocId)) {
+                        notFoundLocs.add(cleanLocId); 
+                    } else {
+                        const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
+                        const docRef = doc(db, LOC_COLLECTION, cleanLocId);
 
-                            let updateData = { 
-                                reserved: false, reservedAt: 0, reservedBy: '', 
-                                updatedAt: new Date()
-                            };
+                        let updateData = { 
+                            reserved: false, reservedAt: 0, reservedBy: '', 
+                            updatedAt: new Date()
+                        };
 
-                            if (finalCode) updateData.code = finalCode;
-                            if (hasNameColumn) updateData.name = row['상품명']?.toString().trim() || '';
-                            if (hasOptionColumn) updateData.option = row['옵션']?.toString().trim() || '';
-                            if (hasStockColumn) updateData.stock = row['정상재고']?.toString().trim() || '0';
-                            if (hasDongColumn) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
-                            if (hasPosColumn) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
+                        if (finalCode) updateData.code = finalCode;
+                        if (hasNameColumn) updateData.name = row['상품명']?.toString().trim() || '';
+                        if (hasOptionColumn) updateData.option = row['옵션']?.toString().trim() || '';
+                        if (hasStockColumn) updateData.stock = row['정상재고']?.toString().trim() || '0';
+                        if (hasDongColumn) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
+                        if (hasPosColumn) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
 
-                            batch.set(docRef, updateData, { merge: true });
+                        batch.set(docRef, updateData, { merge: true });
 
-                            updateCount++; batchCount++;
-                            if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
-                        }
+                        updateCount++; batchCount++;
+                        if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
                     }
                 }
             }
         }
         
-        // 사용률 데이터가 추출되었을 경우 배치에 추가
-        if (usageDataString) {
-            batch.set(doc(db, LOC_COLLECTION, 'INFO_USAGE_STATS'), { data: usageDataString, updatedAt: new Date() }, { merge: true });
-            batchCount++;
-        }
-        
         if (batchCount > 0) await batch.commit();
         
-        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션 정보와 사용률이 갱신되었습니다.`;
+        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션 정보가 갱신되었습니다.`;
         if (notFoundLocs.size > 0) {
             const notFoundArray = Array.from(notFoundLocs);
             resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.size}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundArray.join(', ')}]`;
