@@ -3,6 +3,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
+// ==========================================
+// [A 창고] 기존 로케이션/업무 관리용 프로젝트 (기본)
+// ==========================================
 export const firebaseConfig = {
     apiKey: "AIzaSyAguJOtoqoSipA-wXH3jSYX2yH1RX7tQQw",
     authDomain: "location-e2ff9.firebaseapp.com",
@@ -11,18 +14,39 @@ export const firebaseConfig = {
     messagingSenderId: "559399838918",
     appId: "1:559399838918:web:91c3bbf98adb92d2a863c7",
     measurementId: "G-RTBSE9SN1Q"
-  };
+};
+
+// ==========================================
+// [B 창고] 신규 추가 데이터(배송/입고/주차별)용 프로젝트
+// ==========================================
+export const firebaseConfig_B = {
+    apiKey: "AIzaSyBw1SRRlc3s3jfYGYVp6L7Hwte135i-XO0",
+    authDomain: "location-data-c374f.firebaseapp.com",
+    projectId: "location-data-c374f",
+    storageBucket: "location-data-c374f.firebasestorage.app",
+    messagingSenderId: "504128886505",
+    appId: "1:504128886505:web:29d685a1e386b51f7e8278",
+    measurementId: "G-KTKCH68ZMT"
+};
 
 const APP_ID = 'team-work-logger-v2';
-let db, auth;
+let db, auth, db2;
 
 export const initializeFirebase = () => {
     try {
+        // 1. A창고 문 열기 (기본 앱)
         const app = initializeApp(firebaseConfig);
         db = getFirestore(app);
         auth = getAuth(app);
-        console.log("Firebase initialized successfully.");
-        return { app, db, auth };
+        
+        // 2. B창고 문 열기 (이름표 "SecondaryApp" 부착)
+        const appB = initializeApp(firebaseConfig_B, "SecondaryApp");
+        db2 = getFirestore(appB);
+
+        console.log("Firebase initialized successfully (Dual Projects).");
+        
+        // A창고(db)와 B창고(db2)를 모두 내보냅니다.
+        return { app, db, auth, db2 };
     } catch (error) {
         console.error("Firebase 초기화 실패:", error);
         alert("Firebase 초기화에 실패했습니다. API 키를 확인하세요.");
@@ -172,7 +196,4 @@ function getDefaultConfig() {
              weekend: 4
         }
     };
-
 }
-
-
