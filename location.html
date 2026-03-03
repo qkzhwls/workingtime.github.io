@@ -13,18 +13,19 @@
         .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
         .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 
-        /* 사용률 버튼 및 팝업 스타일 */
+        /* 사용률 버튼 및 팝업 스타일 (hover 제거, click용으로 변경) */
         .usage-container { position: relative; display: inline-block; margin-left: 10px; }
-        .btn-usage { padding: 8px 15px; background: #ff9800; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: default; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .btn-usage { padding: 8px 15px; background: #ff9800; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
+        .btn-usage:hover { background: #e68a00; }
         .usage-popup { 
             display: none; position: absolute; top: 100%; left: 0; 
             background: white; border: 1px solid #ccc; border-radius: 8px; 
             box-shadow: 0 4px 15px rgba(0,0,0,0.3); padding: 15px; z-index: 10000; 
             width: max-content; margin-top: 5px; max-height: 70vh; overflow-y: auto;
         }
-        .usage-container:hover .usage-popup { display: block; }
-        .usage-table { border-collapse: collapse; background: white; font-size: 12px; color: #333; }
-        .usage-table td { padding: 5px 10px; border: 1px solid #ddd; text-align: center; white-space: nowrap; }
+        .usage-table { border-collapse: collapse; background: white; font-size: 13px; color: #333; text-align: center; }
+        .usage-table th { background: #f4f4f4; padding: 8px 12px; border: 1px solid #ddd; font-weight: bold; }
+        .usage-table td { padding: 8px 12px; border: 1px solid #ddd; }
         .usage-table tr:nth-child(even) { background-color: #f9f9f9; }
 
         .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
@@ -159,9 +160,9 @@
             <button class="tab-btn" onclick="switchView('map')">도면 보기</button>
             
             <div class="usage-container">
-                <button class="btn-usage">📊 사용률</button>
-                <div class="usage-popup" id="usage-popup">
-                    <div style="padding: 10px; color: #888;">엑셀을 업로드하면 사용률 데이터가 표시됩니다.</div>
+                <button class="btn-usage" onclick="toggleUsagePopup(event)">📊 사용률</button>
+                <div class="usage-popup" id="usage-popup" onclick="event.stopPropagation()">
+                    <div style="padding: 10px; color: #888;">사용률 계산 중...</div>
                 </div>
             </div>
         </div>
@@ -316,6 +317,8 @@
 
         window.closeAllPopups = function() {
             document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
+            const usagePop = document.getElementById('usage-popup');
+            if(usagePop) usagePop.style.display = 'none';
         }
         
         document.querySelectorAll('.filter-popup').forEach(p => {
