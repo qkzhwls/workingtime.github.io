@@ -1,18 +1,18 @@
 import { initializeFirebase } from './config.js';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const { db } = initializeFirebase();
-const auth = getAuth();
+// config.js에서 db(A창고), db2(B창고) 모두 가져오기
+const { db, auth, db2 } = initializeFirebase();
 const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
+let zikjinData = {}; // B창고 - 직진배송 데이터
+let weeklyData = {}; // B창고 - 주차별 데이터
 let sortConfig = { key: 'id', direction: 'asc' }; 
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
 
 let currentUserName = "비로그인 작업자";
-
-// [신규] 사용률 탭 및 2층 총 적재가능수량 기본값 설정
 window.currentUsageTab = '3F';
 window.capacity2F = 200000;
 
@@ -24,7 +24,60 @@ onAuthStateChanged(auth, (user) => {
 
 const RESERVE_EXPIRE_MS = 1800000; 
 
-// [신규] 2층 총 적재가능수량 변경 및 서버 저장 함수
+// [신규] B창고(직진배송/주차별) 실시간 수신 리스너
+function setupRealtimeListenerB() {
+    if (!db2) return;
+    
+    // 직진배송 데이터 구독
+    onSnapshot(collection(db2, 'ZikjinData'), (snapshot) => {
+        zikjinData = {};
+        snapshot.forEach(docSnap => { zikjinData[docSnap.id] = docSnap.data(); });
+        applyFiltersAndSort();
+    }, (error) => console.error("직진배송 동기화 오류:", error));
+
+    // 주차별 데이터 구독
+    onSnapshot(collection(db2, 'WeeklyData'), (snapshot) => {
+        weeklyData = {};
+        snapshot.forEach(docSnap => { weeklyData[docSnap.id] = docSnap.data(); });
+        applyFiltersAndSort();
+    }, (error) => console.error("주차별데이터 동기화 오류:", error));
+}
+
+// A창고(로케이션) 실시간 수신 리스너
+function setupRealtimeListenerA() {
+    const q = collection(db, LOC_COLLECTION);
+    
+    onSnapshot(q, (snapshot) => {
+        document.getElementById('firebase-guide').style.display = 'none';
+        
+        originalData = [];
+        snapshot.forEach(docSnap => {
+            if (docSnap.id === 'INFO_USAGE_STATS') return;
+            if (docSnap.id === 'INFO_CONFIG') {
+                if (docSnap.data().capacity2F) window.capacity2F = docSnap.data().capacity2F;
+                return;
+            }
+            originalData.push({ id: docSnap.id, ...docSnap.data() });
+        });
+
+        setupFilterPopups();
+        applyFiltersAndSort();
+        
+        const pop = document.getElementById('usage-popup');
+        if (pop && pop.style.display === 'block') {
+            window.calculateAndRenderUsage();
+        }
+    }, (error) => {
+        console.error("A창고 실시간 동기화 오류:", error);
+    });
+}
+
+// 창고 2개 동시 구독 시작
+window.onload = () => {
+    setupRealtimeListenerA();
+    setupRealtimeListenerB();
+};
+
 window.saveCapacity2F = async function() {
     const input = document.getElementById('input-cap-2f');
     if (!input) return;
@@ -41,7 +94,6 @@ window.saveCapacity2F = async function() {
     }
 };
 
-// [신규] 사용률 팝업 내 탭 전환 함수
 window.switchUsageTab = function(tab) {
     window.currentUsageTab = tab;
     window.calculateAndRenderUsage();
@@ -49,9 +101,7 @@ window.switchUsageTab = function(tab) {
 
 window.applyUsageFilter = function(zone, state) {
     filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
-    
     if (zone !== 'all') filters.loc = [zone];
-    
     if (state === 'used') filters.code = 'not-empty';
     else if (state === 'empty') filters.code = 'empty';
     
@@ -87,7 +137,6 @@ window.calculateAndRenderUsage = function() {
 
     if (window.currentUsageTab === '3F') {
         const locations = originalData.filter(d => d.id.charAt(0).toUpperCase() !== 'K');
-        
         let total = locations.length;
         if (total === 0) {
             html += '<div style="padding: 10px;">데이터가 없습니다.</div>';
@@ -103,9 +152,7 @@ window.calculateAndRenderUsage = function() {
             if (isUsed) used++;
 
             const zone = loc.id.charAt(0).toUpperCase();
-            if (!zoneStats[zone]) {
-                zoneStats[zone] = { total: 0, used: 0 };
-            }
+            if (!zoneStats[zone]) { zoneStats[zone] = { total: 0, used: 0 }; }
             zoneStats[zone].total++;
             if (isUsed) zoneStats[zone].used++;
         });
@@ -119,20 +166,14 @@ window.calculateAndRenderUsage = function() {
             <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 표의 숫자를 클릭하면 기존 필터를 해제하고 해당 구역만 보여줍니다.</div>
             <table class="usage-table" style="width:100%;">
                 <thead>
-                    <tr>
-                        <th>구역명</th>
-                        <th>총 칸수</th>
-                        <th>사용중</th>
-                        <th>빈칸</th>
-                        <th>사용률</th>
-                    </tr>
+                    <tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr>
                 </thead>
                 <tbody>
                     <tr>
                         <td style="font-weight:bold; color:#d32f2f;">전체 합계</td>
                         <td style="font-weight:bold;">${total}</td>
-                        <td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')" title="전체 사용중 보기">${used}</td>
-                        <td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')" title="전체 빈칸 보기">${total - used}</td>
+                        <td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')">${used}</td>
+                        <td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')">${total - used}</td>
                         <td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td>
                     </tr>
         `;
@@ -148,22 +189,17 @@ window.calculateAndRenderUsage = function() {
                 <tr>
                     <td><strong>${z}</strong> 구역</td>
                     <td>${zTotal}</td>
-                    <td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')" title="${z}구역 사용중 보기">${zUsed}</td>
-                    <td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')" title="${z}구역 빈칸 보기">${zEmpty}</td>
+                    <td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')">${zUsed}</td>
+                    <td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')">${zEmpty}</td>
                     <td>${zRate}%</td>
                 </tr>
             `;
         });
-
         html += `</tbody></table>`;
         
     } else {
-        // [2층 통계]
         let sum2F = 0;
-        originalData.forEach(loc => {
-            sum2F += Number(loc.stock2f || 0);
-        });
-
+        originalData.forEach(loc => { sum2F += Number(loc.stock2f || 0); });
         let rate2F = ((sum2F / window.capacity2F) * 100).toFixed(1);
 
         html += `
@@ -190,7 +226,6 @@ window.calculateAndRenderUsage = function() {
             <div style="margin-top:15px; font-size:11px; color:#888; text-align:center;">※ 엑셀 파일의 '2층창고재고' 열을 기준으로 자동 합산됩니다.</div>
         `;
     }
-
     popup.innerHTML = html;
 };
 
@@ -198,45 +233,12 @@ window.toggleUsagePopup = function(e) {
     e.stopPropagation();
     const pop = document.getElementById('usage-popup');
     const isVisible = pop.style.display === 'block';
-    
-    if (typeof window.closeAllPopups === 'function') {
-        window.closeAllPopups();
-    }
-    
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
     if (!isVisible) {
         pop.style.display = 'block';
         window.calculateAndRenderUsage();
     }
 };
-
-function setupRealtimeListener() {
-    const q = collection(db, LOC_COLLECTION);
-    
-    onSnapshot(q, (snapshot) => {
-        document.getElementById('firebase-guide').style.display = 'none';
-        
-        originalData = [];
-        snapshot.forEach(docSnap => {
-            if (docSnap.id === 'INFO_USAGE_STATS') return;
-            // [신규] 2층 기준 설정값을 파이어베이스에서 실시간으로 받아옵니다.
-            if (docSnap.id === 'INFO_CONFIG') {
-                if (docSnap.data().capacity2F) window.capacity2F = docSnap.data().capacity2F;
-                return;
-            }
-            originalData.push({ id: docSnap.id, ...docSnap.data() });
-        });
-
-        setupFilterPopups();
-        applyFiltersAndSort();
-        
-        const pop = document.getElementById('usage-popup');
-        if (pop && pop.style.display === 'block') {
-            window.calculateAndRenderUsage();
-        }
-    }, (error) => {
-        console.error("실시간 동기화 오류:", error);
-    });
-}
 
 function getSortButtonsHtml(key) {
     const isAsc = sortConfig.key === key && sortConfig.direction === 'asc';
@@ -258,15 +260,11 @@ function updateLocPopupUI() {
 
     let locHtml = getSortButtonsHtml('id');
     const isAllSelected = filters.loc.length === 0;
-    locHtml += `<div class="filter-option ${isAllSelected ? 'selected' : ''}" onclick="toggleLocFilter('all')">
-        ${isAllSelected ? '✔️ ' : ''}전체보기
-    </div>`;
+    locHtml += `<div class="filter-option ${isAllSelected ? 'selected' : ''}" onclick="toggleLocFilter('all')">${isAllSelected ? '✔️ ' : ''}전체보기</div>`;
     
     prefixes.forEach(p => {
         const isSelected = filters.loc.includes(p);
-        locHtml += `<div class="filter-option ${isSelected ? 'selected' : ''}" onclick="toggleLocFilter('${p}')">
-            ${isSelected ? '✔️ ' : ''}${p} 구역
-        </div>`;
+        locHtml += `<div class="filter-option ${isSelected ? 'selected' : ''}" onclick="toggleLocFilter('${p}')">${isSelected ? '✔️ ' : ''}${p} 구역</div>`;
     });
     locPop.innerHTML = locHtml;
 }
@@ -333,7 +331,6 @@ window.toggleLocFilter = (val) => {
 window.setFilter = (type, value) => {
     filters[type] = value;
     setupFilterPopups(); 
-    
     const btnId = `btn-filter-${type}`;
     const btn = document.getElementById(btnId);
     if (btn) {
@@ -351,7 +348,6 @@ function applyFiltersAndSort() {
         if (filters.pos !== 'all' && (item.pos || '').toString() !== filters.pos) return false;
         
         const hasCode = (item.code && item.code !== item.id && item.code.trim() !== "") || (item.name && item.name.trim() !== "");
-        
         if (filters.code === 'empty' && hasCode) return false;
         if (filters.code === 'not-empty' && !hasCode) return false;
 
@@ -385,13 +381,10 @@ function renderTable(data) {
 
     data.forEach(loc => {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
-        
         let isReserved = loc.reserved === true && (now - (loc.reservedAt || 0) <= RESERVE_EXPIRE_MS);
-        
         let rowStyle = isReserved ? 'background-color: #fffde7;' : '';
         let reserverName = loc.reservedBy || '누군가';
         let badgeHtml = isReserved ? `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>` : '';
-        
         let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
 
         html += `
@@ -407,7 +400,7 @@ function renderTable(data) {
                 <td style="color:#3d5afe; font-weight:bold;">${displayCode}</td>
                 <td style="text-align:left;">${loc.name || ''}</td>
                 <td style="text-align:left; font-size:12px;">${loc.option || ''}</td>
-                <td>${loc.stock || '0'}</td>
+                <td style="font-weight:bold;">${loc.stock || '0'}</td>
             </tr>
         `;
     });
@@ -421,9 +414,191 @@ function renderTable(data) {
     }
 }
 
+// ==========================================
+// [신규] B창고: 직진배송 엑셀 업로드 처리
+// ==========================================
+const fileInputZikjin = document.getElementById('excel-upload-b-zikjin');
+if (fileInputZikjin) {
+    fileInputZikjin.addEventListener('change', function(e) {
+        handleExcelUpload(e.target.files[0], 'ZikjinData', document.getElementById('excel-upload-b-zikjin'));
+    });
+}
+
+// ==========================================
+// [신규] B창고: 주차별 엑셀 업로드 처리
+// ==========================================
+const fileInputWeekly = document.getElementById('excel-upload-b-weekly');
+if (fileInputWeekly) {
+    fileInputWeekly.addEventListener('change', function(e) {
+        handleExcelUpload(e.target.files[0], 'WeeklyData', document.getElementById('excel-upload-b-weekly'));
+    });
+}
+
+// 공통 B창고 업로드 함수
+async function handleExcelUpload(file, collectionName, inputElement) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, {type: 'array'});
+        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+        if (json.length > 0) updateDatabaseB(json, collectionName, inputElement);
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// B창고 데이터 덮어쓰기 로직
+async function updateDatabaseB(rows, collectionName, inputElement) {
+    const tbody = document.getElementById('location-list-body');
+    const label = collectionName === 'ZikjinData' ? '직진배송' : '주차별';
+    
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#d32f2f;">${label} 데이터를 갱신 중입니다. 잠시만 기다려주세요...</td></tr>`;
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    try {
+        const querySnapshot = await getDocs(collection(db2, collectionName));
+        const docsArray = querySnapshot.docs;
+        for (let i = 0; i < docsArray.length; i += 400) {
+            const delBatch = writeBatch(db2);
+            docsArray.slice(i, i + 400).forEach(d => delBatch.delete(d.ref));
+            await delBatch.commit();
+        }
+
+        let batch = writeBatch(db2); 
+        let updateCount = 0; let batchCount = 0;
+
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const code = row['상품코드']?.toString().trim();
+            if (!code) continue;
+
+            const docRef = doc(db2, collectionName, code);
+            batch.set(docRef, { ...row, updatedAt: new Date() }, { merge: true });
+
+            updateCount++; batchCount++;
+            if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db2); batchCount = 0; }
+        }
+        
+        if (batchCount > 0) await batch.commit();
+        
+        alert(`✅ B창고 [${label}] 업데이트 완료!\n총 ${updateCount}건의 데이터가 반영되었습니다.`);
+        if(inputElement) inputElement.value = ''; 
+        
+    } catch (error) {
+        console.error(`${label} 업데이트 실패:`, error);
+        alert(`${label} 업데이트 중 오류가 발생했습니다.`);
+        if(inputElement) inputElement.value = ''; 
+    }
+}
+
+
+// ==========================================
+// 기존 A창고(로케이션) 엑셀 업로드 및 처리
+// ==========================================
+const fileInputA = document.getElementById('excel-upload-a');
+if (fileInputA) {
+    fileInputA.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            
+            const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+            
+            if (json.length > 0) {
+                updateDatabaseA(json);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+async function updateDatabaseA(rows) {
+    const totalRows = rows.length;
+    
+    const tbody = document.getElementById('location-list-body');
+    if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe;">A창고 데이터를 검증 및 동기화 중입니다...</td></tr>`;
+    }
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    try {
+        let batch = writeBatch(db); let updateCount = 0; let batchCount = 0;
+        let notFoundLocs = new Set(); 
+        const validLocIds = new Set(originalData.map(d => d.id));
+
+        const hasDongColumn = ('동' in rows[0] || 'dong' in rows[0]);
+        const hasPosColumn = ('위치' in rows[0] || 'pos' in rows[0]);
+        const hasNameColumn = ('상품명' in rows[0]);
+        const hasStockColumn = ('정상재고' in rows[0]);
+        const hasOptionColumn = ('옵션' in rows[0]);
+        const hasStock2fColumn = ('2층창고재고' in rows[0]);
+
+        for (let i = 0; i < totalRows; i++) {
+            const row = rows[i];
+            const rawLoc = row['로케이션']?.toString().trim();
+            
+            if (rawLoc) {
+                let cleanLocId = ''; let extractedCode = '';
+                if (rawLoc.includes('(')) {
+                    cleanLocId = rawLoc.split('(')[0].trim();
+                    const afterParen = rawLoc.substring(rawLoc.indexOf('('));
+                    const sIndex = afterParen.indexOf('S');
+                    if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
+                } else { cleanLocId = rawLoc; }
+
+                if (cleanLocId) {
+                    if (!validLocIds.has(cleanLocId)) {
+                        notFoundLocs.add(cleanLocId); 
+                    } else {
+                        const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
+                        const docRef = doc(db, LOC_COLLECTION, cleanLocId);
+
+                        let updateData = { 
+                            reserved: false, reservedAt: 0, reservedBy: '', 
+                            updatedAt: new Date()
+                        };
+
+                        if (finalCode) updateData.code = finalCode;
+                        if (hasNameColumn) updateData.name = row['상품명']?.toString().trim() || '';
+                        if (hasOptionColumn) updateData.option = row['옵션']?.toString().trim() || '';
+                        if (hasStockColumn) updateData.stock = row['정상재고']?.toString().trim() || '0';
+                        if (hasDongColumn) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
+                        if (hasPosColumn) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
+                        if (hasStock2fColumn) updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
+
+                        batch.set(docRef, updateData, { merge: true });
+
+                        updateCount++; batchCount++;
+                        if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
+                    }
+                }
+            }
+        }
+        
+        if (batchCount > 0) await batch.commit();
+        
+        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션 정보가 갱신되었습니다.`;
+        if (notFoundLocs.size > 0) {
+            const notFoundArray = Array.from(notFoundLocs);
+            resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.size}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundArray.join(', ')}]`;
+        }
+        
+        alert(resultMessage);
+        document.getElementById('excel-upload-a').value = ''; 
+        
+    } catch (error) {
+        console.error("실패:", error);
+        alert("업데이트 중 오류가 발생했습니다.");
+        document.getElementById('excel-upload-a').value = ''; 
+    }
+}
+
+// 부가 기능 (예약 복사, 모달 등 유지)
 window.copyLocationToClipboard = async (event, locId) => {
     event.stopPropagation(); 
-    
     try {
         const docRef = doc(db, LOC_COLLECTION, locId);
         const snap = await getDoc(docRef);
@@ -461,17 +636,9 @@ window.copyLocationToClipboard = async (event, locId) => {
             }
 
             await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
-            
-            navigator.clipboard.writeText(locId).then(() => {
-                showToast(`[${locId}] 복사 및 예약 완료!`);
-            }).catch(err => {
-                alert('복사 기능을 지원하지 않는 브라우저입니다.');
-            });
+            navigator.clipboard.writeText(locId).then(() => { showToast(`[${locId}] 복사 및 예약 완료!`); });
         }
-    } catch (error) {
-        console.error('복사/예약 실패:', error);
-        alert('예약 처리 중 오류가 발생했습니다. (파이어베이스 한도 초과 등)');
-    }
+    } catch (error) { alert('예약 처리 오류'); }
 };
 
 function showToast(message) {
@@ -491,22 +658,18 @@ window.toggleAllCheckboxes = (source) => {
 window.addSingleLocation = async () => {
     const inputObj = document.getElementById('new-loc-id');
     const newId = inputObj.value.trim().toUpperCase();
-
     if (!newId) return alert("추가할 로케이션 번호를 입력해주세요.");
 
     try {
         const docRef = doc(db, LOC_COLLECTION, newId);
         const docSnap = await getDoc(docRef);
-
         if (docSnap.exists()) return alert(`[${newId}] 로케이션은 이미 존재합니다.`);
 
         await setDoc(docRef, {
             dong: '', pos: '', code: '', name: '', option: '', stock: '0', 
             reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date()
         });
-
-        inputObj.value = ''; 
-        alert(`✅ [${newId}] 로케이션 추가 완료`); 
+        inputObj.value = ''; alert(`✅ [${newId}] 로케이션 추가 완료`); 
     } catch (error) { console.error("추가 실패:", error); }
 };
 
@@ -560,112 +723,6 @@ window.saveManualEdit = async () => {
         document.getElementById('edit-modal').style.display = 'none'; 
     } catch (error) { console.error("수정 실패:", error); }
 };
-
-const fileInput = document.getElementById('excel-upload');
-if (fileInput) {
-    fileInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, {type: 'array'});
-            
-            const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-            
-            if (json.length > 0) {
-                updateDatabase(json);
-            }
-        };
-        reader.readAsArrayBuffer(file);
-    });
-}
-
-async function updateDatabase(rows) {
-    const totalRows = rows.length;
-    
-    const tbody = document.getElementById('location-list-body');
-    if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 검증 및 동기화 중입니다... 잠시만 기다려주세요.</td></tr>`;
-    }
-    await new Promise(resolve => setTimeout(resolve, 50));
-
-    try {
-        let batch = writeBatch(db); let updateCount = 0; let batchCount = 0;
-        let notFoundLocs = new Set(); 
-        const validLocIds = new Set(originalData.map(d => d.id));
-
-        const hasDongColumn = ('동' in rows[0] || 'dong' in rows[0]);
-        const hasPosColumn = ('위치' in rows[0] || 'pos' in rows[0]);
-        const hasNameColumn = ('상품명' in rows[0]);
-        const hasStockColumn = ('정상재고' in rows[0]);
-        const hasOptionColumn = ('옵션' in rows[0]);
-        // [신규] 엑셀에서 2층창고재고 열이 있는지 확인
-        const hasStock2fColumn = ('2층창고재고' in rows[0]);
-
-        for (let i = 0; i < totalRows; i++) {
-            const row = rows[i];
-            const rawLoc = row['로케이션']?.toString().trim();
-            
-            if (rawLoc) {
-                let cleanLocId = ''; let extractedCode = '';
-                if (rawLoc.includes('(')) {
-                    cleanLocId = rawLoc.split('(')[0].trim();
-                    const afterParen = rawLoc.substring(rawLoc.indexOf('('));
-                    const sIndex = afterParen.indexOf('S');
-                    if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
-                } else { cleanLocId = rawLoc; }
-
-                if (cleanLocId) {
-                    if (!validLocIds.has(cleanLocId)) {
-                        notFoundLocs.add(cleanLocId); 
-                    } else {
-                        const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
-                        const docRef = doc(db, LOC_COLLECTION, cleanLocId);
-
-                        let updateData = { 
-                            reserved: false, reservedAt: 0, reservedBy: '', 
-                            updatedAt: new Date()
-                        };
-
-                        if (finalCode) updateData.code = finalCode;
-                        if (hasNameColumn) updateData.name = row['상품명']?.toString().trim() || '';
-                        if (hasOptionColumn) updateData.option = row['옵션']?.toString().trim() || '';
-                        if (hasStockColumn) updateData.stock = row['정상재고']?.toString().trim() || '0';
-                        if (hasDongColumn) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
-                        if (hasPosColumn) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
-                        
-                        // [신규] 2층창고재고 데이터가 있다면 파이어베이스에 추가 저장
-                        if (hasStock2fColumn) updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
-
-                        batch.set(docRef, updateData, { merge: true });
-
-                        updateCount++; batchCount++;
-                        if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
-                    }
-                }
-            }
-        }
-        
-        if (batchCount > 0) await batch.commit();
-        
-        let resultMessage = `✅ 완료! 총 ${updateCount}개의 로케이션 정보가 갱신되었습니다.`;
-        if (notFoundLocs.size > 0) {
-            const notFoundArray = Array.from(notFoundLocs);
-            resultMessage += `\n\n⚠️ 다음 ${notFoundLocs.size}개의 로케이션은 시스템에 존재하지 않아 제외되었습니다:\n[${notFoundArray.join(', ')}]`;
-        }
-        
-        alert(resultMessage);
-        document.getElementById('excel-upload').value = ''; 
-        
-    } catch (error) {
-        console.error("실패:", error);
-        alert("업데이트 중 오류가 발생했습니다.");
-        document.getElementById('excel-upload').value = ''; 
-    }
-}
-
-window.onload = setupRealtimeListener;
 
 window.addEventListener('keydown', function(e) {
     if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
