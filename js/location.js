@@ -456,3 +456,23 @@ async function updateDatabase(rows) {
 
 // 기존 loadAndRender() 대신 실시간 리스너를 시작합니다.
 window.onload = setupRealtimeListener;
+
+
+// =========================================================================
+// [추가된 안전장치] 요금 폭탄 방지용 새로고침(F5) 및 창 닫기 차단 로직
+// =========================================================================
+
+// 1. 키보드 새로고침(F5, Ctrl+R) 완전 차단
+window.addEventListener('keydown', function(e) {
+    if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
+        e.preventDefault(); // 브라우저의 기본 동작(새로고침) 강제 취소
+        alert("🚨 실시간 동기화 모드 작동 중입니다.\n과도한 요금 발생을 막기 위해 새로고침을 차단했습니다.");
+    }
+});
+
+// 2. 마우스로 새로고침(🔄) 버튼을 누르거나 창 닫기(X) 시도 시 경고 팝업 띄우기
+window.addEventListener('beforeunload', function(e) {
+    // 브라우저 표준에 따라 "사이트에서 나가시겠습니까?" 경고창을 띄우는 코드
+    e.preventDefault();
+    e.returnValue = ''; 
+});
