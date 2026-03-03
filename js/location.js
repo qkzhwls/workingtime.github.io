@@ -271,7 +271,6 @@ window.copyLocationToClipboard = async (event, locId) => {
             }).catch(err => {
                 alert('복사 기능을 지원하지 않는 브라우저입니다.');
             });
-            // onSnapshot이 작동 중이므로 loadAndRender나 applyFiltersAndSort를 호출할 필요가 없습니다. 자동으로 화면이 바뀝니다.
         }
     } catch (error) {
         console.error('복사/예약 실패:', error);
@@ -388,7 +387,6 @@ async function updateDatabase(rows) {
 
     const tbody = document.getElementById('location-list-body');
     if (tbody) {
-        // onSnapshot이 작동하여 실시간으로 덮어쓸 수 있지만, 업로드 시작 안내용으로 삽입합니다.
         tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe;">데이터 검증 및 동기화 중입니다... 잠시만 기다려주세요.</td></tr>`;
     }
     await new Promise(resolve => setTimeout(resolve, 50));
@@ -397,6 +395,10 @@ async function updateDatabase(rows) {
         let batch = writeBatch(db); let updateCount = 0; let batchCount = 0;
         let notFoundLocs = new Set(); 
         const validLocIds = new Set(originalData.map(d => d.id));
+
+        // [핵심 로직 추가] 엑셀 첫 번째 줄을 읽어 '동'과 '위치' 헤더(칸)가 있는지 확인합니다.
+        const hasDongColumn = ('동' in rows[0] || 'dong' in rows[0]);
+        const hasPosColumn = ('위치' in rows[0] || 'pos' in rows[0]);
 
         for (let i = 0; i < totalRows; i++) {
             const row = rows[i];
@@ -418,16 +420,27 @@ async function updateDatabase(rows) {
                         const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                         const docRef = doc(db, LOC_COLLECTION, cleanLocId);
 
-                        batch.set(docRef, {
-                            dong: row['동']?.toString().trim() || row['dong']?.toString().trim() || '',
-                            pos: row['위치']?.toString().trim() || row['pos']?.toString().trim() || '',
+                        // 업데이트할 뼈대 객체 (동, 위치는 일단 뺍니다)
+                        let updateData = {
                             code: finalCode,
                             name: row['상품명']?.toString().trim() || '',
                             option: row['옵션']?.toString().trim() || '',
                             stock: row['정상재고']?.toString().trim() || '0',
                             reserved: false, reservedAt: 0, reservedBy: '', 
                             updatedAt: new Date()
-                        }, { merge: true });
+                        };
+
+                        // 엑셀 파일에 '동' 헤더가 있을 때만 업데이트 객체에 추가합니다.
+                        if (hasDongColumn) {
+                            updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
+                        }
+                        // 엑셀 파일에 '위치' 헤더가 있을 때만 업데이트 객체에 추가합니다.
+                        if (hasPosColumn) {
+                            updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
+                        }
+
+                        // merge: true 설정으로 인해 updateData에 없는 항목(동, 위치)은 파이어베이스 서버에서 덮어쓰이지 않고 기존 값이 유지됩니다!
+                        batch.set(docRef, updateData, { merge: true });
 
                         updateCount++; batchCount++;
                         if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
@@ -454,25 +467,20 @@ async function updateDatabase(rows) {
     }
 }
 
-// 기존 loadAndRender() 대신 실시간 리스너를 시작합니다.
 window.onload = setupRealtimeListener;
 
-
 // =========================================================================
-// [추가된 안전장치] 요금 폭탄 방지용 새로고침(F5) 및 창 닫기 차단 로직
+// [안전장치] 요금 폭탄 방지용 새로고침(F5) 및 창 닫기 차단 로직
 // =========================================================================
 
-// 1. 키보드 새로고침(F5, Ctrl+R) 완전 차단
 window.addEventListener('keydown', function(e) {
     if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) {
-        e.preventDefault(); // 브라우저의 기본 동작(새로고침) 강제 취소
+        e.preventDefault(); 
         alert("🚨 실시간 동기화 모드 작동 중입니다.\n과도한 요금 발생을 막기 위해 새로고침을 차단했습니다.");
     }
 });
 
-// 2. 마우스로 새로고침(🔄) 버튼을 누르거나 창 닫기(X) 시도 시 경고 팝업 띄우기
 window.addEventListener('beforeunload', function(e) {
-    // 브라우저 표준에 따라 "사이트에서 나가시겠습니까?" 경고창을 띄우는 코드
     e.preventDefault();
     e.returnValue = ''; 
 });
