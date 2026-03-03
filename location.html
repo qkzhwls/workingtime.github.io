@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3층 로케이션 관리 시스템</title>
+    <title>3층 로케이션 관리 시스템 (듀얼 DB)</title>
     <style>
         :root { --primary: #3d5afe; --bg: #f8f9fa; --card: #ffffff; }
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
@@ -13,7 +13,6 @@
         .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
         .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 
-        /* 사용률 버튼 및 팝업 스타일 */
         .usage-container { position: relative; display: inline-block; margin-left: 10px; }
         .btn-usage { padding: 8px 15px; background: #ff9800; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
         .btn-usage:hover { background: #e68a00; }
@@ -28,8 +27,11 @@
         .usage-table td { padding: 8px 12px; border: 1px solid #ddd; }
         .usage-table tr:nth-child(even) { background-color: #f9f9f9; }
 
-        .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 14px; }
-        .upload-compact input { margin-left: 10px; font-size: 12px; }
+        /* 업로드 영역 스타일 (3개로 분할) */
+        .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 13px; gap: 10px; }
+        .upload-section { display: flex; align-items: center; gap: 5px; }
+        .upload-divider { width: 1px; height: 20px; background: #ccc; margin: 0 5px; }
+        .upload-compact input { font-size: 11px; width: 150px; }
 
         .action-bar { margin: 0 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; background: white; padding: 10px 15px; border-radius: 8px; border: 1px solid #ddd; }
         .action-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 150px; }
@@ -57,7 +59,7 @@
         }
         
         .list-table tbody tr { cursor: pointer; transition: background 0.2s; }
-        .list-table tbody tr:hover { background-color: #f0f4ff !important; }
+        .list-table tbody tr:hover { filter: brightness(0.95); }
         
         .list-table th { 
             background: #f4f4f4; 
@@ -83,7 +85,6 @@
         .checkbox-cell { width: 40px; }
         .loc-check { cursor: pointer; width: 16px; height: 16px; }
 
-        /* 수동 수정 모달 스타일 */
         .modal-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;
@@ -103,7 +104,6 @@
 
         #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
 
-        /* 로케이션 복사 스타일 및 토스트 알림 */
         .loc-copy-cell {
             cursor: copy;
             font-weight: bold;
@@ -168,8 +168,20 @@
         </div>
         
         <div class="upload-compact">
-            <strong>📄 엑셀 동기화(내용 업데이트):</strong> 
-            <input type="file" id="excel-upload" accept=".xls,.xlsx,.csv">
+            <div class="upload-section">
+                <strong style="color:var(--primary);">A창고(로케이션):</strong> 
+                <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv" title="기존 로케이션 엑셀 업로드">
+            </div>
+            <div class="upload-divider"></div>
+            <div class="upload-section">
+                <strong style="color:#d32f2f;">직진배송데이터:</strong> 
+                <input type="file" id="excel-upload-b-zikjin" accept=".xls,.xlsx,.csv" title="직진배송 엑셀 업로드">
+            </div>
+            <div class="upload-divider"></div>
+            <div class="upload-section">
+                <strong style="color:#4caf50;">주차별데이터:</strong> 
+                <input type="file" id="excel-upload-b-weekly" accept=".xls,.xlsx,.csv" title="주차별데이터 엑셀 업로드">
+            </div>
         </div>
     </div>
 
