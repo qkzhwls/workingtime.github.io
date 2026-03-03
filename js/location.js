@@ -20,39 +20,35 @@ onAuthStateChanged(auth, (user) => {
 
 const RESERVE_EXPIRE_MS = 1800000; 
 
-// [신규] 팝업의 숫자를 클릭했을 때 메인 화면 필터를 적용하는 함수
+// [업그레이드] 사용률 팝업 숫자 클릭 시, 다른 필터를 초기화하고 선택한 것만 완벽히 적용
 window.applyUsageFilter = function(zone, state) {
-    // 1. 구역(loc) 필터 설정
-    if (zone === 'all') {
-        filters.loc = [];
-    } else {
-        filters.loc = [zone];
-    }
+    // 1. 기존 필터 완벽하게 초기화 (중복 방지)
+    filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
     
-    // 2. 사용/빈칸(code) 필터 설정
-    if (state === 'used') {
-        filters.code = 'not-empty';
-    } else if (state === 'empty') {
-        filters.code = 'empty';
-    } else {
-        filters.code = 'all';
-    }
+    // 2. 구역(loc) 및 상태(code) 필터 설정
+    if (zone !== 'all') filters.loc = [zone];
     
-    // 3. UI 버튼 불 들어오게 업데이트
-    updateLocPopupUI();
-    const btnLoc = document.getElementById('btn-filter-loc');
-    if (btnLoc) {
-        if (filters.loc.length === 0) btnLoc.classList.remove('active');
-        else btnLoc.classList.add('active');
-    }
+    if (state === 'used') filters.code = 'not-empty';
+    else if (state === 'empty') filters.code = 'empty';
     
-    const btnCode = document.getElementById('btn-filter-code');
-    if (btnCode) {
-        if (filters.code === 'all') btnCode.classList.remove('active');
-        else btnCode.classList.add('active');
-    }
+    // 3. UI 체크마크(✔️) 및 하이라이트 즉각 반영
+    setupFilterPopups();
     
-    // 4. 화면에 실제 적용하고 팝업 닫기
+    // 4. 테이블 헤더 상단 버튼(깔때기 모양)의 파란색 불 켜고 끄기
+    ['loc', 'code', 'dong', 'pos', 'stock'].forEach(id => {
+        const btn = document.getElementById('btn-filter-' + id);
+        if (btn) {
+            if (id === 'loc') {
+                if (filters.loc.length === 0) btn.classList.remove('active');
+                else btn.classList.add('active');
+            } else {
+                if (filters[id] === 'all') btn.classList.remove('active');
+                else btn.classList.add('active');
+            }
+        }
+    });
+    
+    // 5. 화면 테이블에 실제 적용 및 팝업 닫기
     applyFiltersAndSort();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
 };
@@ -61,12 +57,8 @@ window.calculateAndRenderUsage = function() {
     const popup = document.getElementById('usage-popup');
     if (!popup) return;
 
-    // [변경점] K구역 데이터는 계산에서 완전 제외
-    const locations = originalData.filter(d => {
-        if (d.id === 'INFO_USAGE_STATS') return false;
-        if (d.id.charAt(0).toUpperCase() === 'K') return false;
-        return true;
-    });
+    // K구역 완전 제외 (사용률 계산에서만 제외되며, 데이터 목록에는 그대로 뜹니다)
+    const locations = originalData.filter(d => d.id.charAt(0).toUpperCase() !== 'K');
     
     let total = locations.length;
     if (total === 0) {
@@ -91,12 +83,11 @@ window.calculateAndRenderUsage = function() {
 
     const usageRate = ((used / total) * 100).toFixed(1);
 
-    // [변경점] 사용중, 빈칸 숫자에 클릭 이벤트 추가
     let html = `
         <div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">
             📊 전체 창고 사용률: ${usageRate}%
         </div>
-        <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 표의 숫자를 클릭하면 해당 구역으로 필터링됩니다.</div>
+        <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 표의 숫자를 클릭하면 기존 필터를 해제하고 해당 구역만 보여줍니다.</div>
         <table class="usage-table" style="width:100%;">
             <thead>
                 <tr>
@@ -178,10 +169,13 @@ function setupRealtimeListener() {
     });
 }
 
+// [업그레이드] 정렬 팝업에도 ✔️ 마크 표시
 function getSortButtonsHtml(key) {
+    const isAsc = sortConfig.key === key && sortConfig.direction === 'asc';
+    const isDesc = sortConfig.key === key && sortConfig.direction === 'desc';
     return `
-        <div class="filter-option" onclick="executeSort('${key}', 'asc')">⬆️ 오름차순 정렬</div>
-        <div class="filter-option" onclick="executeSort('${key}', 'desc')">⬇️ 내림차순 정렬</div>
+        <div class="filter-option ${isAsc ? 'selected' : ''}" onclick="executeSort('${key}', 'asc')">${isAsc ? '✔️ ' : ''}⬆️ 오름차순 정렬</div>
+        <div class="filter-option ${isDesc ? 'selected' : ''}" onclick="executeSort('${key}', 'desc')">${isDesc ? '✔️ ' : ''}⬇️ 내림차순 정렬</div>
         <div class="filter-divider"></div>
     `;
 }
@@ -209,44 +203,47 @@ function updateLocPopupUI() {
     locPop.innerHTML = locHtml;
 }
 
+// [업그레이드] 모든 필터 팝업에 현재 선택된 항목 ✔️ 마크 표시 (로케이션과 동일하게 작동)
 function setupFilterPopups() {
     const codePop = document.getElementById('pop-code');
     const namePop = document.getElementById('pop-name');
     const optionPop = document.getElementById('pop-option');
     const stockPop = document.getElementById('pop-stock');
+    const dongPop = document.getElementById('pop-dong');
+    const posPop = document.getElementById('pop-pos');
 
     updateLocPopupUI();
 
     let codeHtml = getSortButtonsHtml('code');
-    codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'all\')">전체보기</div>';
-    codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'empty\')">빈칸</div>';
-    codeHtml += '<div class="filter-option" onclick="setFilter(\'code\', \'not-empty\')">내용있음</div>';
+    codeHtml += `<div class="filter-option ${filters.code === 'all' ? 'selected' : ''}" onclick="setFilter('code', 'all')">${filters.code === 'all' ? '✔️ ' : ''}전체보기</div>`;
+    codeHtml += `<div class="filter-option ${filters.code === 'empty' ? 'selected' : ''}" onclick="setFilter('code', 'empty')">${filters.code === 'empty' ? '✔️ ' : ''}빈칸</div>`;
+    codeHtml += `<div class="filter-option ${filters.code === 'not-empty' ? 'selected' : ''}" onclick="setFilter('code', 'not-empty')">${filters.code === 'not-empty' ? '✔️ ' : ''}내용있음</div>`;
     if(codePop) codePop.innerHTML = codeHtml;
 
     if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
     if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
 
     const dongs = [...new Set(originalData.map(d => (d.dong || '').toString()))].filter(Boolean).sort();
-    let dongHtml = getSortButtonsHtml('dong') + `<div class="filter-option" onclick="setFilter('dong', 'all')">전체보기</div>`;
-    dongs.forEach(d => { dongHtml += `<div class="filter-option" onclick="setFilter('dong', '${d}')">${d}</div>`; });
-    if(document.getElementById('pop-dong')) document.getElementById('pop-dong').innerHTML = dongHtml;
+    let dongHtml = getSortButtonsHtml('dong') + `<div class="filter-option ${filters.dong === 'all' ? 'selected' : ''}" onclick="setFilter('dong', 'all')">${filters.dong === 'all' ? '✔️ ' : ''}전체보기</div>`;
+    dongs.forEach(d => { dongHtml += `<div class="filter-option ${filters.dong === d ? 'selected' : ''}" onclick="setFilter('dong', '${d}')">${filters.dong === d ? '✔️ ' : ''}${d}</div>`; });
+    if(dongPop) dongPop.innerHTML = dongHtml;
 
     const poses = [...new Set(originalData.map(d => (d.pos || '').toString()))].filter(Boolean).sort();
-    let posHtml = getSortButtonsHtml('pos') + `<div class="filter-option" onclick="setFilter('pos', 'all')">전체보기</div>`;
-    poses.forEach(p => { posHtml += `<div class="filter-option" onclick="setFilter('pos', '${p}')">${p}</div>`; });
-    if(document.getElementById('pop-pos')) document.getElementById('pop-pos').innerHTML = posHtml;
+    let posHtml = getSortButtonsHtml('pos') + `<div class="filter-option ${filters.pos === 'all' ? 'selected' : ''}" onclick="setFilter('pos', 'all')">${filters.pos === 'all' ? '✔️ ' : ''}전체보기</div>`;
+    poses.forEach(p => { posHtml += `<div class="filter-option ${filters.pos === p ? 'selected' : ''}" onclick="setFilter('pos', '${p}')">${filters.pos === p ? '✔️ ' : ''}${p}</div>`; });
+    if(posPop) posPop.innerHTML = posHtml;
 
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
-    let stockHtml = getSortButtonsHtml('stock');
-    stockHtml += `<div class="filter-option" onclick="setFilter(\'stock\', \'all\')">전체보기</div>`;
+    let stockHtml = getSortButtonsHtml('stock') + `<div class="filter-option ${filters.stock === 'all' ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${filters.stock === 'all' ? '✔️ ' : ''}전체보기</div>`;
     stocks.forEach(s => {
-        stockHtml += `<div class="filter-option" onclick="setFilter('stock', '${s}')">${s}</div>`;
+        stockHtml += `<div class="filter-option ${filters.stock === s ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${filters.stock === s ? '✔️ ' : ''}${s}</div>`;
     });
     if(stockPop) stockPop.innerHTML = stockHtml;
 }
 
 window.executeSort = (key, direction) => {
     sortConfig = { key: key, direction: direction };
+    setupFilterPopups(); // 정렬을 바꿨을 때도 팝업의 ✔️ 표시 업데이트
     applyFiltersAndSort();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
 };
@@ -257,7 +254,7 @@ window.toggleLocFilter = (val) => {
         if (filters.loc.includes(val)) filters.loc = filters.loc.filter(v => v !== val);
         else filters.loc.push(val);
     }
-    updateLocPopupUI();
+    setupFilterPopups(); // UI 전체 동기화
     const btn = document.getElementById('btn-filter-loc');
     if (btn) {
         if (filters.loc.length === 0) btn.classList.remove('active');
@@ -268,6 +265,8 @@ window.toggleLocFilter = (val) => {
 
 window.setFilter = (type, value) => {
     filters[type] = value;
+    setupFilterPopups(); // 다른 필터들을 눌렀을 때도 ✔️ 표시가 즉각 반영되도록
+    
     const btnId = `btn-filter-${type}`;
     const btn = document.getElementById(btnId);
     if (btn) {
@@ -284,7 +283,7 @@ function applyFiltersAndSort() {
         if (filters.dong !== 'all' && (item.dong || '').toString() !== filters.dong) return false;
         if (filters.pos !== 'all' && (item.pos || '').toString() !== filters.pos) return false;
         
-        // [변경점] 사용률 계산 기준과 동일하게 상품코드나 상품명 둘 중 하나라도 있으면 '내용있음'으로 통일
+        // 사용률 계산 기준과 100% 동일하게 통일 (상품코드나 상품명 중 하나라도 있으면 사용중)
         const hasCode = (item.code && item.code !== item.id && item.code.trim() !== "") || (item.name && item.name.trim() !== "");
         
         if (filters.code === 'empty' && hasCode) return false;
