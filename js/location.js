@@ -12,6 +12,10 @@ let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
 
 let currentUserName = "비로그인 작업자";
 
+// [신규] 사용률 탭 및 2층 총 적재가능수량 기본값 설정
+window.currentUsageTab = '3F';
+window.capacity2F = 200000;
+
 onAuthStateChanged(auth, (user) => {
     if (user) {
         currentUserName = user.displayName || user.email.split('@')[0];
@@ -20,21 +24,39 @@ onAuthStateChanged(auth, (user) => {
 
 const RESERVE_EXPIRE_MS = 1800000; 
 
-// [업그레이드] 사용률 팝업 숫자 클릭 시, 다른 필터를 초기화하고 선택한 것만 완벽히 적용
+// [신규] 2층 총 적재가능수량 변경 및 서버 저장 함수
+window.saveCapacity2F = async function() {
+    const input = document.getElementById('input-cap-2f');
+    if (!input) return;
+    
+    const newVal = parseInt(input.value.replace(/,/g, ''), 10);
+    if (isNaN(newVal) || newVal <= 0) return alert("올바른 수량을 입력해주세요.");
+    
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { capacity2F: newVal }, { merge: true });
+        alert(`2층 기준 수량이 ${newVal.toLocaleString()}장으로 변경되었습니다.`);
+    } catch(e) {
+        console.error("수량 변경 실패:", e);
+        alert("수량 변경 중 오류가 발생했습니다.");
+    }
+};
+
+// [신규] 사용률 팝업 내 탭 전환 함수
+window.switchUsageTab = function(tab) {
+    window.currentUsageTab = tab;
+    window.calculateAndRenderUsage();
+};
+
 window.applyUsageFilter = function(zone, state) {
-    // 1. 기존 필터 완벽하게 초기화 (중복 방지)
     filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
     
-    // 2. 구역(loc) 및 상태(code) 필터 설정
     if (zone !== 'all') filters.loc = [zone];
     
     if (state === 'used') filters.code = 'not-empty';
     else if (state === 'empty') filters.code = 'empty';
     
-    // 3. UI 체크마크(✔️) 및 하이라이트 즉각 반영
     setupFilterPopups();
     
-    // 4. 테이블 헤더 상단 버튼(깔때기 모양)의 파란색 불 켜고 끄기
     ['loc', 'code', 'dong', 'pos', 'stock'].forEach(id => {
         const btn = document.getElementById('btn-filter-' + id);
         if (btn) {
@@ -48,7 +70,6 @@ window.applyUsageFilter = function(zone, state) {
         }
     });
     
-    // 5. 화면 테이블에 실제 적용 및 팝업 닫기
     applyFiltersAndSort();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
 };
@@ -57,76 +78,119 @@ window.calculateAndRenderUsage = function() {
     const popup = document.getElementById('usage-popup');
     if (!popup) return;
 
-    // K구역 완전 제외 (사용률 계산에서만 제외되며, 데이터 목록에는 그대로 뜹니다)
-    const locations = originalData.filter(d => d.id.charAt(0).toUpperCase() !== 'K');
-    
-    let total = locations.length;
-    if (total === 0) {
-        popup.innerHTML = '<div style="padding: 10px;">데이터가 없습니다.</div>';
-        return;
-    }
-
-    let used = 0;
-    let zoneStats = {};
-
-    locations.forEach(loc => {
-        const isUsed = (loc.code && loc.code.trim() !== '' && loc.code !== loc.id) || (loc.name && loc.name.trim() !== '');
-        if (isUsed) used++;
-
-        const zone = loc.id.charAt(0).toUpperCase();
-        if (!zoneStats[zone]) {
-            zoneStats[zone] = { total: 0, used: 0 };
-        }
-        zoneStats[zone].total++;
-        if (isUsed) zoneStats[zone].used++;
-    });
-
-    const usageRate = ((used / total) * 100).toFixed(1);
-
     let html = `
-        <div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">
-            📊 전체 창고 사용률: ${usageRate}%
+        <div style="display:flex; gap:10px; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
+            <button onclick="switchUsageTab('3F')" style="flex:1; padding:8px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; background:${window.currentUsageTab === '3F' ? 'var(--primary)' : '#eee'}; color:${window.currentUsageTab === '3F' ? 'white' : '#555'}">3층 로케이션</button>
+            <button onclick="switchUsageTab('2F')" style="flex:1; padding:8px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; background:${window.currentUsageTab === '2F' ? 'var(--primary)' : '#eee'}; color:${window.currentUsageTab === '2F' ? 'white' : '#555'}">2층 창고재고</button>
         </div>
-        <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 표의 숫자를 클릭하면 기존 필터를 해제하고 해당 구역만 보여줍니다.</div>
-        <table class="usage-table" style="width:100%;">
-            <thead>
-                <tr>
-                    <th>구역명</th>
-                    <th>총 칸수</th>
-                    <th>사용중</th>
-                    <th>빈칸</th>
-                    <th>사용률</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td style="font-weight:bold; color:#d32f2f;">전체 합계</td>
-                    <td style="font-weight:bold;">${total}</td>
-                    <td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')" title="전체 사용중 보기">${used}</td>
-                    <td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')" title="전체 빈칸 보기">${total - used}</td>
-                    <td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td>
-                </tr>
     `;
 
-    const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
-    zones.forEach(z => {
-        const zTotal = zoneStats[z].total;
-        const zUsed = zoneStats[z].used;
-        const zEmpty = zTotal - zUsed;
-        const zRate = ((zUsed / zTotal) * 100).toFixed(1);
+    if (window.currentUsageTab === '3F') {
+        const locations = originalData.filter(d => d.id.charAt(0).toUpperCase() !== 'K');
+        
+        let total = locations.length;
+        if (total === 0) {
+            html += '<div style="padding: 10px;">데이터가 없습니다.</div>';
+            popup.innerHTML = html;
+            return;
+        }
+
+        let used = 0;
+        let zoneStats = {};
+
+        locations.forEach(loc => {
+            const isUsed = (loc.code && loc.code.trim() !== '' && loc.code !== loc.id) || (loc.name && loc.name.trim() !== '');
+            if (isUsed) used++;
+
+            const zone = loc.id.charAt(0).toUpperCase();
+            if (!zoneStats[zone]) {
+                zoneStats[zone] = { total: 0, used: 0 };
+            }
+            zoneStats[zone].total++;
+            if (isUsed) zoneStats[zone].used++;
+        });
+
+        const usageRate = ((used / total) * 100).toFixed(1);
 
         html += `
-            <tr>
-                <td><strong>${z}</strong> 구역</td>
-                <td>${zTotal}</td>
-                <td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')" title="${z}구역 사용중 보기">${zUsed}</td>
-                <td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')" title="${z}구역 빈칸 보기">${zEmpty}</td>
-                <td>${zRate}%</td>
-            </tr>
+            <div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">
+                📊 3층 전체 사용률: ${usageRate}%
+            </div>
+            <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 표의 숫자를 클릭하면 기존 필터를 해제하고 해당 구역만 보여줍니다.</div>
+            <table class="usage-table" style="width:100%;">
+                <thead>
+                    <tr>
+                        <th>구역명</th>
+                        <th>총 칸수</th>
+                        <th>사용중</th>
+                        <th>빈칸</th>
+                        <th>사용률</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="font-weight:bold; color:#d32f2f;">전체 합계</td>
+                        <td style="font-weight:bold;">${total}</td>
+                        <td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')" title="전체 사용중 보기">${used}</td>
+                        <td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')" title="전체 빈칸 보기">${total - used}</td>
+                        <td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td>
+                    </tr>
         `;
-    });
 
-    html += `</tbody></table>`;
+        const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
+        zones.forEach(z => {
+            const zTotal = zoneStats[z].total;
+            const zUsed = zoneStats[z].used;
+            const zEmpty = zTotal - zUsed;
+            const zRate = ((zUsed / zTotal) * 100).toFixed(1);
+
+            html += `
+                <tr>
+                    <td><strong>${z}</strong> 구역</td>
+                    <td>${zTotal}</td>
+                    <td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')" title="${z}구역 사용중 보기">${zUsed}</td>
+                    <td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')" title="${z}구역 빈칸 보기">${zEmpty}</td>
+                    <td>${zRate}%</td>
+                </tr>
+            `;
+        });
+
+        html += `</tbody></table>`;
+        
+    } else {
+        // [2층 통계]
+        let sum2F = 0;
+        originalData.forEach(loc => {
+            sum2F += Number(loc.stock2f || 0);
+        });
+
+        let rate2F = ((sum2F / window.capacity2F) * 100).toFixed(1);
+
+        html += `
+            <div style="font-size:15px; font-weight:bold; margin-bottom:15px; color:var(--primary); text-align:center;">
+                🏢 2층 전체 창고 사용률: ${rate2F}%
+            </div>
+            <table class="usage-table" style="width:100%;">
+                <tr>
+                    <th style="background:#eef1ff; width: 40%;">총 적재가능수량</th>
+                    <td style="text-align: right;">
+                        <input type="number" id="input-cap-2f" value="${window.capacity2F}" style="width:80px; padding:3px; text-align:right; font-size:13px; font-weight:bold;"> 장
+                        <button onclick="saveCapacity2F()" style="padding:4px 8px; margin-left:5px; font-size:11px; background:var(--primary); color:white; border:none; border-radius:3px; cursor:pointer;">기준변경</button>
+                    </td>
+                </tr>
+                <tr>
+                    <th style="background:#eef1ff;">현재 적재수량</th>
+                    <td style="font-weight:bold; color:var(--primary); text-align: right;">${sum2F.toLocaleString()} 장</td>
+                </tr>
+                <tr>
+                    <th style="background:#eef1ff;">남은 수량</th>
+                    <td style="font-weight:bold; color:#ff5252; text-align: right;">${(window.capacity2F - sum2F).toLocaleString()} 장</td>
+                </tr>
+            </table>
+            <div style="margin-top:15px; font-size:11px; color:#888; text-align:center;">※ 엑셀 파일의 '2층창고재고' 열을 기준으로 자동 합산됩니다.</div>
+        `;
+    }
+
     popup.innerHTML = html;
 };
 
@@ -154,6 +218,11 @@ function setupRealtimeListener() {
         originalData = [];
         snapshot.forEach(docSnap => {
             if (docSnap.id === 'INFO_USAGE_STATS') return;
+            // [신규] 2층 기준 설정값을 파이어베이스에서 실시간으로 받아옵니다.
+            if (docSnap.id === 'INFO_CONFIG') {
+                if (docSnap.data().capacity2F) window.capacity2F = docSnap.data().capacity2F;
+                return;
+            }
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
 
@@ -169,7 +238,6 @@ function setupRealtimeListener() {
     });
 }
 
-// [업그레이드] 정렬 팝업에도 ✔️ 마크 표시
 function getSortButtonsHtml(key) {
     const isAsc = sortConfig.key === key && sortConfig.direction === 'asc';
     const isDesc = sortConfig.key === key && sortConfig.direction === 'desc';
@@ -203,7 +271,6 @@ function updateLocPopupUI() {
     locPop.innerHTML = locHtml;
 }
 
-// [업그레이드] 모든 필터 팝업에 현재 선택된 항목 ✔️ 마크 표시 (로케이션과 동일하게 작동)
 function setupFilterPopups() {
     const codePop = document.getElementById('pop-code');
     const namePop = document.getElementById('pop-name');
@@ -243,7 +310,7 @@ function setupFilterPopups() {
 
 window.executeSort = (key, direction) => {
     sortConfig = { key: key, direction: direction };
-    setupFilterPopups(); // 정렬을 바꿨을 때도 팝업의 ✔️ 표시 업데이트
+    setupFilterPopups(); 
     applyFiltersAndSort();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
 };
@@ -254,7 +321,7 @@ window.toggleLocFilter = (val) => {
         if (filters.loc.includes(val)) filters.loc = filters.loc.filter(v => v !== val);
         else filters.loc.push(val);
     }
-    setupFilterPopups(); // UI 전체 동기화
+    setupFilterPopups(); 
     const btn = document.getElementById('btn-filter-loc');
     if (btn) {
         if (filters.loc.length === 0) btn.classList.remove('active');
@@ -265,7 +332,7 @@ window.toggleLocFilter = (val) => {
 
 window.setFilter = (type, value) => {
     filters[type] = value;
-    setupFilterPopups(); // 다른 필터들을 눌렀을 때도 ✔️ 표시가 즉각 반영되도록
+    setupFilterPopups(); 
     
     const btnId = `btn-filter-${type}`;
     const btn = document.getElementById(btnId);
@@ -283,7 +350,6 @@ function applyFiltersAndSort() {
         if (filters.dong !== 'all' && (item.dong || '').toString() !== filters.dong) return false;
         if (filters.pos !== 'all' && (item.pos || '').toString() !== filters.pos) return false;
         
-        // 사용률 계산 기준과 100% 동일하게 통일 (상품코드나 상품명 중 하나라도 있으면 사용중)
         const hasCode = (item.code && item.code !== item.id && item.code.trim() !== "") || (item.name && item.name.trim() !== "");
         
         if (filters.code === 'empty' && hasCode) return false;
@@ -534,6 +600,8 @@ async function updateDatabase(rows) {
         const hasNameColumn = ('상품명' in rows[0]);
         const hasStockColumn = ('정상재고' in rows[0]);
         const hasOptionColumn = ('옵션' in rows[0]);
+        // [신규] 엑셀에서 2층창고재고 열이 있는지 확인
+        const hasStock2fColumn = ('2층창고재고' in rows[0]);
 
         for (let i = 0; i < totalRows; i++) {
             const row = rows[i];
@@ -566,6 +634,9 @@ async function updateDatabase(rows) {
                         if (hasStockColumn) updateData.stock = row['정상재고']?.toString().trim() || '0';
                         if (hasDongColumn) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
                         if (hasPosColumn) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
+                        
+                        // [신규] 2층창고재고 데이터가 있다면 파이어베이스에 추가 저장
+                        if (hasStock2fColumn) updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
 
                         batch.set(docRef, updateData, { merge: true });
 
