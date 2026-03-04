@@ -128,7 +128,7 @@ function renderTableHeader() {
     window.visibleColumns.forEach(col => {
         if (col === 'std_dong') { html += createTh('dong', '동', 80, true); popupHtml += `<div id="pop-dong" class="filter-popup"></div>`; }
         else if (col === 'std_pos') { html += createTh('pos', '위치', 80, true); popupHtml += `<div id="pop-pos" class="filter-popup"></div>`; }
-        else if (col === 'std_id') { html += createTh('id', '로케이션', 150, true); popupHtml += `<div id="pop-loc" class="filter-popup"></div>`; }
+        else if (col === 'std_id') { html += createTh('id', '로케이션', 150, true); popupHtml += `<div id="pop-id" class="filter-popup"></div>`; } // 수정완료: pop-loc -> pop-id로 이름 일치
         else if (col === 'std_code') { html += createTh('code', '상품코드', 150, true); popupHtml += `<div id="pop-code" class="filter-popup"></div>`; }
         else if (col === 'std_name') { html += createTh('name', '상품명', 'auto', true); popupHtml += `<div id="pop-name" class="filter-popup"></div>`; }
         else if (col === 'std_option') { html += createTh('option', '옵션', 180, true); popupHtml += `<div id="pop-option" class="filter-popup"></div>`; }
@@ -525,7 +525,7 @@ function getSortButtonsHtml(key) {
 }
 
 function updateLocPopupUI() {
-    const locPop = document.getElementById('pop-loc');
+    const locPop = document.getElementById('pop-id'); // 수정됨: pop-loc -> pop-id
     if (!locPop) return;
     let prefixSet = new Set(originalData.map(d => d.id.charAt(0))); prefixSet.add('★');
     const prefixes = [...prefixSet].sort((a, b) => (a === '★' ? -1 : (b === '★' ? 1 : a.localeCompare(b))));
@@ -538,7 +538,7 @@ function updateLocPopupUI() {
 
 // 화면 필터 상태 재설정 (새로고침시 파란색 표시 유지)
 function updateFilterButtonStates() {
-    const btnId = document.getElementById('btn-filter-id'); // 기존 'loc' 오타 수정
+    const btnId = document.getElementById('btn-filter-id'); // 수정됨
     if (btnId) {
         if (filters.loc.length === 0) btnId.classList.remove('active');
         else btnId.classList.add('active');
