@@ -20,7 +20,7 @@ window.currentUsageTab = '3F';
 window.capacity2F = 200000;
 window.sheetUrl = ''; 
 
-// [신규] 동적 컬럼 관리를 위한 변수 선언
+// 동적 컬럼 관리를 위한 변수 선언
 window.visibleColumns = ['std_dong', 'std_pos', 'std_id', 'std_code', 'std_name', 'std_option', 'std_stock'];
 window.excelHeaders = []; 
 
@@ -91,7 +91,6 @@ function setupRealtimeListenerA() {
                 const conf = docSnap.data();
                 if (conf.capacity2F) window.capacity2F = conf.capacity2F;
                 if (conf.sheetUrl) window.sheetUrl = conf.sheetUrl;
-                // [신규] 동적 헤더 설정 동기화
                 if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
                 if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
                 return;
@@ -99,8 +98,8 @@ function setupRealtimeListenerA() {
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
         
-        renderTableHeader(); // 테이블 헤더 동적 생성
-        applyFiltersAndSort(); // 리스트 출력
+        renderTableHeader(); 
+        applyFiltersAndSort(); 
         
         const pop = document.getElementById('usage-popup');
         if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
@@ -112,7 +111,7 @@ window.onload = () => {
     setupRealtimeListenerB();
 };
 
-// [신규] 동적 테이블 헤더 생성 로직
+// 동적 테이블 헤더 생성 로직
 function renderTableHeader() {
     const theadTr = document.getElementById('dynamic-thead-tr');
     const popupContainer = document.getElementById('dynamic-popups');
@@ -121,7 +120,6 @@ function renderTableHeader() {
     let html = `<th class="checkbox-cell"><input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)"></th>`;
     let popupHtml = '';
     
-    // 표준 컬럼 필터는 기존 팝업 div를 재활용
     window.visibleColumns.forEach(col => {
         if (col === 'std_dong') { html += createTh('dong', '동', 80, true); popupHtml += `<div id="pop-dong" class="filter-popup"></div>`; }
         else if (col === 'std_pos') { html += createTh('pos', '위치', 80, true); popupHtml += `<div id="pop-pos" class="filter-popup"></div>`; }
@@ -132,7 +130,7 @@ function renderTableHeader() {
         else if (col === 'std_stock') { html += createTh('stock', '정상재고', 130, true); popupHtml += `<div id="pop-stock" class="filter-popup"></div>`; }
         else if (col.startsWith('cus_')) {
             const label = col.replace('cus_', '');
-            html += createTh(col, label, 120, false); // 커스텀 열은 필터 미지원(단순표시)
+            html += createTh(col, label, 120, false); 
         }
     });
     
@@ -150,7 +148,7 @@ function createTh(key, label, width, hasFilter) {
 }
 
 
-// [신규] 환경설정 모달 제어 로직 (헤더 선택)
+// 환경설정 모달 제어 로직
 window.openSettingsModal = (e) => {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -158,7 +156,6 @@ window.openSettingsModal = (e) => {
     const container = document.getElementById('setting-headers-container');
     let html = '';
     
-    // 1. 고정 표준 컬럼
     const stdCols = [
         { id: 'std_dong', label: '동' }, { id: 'std_pos', label: '위치' }, { id: 'std_id', label: '로케이션(ID)' },
         { id: 'std_code', label: '상품코드' }, { id: 'std_name', label: '상품명' }, { id: 'std_option', label: '옵션' }, { id: 'std_stock', label: '정상재고' }
@@ -169,7 +166,6 @@ window.openSettingsModal = (e) => {
         html += `<label style="display:flex; align-items:center; gap:5px; width: 45%;"><input type="checkbox" class="chk-header" value="${col.id}" ${isChecked}> ${col.label}</label>`;
     });
     
-    // 2. 엑셀 파일에서 읽어온 커스텀 컬럼
     window.excelHeaders.forEach(header => {
         const colId = 'cus_' + header;
         const isChecked = window.visibleColumns.includes(colId) ? 'checked' : '';
@@ -195,7 +191,7 @@ window.saveHeaderSettings = async () => {
 };
 
 
-// 💡 스마트 로케이션 추천 (핵심 알고리즘)
+// 스마트 로케이션 추천 알고리즘
 window.showRecommendation = function() {
     window.showLoading("💡 상품 점수를 계산하고 최적의 로케이션을 매칭 중입니다...");
 
@@ -352,7 +348,7 @@ window.calculateAndRenderUsage = function() {
         
         let used = 0; let zoneStats = {};
         
-        // [신규] 당일지정수량 로직 (오늘 00시 00분부터의 예약만 카운트)
+        // [수정] 당일지정수량 로직: 엑셀 최신화로 자물쇠가 풀려도 assignedAt 기록으로 카운트 유지
         let todayReservedCount = 0;
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -361,7 +357,10 @@ window.calculateAndRenderUsage = function() {
             const isUsed = (loc.code && loc.code.trim() !== '' && loc.code !== loc.id) || (loc.name && loc.name.trim() !== '');
             if (isUsed) used++;
             
-            if (loc.reserved && loc.reservedAt >= todayStart) todayReservedCount++;
+            // 예약되었거나, 오늘 예약(클릭)된 기록(assignedAt)이 있으면 당일 카운트 포함
+            if ((loc.assignedAt && loc.assignedAt >= todayStart) || (loc.reserved && loc.reservedAt >= todayStart)) {
+                todayReservedCount++;
+            }
 
             const zone = loc.id.charAt(0).toUpperCase();
             if (!zoneStats[zone]) { zoneStats[zone] = { total: 0, used: 0 }; }
@@ -371,7 +370,6 @@ window.calculateAndRenderUsage = function() {
 
         const usageRate = ((used / total) * 100).toFixed(1);
         
-        // [신규] 상단 당일지정/선지정 수량 패널 추가
         html += `
             <div style="display:flex; justify-content: space-around; background: #eef1ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #c5cae9;">
                 <div style="text-align:center;">
@@ -479,7 +477,6 @@ function applyFiltersAndSort() {
     renderTable(filtered);
 }
 
-// [신규] 동적 헤더에 맞춰 내용(td) 렌더링
 function renderTable(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
@@ -633,7 +630,6 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     }
 }
 
-// [수정] 엑셀 추가 헤더를 감지하여 저장하고 데이터를 통째로(rawData) 저장하는 로직
 async function updateDatabaseA(rows) {
     const totalRows = rows.length;
     try {
@@ -671,7 +667,9 @@ async function updateDatabaseA(rows) {
                         const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                         const docRef = doc(db, LOC_COLLECTION, cleanLocId);
 
+                        // [수정] 엑셀 업데이트 시 기존 assignedAt(당일지정기록)을 파괴하지 않고 유지하도록 변경
                         let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: row };
+                        
                         if (finalCode) updateData.code = finalCode;
                         updateData.name = row['상품명']?.toString().trim() || '';
                         updateData.option = row['옵션']?.toString().trim() || '';
@@ -698,6 +696,7 @@ async function updateDatabaseA(rows) {
     finally { document.getElementById('excel-upload-a').value = ''; window.hideLoading(); }
 }
 
+// [수정] 예약 및 해제 시 assignedAt 타이머 동작 로직 개선
 window.copyLocationToClipboard = async (event, locId) => {
     event.stopPropagation(); 
     try {
@@ -709,7 +708,8 @@ window.copyLocationToClipboard = async (event, locId) => {
 
             if (isReserved && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n예약을 해제(취소)하시겠습니까?`)) {
-                    await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '' }, { merge: true });
+                    // [핵심] 예약 취소 시 assignedAt을 0으로 되돌려 당일 카운트에서 뺌
+                    await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '', assignedAt: 0 }, { merge: true });
                     showToast(`[${locId}] 예약 해제 완료`);
                 } else { navigator.clipboard.writeText(locId); showToast(`[${locId}] 내 예약 복사 완료!`); }
                 return;
@@ -719,13 +719,15 @@ window.copyLocationToClipboard = async (event, locId) => {
                 const rTime = new Date(data.reservedAt || 0);
                 const timeStr = `${rTime.getHours()}:${String(rTime.getMinutes()).padStart(2, '0')}`;
                 if (confirm(`[${locId}] 로케이션은 현재 [${reserverName}]님이 ${timeStr}부터 사용(예약) 중입니다.\n강제로 예약을 뺏어오시겠습니까?`)) {
-                    await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
+                    // 강제로 뺏어올 때도 당일 지정 기록 갱신
+                    await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
                     navigator.clipboard.writeText(locId); showToast(`[${locId}] 예약을 뺏어와 복사했습니다.`);
                 }
                 return; 
             }
 
-            await setDoc(docRef, { reserved: true, reservedAt: now, reservedBy: currentUserName }, { merge: true });
+            // [핵심] 새로운 예약 시 assignedAt(당일 지정 메모리)에 현재 시간 기록
+            await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
             navigator.clipboard.writeText(locId).then(() => { showToast(`[${locId}] 복사 및 예약 완료!`); });
         }
     } catch (error) { alert('예약 처리 오류'); }
@@ -740,14 +742,13 @@ window.toggleAllCheckboxes = (source) => {
     document.querySelectorAll('.loc-check').forEach(cb => cb.checked = source.checked);
 };
 
-// [신규] 환경설정 내부 로케이션 추가
 window.addSingleLocationFromSetting = async () => {
     const inputObj = document.getElementById('setting-new-loc'); const newId = inputObj.value.trim().toUpperCase();
     if (!newId) return alert("추가할 로케이션 번호를 입력해주세요.");
     try {
         const docRef = doc(db, LOC_COLLECTION, newId); const docSnap = await getDoc(docRef);
         if (docSnap.exists()) return alert(`[${newId}] 로케이션은 이미 존재합니다.`);
-        await setDoc(docRef, { dong: '', pos: '', code: '', name: '', option: '', stock: '0', reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: {} });
+        await setDoc(docRef, { dong: '', pos: '', code: '', name: '', option: '', stock: '0', reserved: false, reservedAt: 0, assignedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: {} });
         inputObj.value = ''; alert(`✅ [${newId}] 로케이션 추가 완료`); 
     } catch (error) { console.error("추가 실패:", error); }
 };
