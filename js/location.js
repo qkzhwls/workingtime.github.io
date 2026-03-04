@@ -8,7 +8,7 @@ const LOC_COLLECTION = 'Locations';
 let originalData = []; 
 let zikjinData = {}; 
 let weeklyData = {}; 
-let incomingData = {}; // [신규] B창고 - 입고예정 데이터
+let incomingData = {}; 
 let sortConfig = { key: 'id', direction: 'asc' }; 
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
 
@@ -18,7 +18,7 @@ let currentUserName = "비로그인 작업자";
 let appConfig = null;
 window.currentUsageTab = '3F';
 window.capacity2F = 200000;
-window.sheetUrl = ''; // [신규] 구글시트 링크 변수
+window.sheetUrl = ''; 
 
 loadAppConfig(db).then(config => {
     appConfig = config;
@@ -53,31 +53,29 @@ window.hideLoading = function() {
     document.getElementById('loading-overlay').style.display = 'none';
 };
 
-
-// [수정] B창고(직진배송/주차별/입고예정) 실시간 수신 리스너
+// B창고 데이터 리스너
 function setupRealtimeListenerB() {
     if (!db2) return;
     onSnapshot(collection(db2, 'ZikjinData'), (snapshot) => {
         zikjinData = {};
         snapshot.forEach(docSnap => { zikjinData[docSnap.id] = docSnap.data(); });
         applyFiltersAndSort();
-    }, (error) => console.error("직진배송 동기화 오류:", error));
+    }, (error) => console.error("직진배송 오류:", error));
 
     onSnapshot(collection(db2, 'WeeklyData'), (snapshot) => {
         weeklyData = {};
         snapshot.forEach(docSnap => { weeklyData[docSnap.id] = docSnap.data(); });
         applyFiltersAndSort();
-    }, (error) => console.error("주차별데이터 동기화 오류:", error));
+    }, (error) => console.error("주차별데이터 오류:", error));
     
-    // [신규] 입고예정 데이터 구독
     onSnapshot(collection(db2, 'IncomingData'), (snapshot) => {
         incomingData = {};
         snapshot.forEach(docSnap => { incomingData[docSnap.id] = docSnap.data(); });
         applyFiltersAndSort();
-    }, (error) => console.error("입고예정데이터 동기화 오류:", error));
+    }, (error) => console.error("입고예정데이터 오류:", error));
 }
 
-// A창고(로케이션) 실시간 수신 리스너
+// A창고 데이터 리스너
 function setupRealtimeListenerA() {
     const q = collection(db, LOC_COLLECTION);
     onSnapshot(q, (snapshot) => {
@@ -87,7 +85,6 @@ function setupRealtimeListenerA() {
             if (docSnap.id === 'INFO_USAGE_STATS') return;
             if (docSnap.id === 'INFO_CONFIG') {
                 if (docSnap.data().capacity2F) window.capacity2F = docSnap.data().capacity2F;
-                // [신규] 설정에 저장된 구글시트 링크 불러오기
                 if (docSnap.data().sheetUrl) window.sheetUrl = docSnap.data().sheetUrl;
                 return;
             }
@@ -97,9 +94,7 @@ function setupRealtimeListenerA() {
         applyFiltersAndSort();
         const pop = document.getElementById('usage-popup');
         if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
-    }, (error) => {
-        console.error("A창고 실시간 동기화 오류:", error);
-    });
+    }, (error) => { console.error("A창고 오류:", error); });
 }
 
 window.onload = () => {
@@ -107,7 +102,108 @@ window.onload = () => {
     setupRealtimeListenerB();
 };
 
-// [신규] 구글시트 링크 관리 함수들
+// [신규] 💡 스마트 로케이션 추천 (핵심 알고리즘)
+window.showRecommendation = function() {
+    window.showLoading("💡 상품 점수를 계산하고 최적의 로케이션을 매칭 중입니다...");
+
+    setTimeout(() => {
+        // 1단계: B창고(직진+주차별)에 있는 모든 상품코드 수집
+        const allCodes = new Set([...Object.keys(zikjinData), ...Object.keys(weeklyData)]);
+        let scoredItems = [];
+
+        allCodes.forEach(code => {
+            let zItem = zikjinData[code] || {};
+            let wItem = weeklyData[code] || {};
+            let name = zItem['상품명'] || wItem['상품명'] || '알 수 없음';
+            
+            let score = 0;
+            let zQty = Number(zItem['수량'] || 0); // 직진배송 수량
+            let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0); // 주차별 수량
+            
+            // 기본 공식: (직진수량 * 10) + (주차별수량 * 2)
+            score += (zQty * 10);
+            score += (wQty * 2);
+
+            // 트렌드 예측 공식 (최근 날짜 3일 vs 이전 날짜 3일 비교)
+            // YYYYMMDD 형태의 날짜 키(Key)값만 추출
+            let dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
+            if (dates.length >= 6) {
+                let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
+                let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
+                
+                // 최근 상승세(모멘텀)를 보이면 최종 점수에 1.2배 가산점 부여
+                if (recent3 > prev3) {
+                    score *= 1.2;
+                }
+            }
+
+            // 점수가 0점 초과인 상품만 추천 리스트에 편입
+            if (score > 0) {
+                // 현재 해당 상품이 있는 로케이션 위치 찾기 (없으면 '신규배치')
+                let currentLocs = originalData.filter(d => d.code === code).map(d => d.id).join(', ');
+                if (!currentLocs) currentLocs = '신규배치 (없음)';
+
+                scoredItems.push({ code, name, score, currentLocs });
+            }
+        });
+
+        // 점수가 높은 순으로 내림차순 정렬 (1등부터)
+        scoredItems.sort((a, b) => b.score - a.score);
+
+        // 2단계: 현재 3층 창고의 '빈 로케이션' 목록 전부 가져오기
+        let emptyLocs = originalData.filter(d => {
+            const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
+            return !hasContent;
+        });
+
+        // 우선순위 정렬 공식: 동(1->6) -> 위치(2->3->4->1->5)
+        const posPriority = { '2': 1, '3': 2, '4': 3, '1': 4, '5': 5 };
+        const getPosRank = (p) => posPriority[p?.toString().trim()] || 99;
+
+        emptyLocs.sort((a, b) => {
+            let dongA = a.dong || '';
+            let dongB = b.dong || '';
+            if (dongA !== dongB) return dongA.localeCompare(dongB); // 1. 동 우선 (오름차순)
+            
+            let posRankA = getPosRank(a.pos);
+            let posRankB = getPosRank(b.pos);
+            if (posRankA !== posRankB) return posRankA - posRankB; // 2. 지정된 위치 순서 우선
+            
+            return a.id.localeCompare(b.id); // 3. 그래도 같으면 로케이션 이름순
+        });
+
+        // 3단계: 점수 1등 상품과 1순위 빈칸을 1:1로 매칭시켜 모달창에 렌더링
+        const tbody = document.getElementById('recommend-tbody');
+        let html = '';
+        
+        let matchCount = Math.min(scoredItems.length, emptyLocs.length);
+        if (matchCount === 0) {
+            html = '<tr><td colspan="5" style="padding:40px;">데이터가 부족하거나 추천할 빈 로케이션이 없습니다.</td></tr>';
+        } else {
+            for (let i = 0; i < matchCount; i++) {
+                let item = scoredItems[i];
+                let eLoc = emptyLocs[i];
+                html += `
+                    <tr>
+                        <td style="color:var(--primary); font-weight:bold; border-left:none;">${i+1}위 <br><span style="font-size:11px; color:#888;">(${item.score.toFixed(1)}점)</span></td>
+                        <td style="font-weight:bold; color:#333;">${item.code}</td>
+                        <td style="text-align:left; font-size:13px;">${item.name}</td>
+                        <td style="color:#888;">${item.currentLocs}</td>
+                        <td style="color:#2e7d32; font-weight:bold; background:#f1f8e9; border-right:none;">${eLoc.id} <br><span style="font-size:11px; color:#555;">(${eLoc.dong}동 ${eLoc.pos}위치)</span></td>
+                    </tr>
+                `;
+            }
+        }
+
+        tbody.innerHTML = html;
+        window.hideLoading();
+        document.getElementById('recommend-modal').style.display = 'flex';
+
+    }, 500); // 로딩창 애니메이션을 위한 약간의 딜레이
+};
+
+
+// 구글시트 링크 관리 함수
 window.openSheetModal = (e) => {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -126,44 +222,23 @@ window.saveSheetUrl = async () => {
         window.sheetUrl = url;
         alert("✅ 구글시트 링크가 안전하게 저장되었습니다.");
         if (typeof window.closeSheetModal === 'function') window.closeSheetModal();
-    } catch(e) {
-        console.error("링크 저장 실패:", e);
-        alert("링크 저장 중 오류가 발생했습니다.");
-    }
+    } catch(e) { console.error("링크 저장 실패:", e); alert("오류가 발생했습니다."); }
 };
 
-// [신규] 구글시트 입고예정 데이터 다이렉트 동기화 (CORS 프록시 우회)
 window.syncIncomingData = async () => {
-    if (!window.sheetUrl) {
-        alert("구글시트 링크가 아직 설정되지 않았습니다.\n먼저 [⚙️ 구글시트 링크 설정] 메뉴에서 링크를 저장해주세요.");
-        return;
-    }
-    
+    if (!window.sheetUrl) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
     window.showLoading("🔄 입고예정 데이터를 구글시트에서 가져오고 있습니다...");
-    
     try {
         const proxyUrl = 'https://corsproxy.io/?'; 
         const response = await fetch(proxyUrl + encodeURIComponent(window.sheetUrl));
-        
-        if (!response.ok) throw new Error("네트워크 응답 오류");
-        
+        if (!response.ok) throw new Error("응답 오류");
         const arrayBuffer = await response.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
         const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-        
-        if (json.length > 0) {
-            updateDatabaseB(json, 'IncomingData', null);
-        } else {
-            window.hideLoading();
-            alert("연결된 구글시트에 데이터가 비어있습니다.");
-        }
-    } catch (error) {
-        console.error(error);
-        window.hideLoading();
-        alert("데이터를 가져오는 데 실패했습니다.\n사내 방화벽 문제이거나 구글시트 웹 게시 링크가 잘못되었을 수 있습니다.");
-    }
+        if (json.length > 0) updateDatabaseB(json, 'IncomingData', null);
+        else { window.hideLoading(); alert("시트에 데이터가 없습니다."); }
+    } catch (error) { window.hideLoading(); alert("연결 실패. 방화벽이나 링크 설정을 확인하세요."); }
 };
-
 
 window.saveCapacity2F = async function() {
     const input = document.getElementById('input-cap-2f');
@@ -176,28 +251,15 @@ window.saveCapacity2F = async function() {
     } catch(e) { console.error(e); alert("오류가 발생했습니다."); }
 };
 
-window.switchUsageTab = function(tab) {
-    window.currentUsageTab = tab;
-    window.calculateAndRenderUsage();
-};
-
+window.switchUsageTab = function(tab) { window.currentUsageTab = tab; window.calculateAndRenderUsage(); };
 window.applyUsageFilter = function(zone, state) {
     filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
     if (zone !== 'all') filters.loc = [zone];
-    if (state === 'used') filters.code = 'not-empty';
-    else if (state === 'empty') filters.code = 'empty';
+    if (state === 'used') filters.code = 'not-empty'; else if (state === 'empty') filters.code = 'empty';
     setupFilterPopups();
     ['loc', 'code', 'dong', 'pos', 'stock'].forEach(id => {
         const btn = document.getElementById('btn-filter-' + id);
-        if (btn) {
-            if (id === 'loc') {
-                if (filters.loc.length === 0) btn.classList.remove('active');
-                else btn.classList.add('active');
-            } else {
-                if (filters[id] === 'all') btn.classList.remove('active');
-                else btn.classList.add('active');
-            }
-        }
+        if (btn) { if (filters[id] === 'all' && (id!=='loc' || filters.loc.length===0)) btn.classList.remove('active'); else btn.classList.add('active'); }
     });
     applyFiltersAndSort();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -206,17 +268,12 @@ window.applyUsageFilter = function(zone, state) {
 window.calculateAndRenderUsage = function() {
     const popup = document.getElementById('usage-popup');
     if (!popup) return;
-    let html = `
-        <div style="display:flex; gap:10px; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
-            <button onclick="switchUsageTab('3F')" style="flex:1; padding:8px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; background:${window.currentUsageTab === '3F' ? 'var(--primary)' : '#eee'}; color:${window.currentUsageTab === '3F' ? 'white' : '#555'}">3층 로케이션</button>
-            <button onclick="switchUsageTab('2F')" style="flex:1; padding:8px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; background:${window.currentUsageTab === '2F' ? 'var(--primary)' : '#eee'}; color:${window.currentUsageTab === '2F' ? 'white' : '#555'}">2층 창고재고</button>
-        </div>
-    `;
+    let html = `<div style="display:flex; gap:10px; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 10px;"><button onclick="switchUsageTab('3F')" style="flex:1; padding:8px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; background:${window.currentUsageTab === '3F' ? 'var(--primary)' : '#eee'}; color:${window.currentUsageTab === '3F' ? 'white' : '#555'}">3층 로케이션</button><button onclick="switchUsageTab('2F')" style="flex:1; padding:8px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; background:${window.currentUsageTab === '2F' ? 'var(--primary)' : '#eee'}; color:${window.currentUsageTab === '2F' ? 'white' : '#555'}">2층 창고재고</button></div>`;
 
     if (window.currentUsageTab === '3F') {
         const locations = originalData.filter(d => d.id.charAt(0).toUpperCase() !== 'K');
         let total = locations.length;
-        if (total === 0) { html += '<div style="padding: 10px;">데이터가 없습니다.</div>'; popup.innerHTML = html; return; }
+        if (total === 0) { popup.innerHTML = html + '<div style="padding: 10px;">데이터가 없습니다.</div>'; return; }
         let used = 0; let zoneStats = {};
 
         locations.forEach(loc => {
@@ -229,14 +286,7 @@ window.calculateAndRenderUsage = function() {
         });
 
         const usageRate = ((used / total) * 100).toFixed(1);
-        html += `
-            <div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div>
-            <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 표의 숫자를 클릭하면 기존 필터를 해제하고 해당 구역만 보여줍니다.</div>
-            <table class="usage-table" style="width:100%;">
-                <thead><tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead>
-                <tbody>
-                    <tr><td style="font-weight:bold; color:#d32f2f;">전체 합계</td><td style="font-weight:bold;">${total}</td><td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')">${used}</td><td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')">${total - used}</td><td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td></tr>
-        `;
+        html += `<div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div><div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 숫자를 클릭하면 해당 구역만 보여줍니다.</div><table class="usage-table" style="width:100%;"><thead><tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody><tr><td style="font-weight:bold; color:#d32f2f;">전체 합계</td><td style="font-weight:bold;">${total}</td><td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')">${used}</td><td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')">${total - used}</td><td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td></tr>`;
 
         const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
         zones.forEach(z => {
@@ -247,15 +297,7 @@ window.calculateAndRenderUsage = function() {
     } else {
         let sum2F = 0; originalData.forEach(loc => { sum2F += Number(loc.stock2f || 0); });
         let rate2F = ((sum2F / window.capacity2F) * 100).toFixed(1);
-        html += `
-            <div style="font-size:15px; font-weight:bold; margin-bottom:15px; color:var(--primary); text-align:center;">🏢 2층 전체 창고 사용률: ${rate2F}%</div>
-            <table class="usage-table" style="width:100%;">
-                <tr><th style="background:#eef1ff; width: 40%;">총 적재가능수량</th><td style="text-align: right;"><input type="number" id="input-cap-2f" value="${window.capacity2F}" style="width:80px; padding:3px; text-align:right; font-size:13px; font-weight:bold;"> 장 <button onclick="saveCapacity2F()" style="padding:4px 8px; margin-left:5px; font-size:11px; background:var(--primary); color:white; border:none; border-radius:3px; cursor:pointer;">기준변경</button></td></tr>
-                <tr><th style="background:#eef1ff;">현재 적재수량</th><td style="font-weight:bold; color:var(--primary); text-align: right;">${sum2F.toLocaleString()} 장</td></tr>
-                <tr><th style="background:#eef1ff;">남은 수량</th><td style="font-weight:bold; color:#ff5252; text-align: right;">${(window.capacity2F - sum2F).toLocaleString()} 장</td></tr>
-            </table>
-            <div style="margin-top:15px; font-size:11px; color:#888; text-align:center;">※ 엑셀 파일의 '2층창고재고' 열을 기준으로 자동 합산됩니다.</div>
-        `;
+        html += `<div style="font-size:15px; font-weight:bold; margin-bottom:15px; color:var(--primary); text-align:center;">🏢 2층 전체 창고 사용률: ${rate2F}%</div><table class="usage-table" style="width:100%;"><tr><th style="background:#eef1ff; width: 40%;">총 적재가능수량</th><td style="text-align: right;"><input type="number" id="input-cap-2f" value="${window.capacity2F}" style="width:80px; padding:3px; text-align:right; font-size:13px; font-weight:bold;"> 장 <button onclick="saveCapacity2F()" style="padding:4px 8px; margin-left:5px; font-size:11px; background:var(--primary); color:white; border:none; border-radius:3px; cursor:pointer;">기준변경</button></td></tr><tr><th style="background:#eef1ff;">현재 적재수량</th><td style="font-weight:bold; color:var(--primary); text-align: right;">${sum2F.toLocaleString()} 장</td></tr><tr><th style="background:#eef1ff;">남은 수량</th><td style="font-weight:bold; color:#ff5252; text-align: right;">${(window.capacity2F - sum2F).toLocaleString()} 장</td></tr></table>`;
     }
     popup.innerHTML = html;
 };
@@ -263,9 +305,8 @@ window.calculateAndRenderUsage = function() {
 window.toggleUsagePopup = function(e) {
     e.stopPropagation();
     const pop = document.getElementById('usage-popup');
-    const isVisible = pop.style.display === 'block';
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
-    if (!isVisible) { pop.style.display = 'block'; window.calculateAndRenderUsage(); }
+    if (pop.style.display !== 'block') { pop.style.display = 'block'; window.calculateAndRenderUsage(); }
 };
 
 function getSortButtonsHtml(key) {
@@ -425,7 +466,6 @@ function handleExcelUpload(file, collectionName, inputElement, loadingMessage) {
     }, 50);
 }
 
-// [수정] updateDatabaseB는 컬렉션 이름에 맞게 라벨 지정 (입고예정도 포함됨)
 async function updateDatabaseB(rows, collectionName, inputElement) {
     let label = '데이터';
     if (collectionName === 'ZikjinData') label = '직진배송';
