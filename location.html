@@ -27,9 +27,12 @@
         .usage-table td { padding: 8px 12px; border: 1px solid #ddd; }
         .usage-table tr:nth-child(even) { background-color: #f9f9f9; }
 
-        .upload-dropdown { position: relative; display: inline-block; margin-left: 10px; }
+        .header-actions { display: flex; gap: 10px; align-items: center; }
+        .upload-dropdown { position: relative; display: inline-block; }
         .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
-        .btn-main-upload:hover { background: #555; }
+        .btn-main-upload:hover { filter: brightness(1.2); }
+        .btn-smart { background: #4caf50; }
+        
         .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
         .upload-menu label, .upload-menu div.menu-item { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
         .upload-menu label:hover, .upload-menu div.menu-item:hover { background: #f0f4ff; color: var(--primary); }
@@ -42,8 +45,6 @@
         .btn-add:hover { background: #324ee0; }
         .btn-delete-bulk { padding: 6px 12px; background: #ff5252; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
         .btn-delete-bulk:hover { background: #e04848; }
-        .btn-smart-recommend { padding: 6px 12px; background: #4caf50; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-right: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .btn-smart-recommend:hover { background: #43a047; }
 
         .list-container { 
             overflow: auto; 
@@ -141,27 +142,36 @@
             </div>
         </div>
         
-        <div class="upload-dropdown">
-            <button class="btn-main-upload" onclick="toggleUploadMenu(event)">📥 데이터 연동/업로드 ▼</button>
-            <div class="upload-menu" id="upload-menu" onclick="event.stopPropagation()">
-                <label>
-                    <span style="color:var(--primary);">로케이션최신화</span>
-                    <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv">
-                </label>
-                <label>
-                    <span style="color:#d32f2f;">직진배송데이터</span>
-                    <input type="file" id="excel-upload-b-zikjin" accept=".xls,.xlsx,.csv">
-                </label>
-                <label>
-                    <span style="color:#4caf50;">주차별데이터</span>
-                    <input type="file" id="excel-upload-b-weekly" accept=".xls,.xlsx,.csv">
-                </label>
-                <div class="menu-divider"></div>
-                <div class="menu-item" style="text-align:center; color:#ff9800;" onclick="syncIncomingData()">
-                    🔄 <strong>입고예정(구글시트) 동기화</strong>
+        <div class="header-actions">
+            <div class="upload-dropdown">
+                <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'upload-menu-1')">📥 데이터 연동/업로드 ▼</button>
+                <div class="upload-menu" id="upload-menu-1" onclick="event.stopPropagation()">
+                    <label>
+                        <span style="color:var(--primary);">로케이션최신화 (A창고)</span>
+                        <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv,.html,.htm">
+                    </label>
+                    <div class="menu-divider"></div>
+                    <div class="menu-item" style="text-align:center; color:#ff9800;" onclick="syncIncomingData()">
+                        🔄 <strong>입고예정(구글시트) 동기화</strong>
+                    </div>
+                    <div class="menu-item" style="text-align:center; color:#888; font-size:12px;" onclick="openSheetModal(event)">
+                        ⚙️ 구글시트 링크 설정
+                    </div>
                 </div>
-                <div class="menu-item" style="text-align:center; color:#888; font-size:12px;" onclick="openSheetModal(event)">
-                    ⚙️ 구글시트 링크 설정
+            </div>
+
+            <div class="upload-dropdown">
+                <button class="btn-main-upload btn-smart" onclick="toggleUploadMenu(event, 'upload-menu-2')">💡 스마트 로케이션 추천 ▼</button>
+                <div class="upload-menu" id="upload-menu-2" onclick="event.stopPropagation()">
+                    <label>
+                        <span style="color:#d32f2f;">📂 1. 배송/주차별 데이터 업로드</span><br>
+                        <span style="font-size:11px; color:#666; font-weight:normal;">(파일을 여러 개 한 번에 선택 가능합니다)</span>
+                        <input type="file" id="excel-upload-combined" accept=".xls,.xlsx,.csv,.html,.htm" multiple>
+                    </label>
+                    <div class="menu-divider"></div>
+                    <div class="menu-item" style="text-align:center; color:var(--primary);" onclick="showRecommendation()">
+                        🚀 <strong>2. 추천 이동 지시서 보기</strong>
+                    </div>
                 </div>
             </div>
         </div>
@@ -172,7 +182,6 @@
             <button class="btn-delete-bulk" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
         </div>
         <div style="display: flex; align-items: center;">
-            <button class="btn-smart-recommend" onclick="showRecommendation()">💡 스마트 로케이션 추천</button>
             <input type="text" id="new-loc-id" class="action-input" placeholder="예: A-1-001" onkeypress="if(event.key === 'Enter') addSingleLocation()">
             <button class="btn-add" onclick="addSingleLocation()" style="margin-left: 5px;">➕ 빈 로케이션 추가</button>
         </div>
@@ -298,20 +307,21 @@
             }
         }
 
-        function toggleUploadMenu(e) {
+        // [수정] 여러 드롭다운 메뉴를 제어하도록 파라미터(id) 추가
+        function toggleUploadMenu(e, menuId) {
             e.stopPropagation();
-            const menu = document.getElementById('upload-menu');
+            const menu = document.getElementById(menuId);
             const isVisible = menu.style.display === 'block';
             closeAllPopups(); 
             if (!isVisible) { menu.style.display = 'block'; }
         }
 
+        // [수정] 모든 업로드 메뉴가 창 닫힐 때 같이 닫히도록 수정
         window.closeAllPopups = function() {
             document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
             const usagePop = document.getElementById('usage-popup');
             if(usagePop) usagePop.style.display = 'none';
-            const uploadMenu = document.getElementById('upload-menu');
-            if(uploadMenu) uploadMenu.style.display = 'none';
+            document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
         }
         
         document.querySelectorAll('.filter-popup').forEach(p => { p.addEventListener('click', function(e) { e.stopPropagation(); }); });
