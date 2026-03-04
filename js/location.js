@@ -20,6 +20,10 @@ window.currentUsageTab = '3F';
 window.capacity2F = 200000;
 window.sheetUrl = ''; 
 
+// [신규] 동적 컬럼 관리를 위한 변수 선언
+window.visibleColumns = ['std_dong', 'std_pos', 'std_id', 'std_code', 'std_name', 'std_option', 'std_stock'];
+window.excelHeaders = []; 
+
 loadAppConfig(db).then(config => {
     appConfig = config;
     if (auth.currentUser) updateCurrentUserName(auth.currentUser);
@@ -84,14 +88,20 @@ function setupRealtimeListenerA() {
         snapshot.forEach(docSnap => {
             if (docSnap.id === 'INFO_USAGE_STATS') return;
             if (docSnap.id === 'INFO_CONFIG') {
-                if (docSnap.data().capacity2F) window.capacity2F = docSnap.data().capacity2F;
-                if (docSnap.data().sheetUrl) window.sheetUrl = docSnap.data().sheetUrl;
+                const conf = docSnap.data();
+                if (conf.capacity2F) window.capacity2F = conf.capacity2F;
+                if (conf.sheetUrl) window.sheetUrl = conf.sheetUrl;
+                // [신규] 동적 헤더 설정 동기화
+                if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
+                if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
                 return;
             }
             originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
-        setupFilterPopups();
-        applyFiltersAndSort();
+        
+        renderTableHeader(); // 테이블 헤더 동적 생성
+        applyFiltersAndSort(); // 리스트 출력
+        
         const pop = document.getElementById('usage-popup');
         if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
     }, (error) => { console.error("A창고 오류:", error); });
@@ -101,6 +111,89 @@ window.onload = () => {
     setupRealtimeListenerA();
     setupRealtimeListenerB();
 };
+
+// [신규] 동적 테이블 헤더 생성 로직
+function renderTableHeader() {
+    const theadTr = document.getElementById('dynamic-thead-tr');
+    const popupContainer = document.getElementById('dynamic-popups');
+    if (!theadTr || !popupContainer) return;
+
+    let html = `<th class="checkbox-cell"><input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)"></th>`;
+    let popupHtml = '';
+    
+    // 표준 컬럼 필터는 기존 팝업 div를 재활용
+    window.visibleColumns.forEach(col => {
+        if (col === 'std_dong') { html += createTh('dong', '동', 80, true); popupHtml += `<div id="pop-dong" class="filter-popup"></div>`; }
+        else if (col === 'std_pos') { html += createTh('pos', '위치', 80, true); popupHtml += `<div id="pop-pos" class="filter-popup"></div>`; }
+        else if (col === 'std_id') { html += createTh('id', '로케이션', 150, true); popupHtml += `<div id="pop-loc" class="filter-popup"></div>`; }
+        else if (col === 'std_code') { html += createTh('code', '상품코드', 150, true); popupHtml += `<div id="pop-code" class="filter-popup"></div>`; }
+        else if (col === 'std_name') { html += createTh('name', '상품명', 'auto', true); popupHtml += `<div id="pop-name" class="filter-popup"></div>`; }
+        else if (col === 'std_option') { html += createTh('option', '옵션', 180, true); popupHtml += `<div id="pop-option" class="filter-popup"></div>`; }
+        else if (col === 'std_stock') { html += createTh('stock', '정상재고', 130, true); popupHtml += `<div id="pop-stock" class="filter-popup"></div>`; }
+        else if (col.startsWith('cus_')) {
+            const label = col.replace('cus_', '');
+            html += createTh(col, label, 120, false); // 커스텀 열은 필터 미지원(단순표시)
+        }
+    });
+    
+    theadTr.innerHTML = html;
+    popupContainer.innerHTML = popupHtml;
+    
+    document.querySelectorAll('.filter-popup').forEach(p => { p.addEventListener('click', function(e) { e.stopPropagation(); }); });
+    setupFilterPopups();
+}
+
+function createTh(key, label, width, hasFilter) {
+    let widthStyle = width === 'auto' ? '' : `style="width: ${width}px;"`;
+    let filterHtml = hasFilter ? `<span class="filter-btn" id="btn-filter-${key}" onclick="toggleFilterPopup(event, 'pop-${key}')">▼</span>` : '';
+    return `<th ${widthStyle}><div class="th-content"><span class="title-text">${label}</span>${filterHtml}</div></th>`;
+}
+
+
+// [신규] 환경설정 모달 제어 로직 (헤더 선택)
+window.openSettingsModal = (e) => {
+    if(e) e.stopPropagation();
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+    
+    const container = document.getElementById('setting-headers-container');
+    let html = '';
+    
+    // 1. 고정 표준 컬럼
+    const stdCols = [
+        { id: 'std_dong', label: '동' }, { id: 'std_pos', label: '위치' }, { id: 'std_id', label: '로케이션(ID)' },
+        { id: 'std_code', label: '상품코드' }, { id: 'std_name', label: '상품명' }, { id: 'std_option', label: '옵션' }, { id: 'std_stock', label: '정상재고' }
+    ];
+    
+    stdCols.forEach(col => {
+        const isChecked = window.visibleColumns.includes(col.id) ? 'checked' : '';
+        html += `<label style="display:flex; align-items:center; gap:5px; width: 45%;"><input type="checkbox" class="chk-header" value="${col.id}" ${isChecked}> ${col.label}</label>`;
+    });
+    
+    // 2. 엑셀 파일에서 읽어온 커스텀 컬럼
+    window.excelHeaders.forEach(header => {
+        const colId = 'cus_' + header;
+        const isChecked = window.visibleColumns.includes(colId) ? 'checked' : '';
+        html += `<label style="display:flex; align-items:center; gap:5px; width: 45%; color:#e65100;"><input type="checkbox" class="chk-header" value="${colId}" ${isChecked}> ${header}</label>`;
+    });
+
+    container.innerHTML = html;
+    document.getElementById('settings-modal').style.display = 'flex';
+};
+
+window.saveHeaderSettings = async () => {
+    const checkboxes = document.querySelectorAll('.chk-header:checked');
+    const newVisible = Array.from(checkboxes).map(cb => cb.value);
+    
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { visibleColumns: newVisible }, { merge: true });
+        window.visibleColumns = newVisible;
+        document.getElementById('settings-modal').style.display = 'none';
+        renderTableHeader(); 
+        applyFiltersAndSort(); 
+        showToast("✅ 화면 헤더 설정이 저장되었습니다.");
+    } catch(e) { console.error(e); alert("저장 실패"); }
+};
+
 
 // 💡 스마트 로케이션 추천 (핵심 알고리즘)
 window.showRecommendation = function() {
@@ -186,7 +279,6 @@ window.showRecommendation = function() {
 };
 
 
-// 구글시트 링크 관리 함수
 window.openSheetModal = (e) => {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -257,11 +349,20 @@ window.calculateAndRenderUsage = function() {
         const locations = originalData.filter(d => d.id.charAt(0).toUpperCase() !== 'K');
         let total = locations.length;
         if (total === 0) { popup.innerHTML = html + '<div style="padding: 10px;">데이터가 없습니다.</div>'; return; }
+        
         let used = 0; let zoneStats = {};
+        
+        // [신규] 당일지정수량 로직 (오늘 00시 00분부터의 예약만 카운트)
+        let todayReservedCount = 0;
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
         locations.forEach(loc => {
             const isUsed = (loc.code && loc.code.trim() !== '' && loc.code !== loc.id) || (loc.name && loc.name.trim() !== '');
             if (isUsed) used++;
+            
+            if (loc.reserved && loc.reservedAt >= todayStart) todayReservedCount++;
+
             const zone = loc.id.charAt(0).toUpperCase();
             if (!zoneStats[zone]) { zoneStats[zone] = { total: 0, used: 0 }; }
             zoneStats[zone].total++;
@@ -269,7 +370,23 @@ window.calculateAndRenderUsage = function() {
         });
 
         const usageRate = ((used / total) * 100).toFixed(1);
-        html += `<div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div><div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 숫자를 클릭하면 해당 구역만 보여줍니다.</div><table class="usage-table" style="width:100%;"><thead><tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody><tr><td style="font-weight:bold; color:#d32f2f;">전체 합계</td><td style="font-weight:bold;">${total}</td><td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')">${used}</td><td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')">${total - used}</td><td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td></tr>`;
+        
+        // [신규] 상단 당일지정/선지정 수량 패널 추가
+        html += `
+            <div style="display:flex; justify-content: space-around; background: #eef1ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #c5cae9;">
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#555; font-weight:bold;">당일지정수량(예약)</div>
+                    <div style="font-size:18px; color:var(--primary); font-weight:900;">${todayReservedCount}</div>
+                </div>
+                <div style="width:1px; background:#ccc;"></div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량(준비중)</div>
+                    <div style="font-size:18px; color:#ff9800; font-weight:900;">0</div>
+                </div>
+            </div>
+            <div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div>
+            <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 숫자를 클릭하면 해당 구역만 보여줍니다.</div>
+            <table class="usage-table" style="width:100%;"><thead><tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody><tr><td style="font-weight:bold; color:#d32f2f;">전체 합계</td><td style="font-weight:bold;">${total}</td><td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')">${used}</td><td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')">${total - used}</td><td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td></tr>`;
 
         const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
         zones.forEach(z => {
@@ -362,6 +479,7 @@ function applyFiltersAndSort() {
     renderTable(filtered);
 }
 
+// [신규] 동적 헤더에 맞춰 내용(td) 렌더링
 function renderTable(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
@@ -372,34 +490,39 @@ function renderTable(data) {
     let html = ''; const now = new Date().getTime();
 
     data.forEach(loc => {
-        let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
         let isReserved = loc.reserved === true;
         let rowStyle = isReserved ? 'background-color: #fffde7;' : '';
         let reserverName = loc.reservedBy || '누군가';
         let badgeHtml = isReserved ? `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>` : '';
         let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
 
-        html += `
-            <tr onclick="if(event.target.tagName !== 'INPUT') openEditModal('${loc.id}')" style="${rowStyle}">
-                <td onclick="event.stopPropagation()"><input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked}></td>
-                <td style="color:#666;">${loc.dong || ''}</td>
-                <td style="color:#666;">${loc.pos || ''}</td>
-                <td class="loc-copy-cell" onclick="copyLocationToClipboard(event, '${loc.id}')" title="클릭하여 복사 및 예약">${loc.id} ${badgeHtml}</td>
-                <td style="color:#3d5afe; font-weight:bold;">${displayCode}</td>
-                <td style="text-align:left;">${loc.name || ''}</td>
-                <td style="text-align:left; font-size:12px;">${loc.option || ''}</td>
-                <td style="font-weight:bold;">${loc.stock || '0'}</td>
-            </tr>
-        `;
+        html += `<tr onclick="if(event.target.tagName !== 'INPUT') openEditModal('${loc.id}')" style="${rowStyle}">`;
+        html += `<td onclick="event.stopPropagation()"><input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked}></td>`;
+        
+        window.visibleColumns.forEach(col => {
+            if (col === 'std_dong') html += `<td style="color:#666;">${loc.dong || ''}</td>`;
+            else if (col === 'std_pos') html += `<td style="color:#666;">${loc.pos || ''}</td>`;
+            else if (col === 'std_id') html += `<td class="loc-copy-cell" onclick="copyLocationToClipboard(event, '${loc.id}')" title="클릭하여 복사 및 예약">${loc.id} ${badgeHtml}</td>`;
+            else if (col === 'std_code') html += `<td style="color:#3d5afe; font-weight:bold;">${loc.code === loc.id ? '' : (loc.code || '')}</td>`;
+            else if (col === 'std_name') html += `<td style="text-align:left;">${loc.name || ''}</td>`;
+            else if (col === 'std_option') html += `<td style="text-align:left; font-size:12px;">${loc.option || ''}</td>`;
+            else if (col === 'std_stock') html += `<td style="font-weight:bold;">${loc.stock || '0'}</td>`;
+            else if (col.startsWith('cus_')) {
+                const key = col.replace('cus_', '');
+                let val = (loc.rawData && loc.rawData[key]) ? loc.rawData[key] : '';
+                html += `<td>${val}</td>`;
+            }
+        });
+        html += `</tr>`;
     });
     
-    tbody.innerHTML = html || '<tr><td colspan="8" style="padding:50px;">데이터가 없습니다.</td></tr>';
+    tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
     const checkAllBtn = document.getElementById('check-all');
     const allCheckboxes = document.querySelectorAll('.loc-check');
     if (checkAllBtn && allCheckboxes.length > 0) checkAllBtn.checked = document.querySelectorAll('.loc-check:checked').length === allCheckboxes.length;
 }
 
-// [신규] 직진배송/주차별 데이터 통합 업로드 (다중 파일 선택, 자동 분류)
+
 const fileInputCombined = document.getElementById('excel-upload-combined');
 if (fileInputCombined) {
     fileInputCombined.addEventListener('change', async function(e) {
@@ -414,7 +537,6 @@ if (fileInputCombined) {
 
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
-                
                 const data = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onload = e => resolve(new Uint8Array(e.target.result));
@@ -427,7 +549,6 @@ if (fileInputCombined) {
 
                 if (json.length === 0) continue;
 
-                // 데이터 항목(헤더) 검사로 파일 종류 자동 인식
                 const headers = Object.keys(json[0]);
                 const isWeekly = headers.includes('기간발주수량') || headers.includes('기간배송수량');
                 const collectionName = isWeekly ? 'WeeklyData' : 'ZikjinData';
@@ -435,7 +556,6 @@ if (fileInputCombined) {
                 if (isWeekly) weeklyCount++;
                 else zikjinCount++;
 
-                // silent=true 옵션으로 내부 alert 무시
                 await updateDatabaseB(json, collectionName, null, true);
             }
 
@@ -471,7 +591,6 @@ if (fileInputA) {
     });
 }
 
-// [수정] silent 매개변수를 추가하여 여러 개의 파일을 올릴 때 팝업이 중복으로 뜨는 것을 방지
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = '데이터';
     if (collectionName === 'ZikjinData') label = '직진배송';
@@ -514,19 +633,23 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     }
 }
 
+// [수정] 엑셀 추가 헤더를 감지하여 저장하고 데이터를 통째로(rawData) 저장하는 로직
 async function updateDatabaseA(rows) {
     const totalRows = rows.length;
     try {
+        const allHeaders = Object.keys(rows[0]);
+        const exclude = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
+        const customHeaders = allHeaders.filter(h => !exclude.includes(h));
+        
+        const newHeaders = [...new Set([...window.excelHeaders, ...customHeaders])];
+        if (newHeaders.length > window.excelHeaders.length) {
+            await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { excelHeaders: newHeaders }, { merge: true });
+            window.excelHeaders = newHeaders;
+        }
+
         let batch = writeBatch(db); let updateCount = 0; let batchCount = 0;
         let notFoundLocs = new Set(); 
         const validLocIds = new Set(originalData.map(d => d.id));
-
-        const hasDongColumn = ('동' in rows[0] || 'dong' in rows[0]);
-        const hasPosColumn = ('위치' in rows[0] || 'pos' in rows[0]);
-        const hasNameColumn = ('상품명' in rows[0]);
-        const hasStockColumn = ('정상재고' in rows[0]);
-        const hasOptionColumn = ('옵션' in rows[0]);
-        const hasStock2fColumn = ('2층창고재고' in rows[0]);
 
         for (let i = 0; i < totalRows; i++) {
             const row = rows[i];
@@ -548,14 +671,14 @@ async function updateDatabaseA(rows) {
                         const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                         const docRef = doc(db, LOC_COLLECTION, cleanLocId);
 
-                        let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date() };
+                        let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: row };
                         if (finalCode) updateData.code = finalCode;
-                        if (hasNameColumn) updateData.name = row['상품명']?.toString().trim() || '';
-                        if (hasOptionColumn) updateData.option = row['옵션']?.toString().trim() || '';
-                        if (hasStockColumn) updateData.stock = row['정상재고']?.toString().trim() || '0';
-                        if (hasDongColumn) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
-                        if (hasPosColumn) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
-                        if (hasStock2fColumn) updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
+                        updateData.name = row['상품명']?.toString().trim() || '';
+                        updateData.option = row['옵션']?.toString().trim() || '';
+                        updateData.stock = row['정상재고']?.toString().trim() || '0';
+                        updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
+                        updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
+                        updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
 
                         batch.set(docRef, updateData, { merge: true });
 
@@ -617,20 +740,21 @@ window.toggleAllCheckboxes = (source) => {
     document.querySelectorAll('.loc-check').forEach(cb => cb.checked = source.checked);
 };
 
-window.addSingleLocation = async () => {
-    const inputObj = document.getElementById('new-loc-id'); const newId = inputObj.value.trim().toUpperCase();
+// [신규] 환경설정 내부 로케이션 추가
+window.addSingleLocationFromSetting = async () => {
+    const inputObj = document.getElementById('setting-new-loc'); const newId = inputObj.value.trim().toUpperCase();
     if (!newId) return alert("추가할 로케이션 번호를 입력해주세요.");
     try {
         const docRef = doc(db, LOC_COLLECTION, newId); const docSnap = await getDoc(docRef);
         if (docSnap.exists()) return alert(`[${newId}] 로케이션은 이미 존재합니다.`);
-        await setDoc(docRef, { dong: '', pos: '', code: '', name: '', option: '', stock: '0', reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date() });
+        await setDoc(docRef, { dong: '', pos: '', code: '', name: '', option: '', stock: '0', reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: {} });
         inputObj.value = ''; alert(`✅ [${newId}] 로케이션 추가 완료`); 
     } catch (error) { console.error("추가 실패:", error); }
 };
 
 window.deleteSelectedLocations = async () => {
     const checkedBoxes = document.querySelectorAll('.loc-check:checked');
-    if (checkedBoxes.length === 0) return alert("삭제할 로케이션을 선택해주세요.");
+    if (checkedBoxes.length === 0) return alert("바깥의 메인 데이터 리스트 화면에서 삭제할 로케이션 체크박스를 먼저 선택해주세요.");
     if (!confirm(`선택한 ${checkedBoxes.length}개의 로케이션을 정말 삭제하시겠습니까?`)) return;
 
     try {
