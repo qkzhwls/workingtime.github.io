@@ -1,4 +1,4 @@
-import { initializeFirebase } from './config.js';
+import { initializeFirebase, loadAppConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
@@ -7,24 +7,53 @@ const { db, auth, db2 } = initializeFirebase();
 const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
-let zikjinData = {}; // B창고 - 직진배송 데이터 (향후 알고리즘용)
-let weeklyData = {}; // B창고 - 주차별 데이터 (향후 알고리즘용)
+let zikjinData = {}; // B창고 - 직진배송 데이터
+let weeklyData = {}; // B창고 - 주차별 데이터
 let sortConfig = { key: 'id', direction: 'asc' }; 
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
 
+// [수정] 30분 타이머 제거 -> Infinity(무한대)로 설정하여 엑셀 업로드 전까지 영구 유지
+const RESERVE_EXPIRE_MS = Infinity; 
+
 let currentUserName = "비로그인 작업자";
+let appConfig = null;
 window.currentUsageTab = '3F';
 window.capacity2F = 200000;
 
+// [신규] 설정 파일(config)을 불러와 진짜 이름 매칭 준비
+loadAppConfig(db).then(config => {
+    appConfig = config;
+    if (auth.currentUser) updateCurrentUserName(auth.currentUser);
+});
+
+// [신규] 이메일 기반으로 config.js의 진짜 이름 찾기 함수
+function updateCurrentUserName(user) {
+    if (!user) return;
+    let email = user.email || "";
+    let name = user.displayName || email.split('@')[0];
+    
+    // config.js의 memberEmails 데이터에서 이메일과 일치하는 '이름' 찾기
+    if (appConfig && appConfig.memberEmails) {
+        for (let key in appConfig.memberEmails) {
+            if (appConfig.memberEmails[key] === email) {
+                name = key; // 진짜 이름으로 교체
+                break;
+            }
+        }
+    }
+    currentUserName = name;
+}
+
 onAuthStateChanged(auth, (user) => {
     if (user) {
-        currentUserName = user.displayName || user.email.split('@')[0];
+        updateCurrentUserName(user);
+    } else {
+        currentUserName = "비로그인 작업자";
     }
 });
 
-const RESERVE_EXPIRE_MS = 1800000; 
 
-// [신규] 로딩 오버레이 제어 함수
+// 로딩 오버레이 제어 함수
 window.showLoading = function(text) {
     const loadingText = document.getElementById('loading-text');
     if(loadingText) loadingText.innerText = text;
@@ -40,14 +69,12 @@ window.hideLoading = function() {
 function setupRealtimeListenerB() {
     if (!db2) return;
     
-    // 직진배송 데이터 구독
     onSnapshot(collection(db2, 'ZikjinData'), (snapshot) => {
         zikjinData = {};
         snapshot.forEach(docSnap => { zikjinData[docSnap.id] = docSnap.data(); });
         applyFiltersAndSort();
     }, (error) => console.error("직진배송 동기화 오류:", error));
 
-    // 주차별 데이터 구독
     onSnapshot(collection(db2, 'WeeklyData'), (snapshot) => {
         weeklyData = {};
         snapshot.forEach(docSnap => { weeklyData[docSnap.id] = docSnap.data(); });
@@ -393,7 +420,8 @@ function renderTable(data) {
 
     data.forEach(loc => {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
-        let isReserved = loc.reserved === true && (now - (loc.reservedAt || 0) <= RESERVE_EXPIRE_MS);
+        // [수정] 무제한 예약 확인 (단순히 reserved 상태만 확인)
+        let isReserved = loc.reserved === true;
         let rowStyle = isReserved ? 'background-color: #fffde7;' : '';
         let reserverName = loc.reservedBy || '누군가';
         let badgeHtml = isReserved ? `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>` : '';
@@ -426,10 +454,6 @@ function renderTable(data) {
     }
 }
 
-// ==========================================
-// [개선] 엑셀 업로드 시 로딩 화면 적용 로직
-// ==========================================
-
 // B창고: 직진배송 엑셀
 const fileInputZikjin = document.getElementById('excel-upload-b-zikjin');
 if (fileInputZikjin) {
@@ -455,7 +479,6 @@ if (fileInputA) {
         
         window.showLoading('A창고(로케이션) 데이터를 동기화 중입니다...');
         
-        // UI가 로딩 화면을 그릴 수 있도록 약간의 딜레이를 줌
         setTimeout(() => {
             const reader = new FileReader();
             reader.onload = function(e) {
@@ -525,7 +548,7 @@ async function updateDatabaseB(rows, collectionName, inputElement) {
         alert(`${label} 업데이트 중 오류가 발생했습니다.`);
     } finally {
         if(inputElement) inputElement.value = ''; 
-        window.hideLoading(); // 작업이 끝나면 무조건 로딩창 숨김
+        window.hideLoading();
     }
 }
 
@@ -602,7 +625,7 @@ async function updateDatabaseA(rows) {
         alert("업데이트 중 오류가 발생했습니다.");
     } finally {
         document.getElementById('excel-upload-a').value = ''; 
-        window.hideLoading(); // 작업 끝나면 반드시 로딩화면 닫기
+        window.hideLoading();
     }
 }
 
@@ -617,12 +640,11 @@ window.copyLocationToClipboard = async (event, locId) => {
             const data = snap.data();
             const now = new Date().getTime();
             
+            // [수정] 무제한 예약 확인 (시간 체크 안함)
             const isReserved = data.reserved === true;
-            const reservedTime = data.reservedAt || 0;
             const reserverName = data.reservedBy || '다른 작업자';
-            const isExpired = (now - reservedTime) > RESERVE_EXPIRE_MS;
 
-            if (isReserved && !isExpired && reserverName === currentUserName) {
+            if (isReserved && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n예약을 해제(취소)하시겠습니까?`)) {
                     await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '' }, { merge: true });
                     showToast(`[${locId}] 예약 해제 완료`);
@@ -633,8 +655,8 @@ window.copyLocationToClipboard = async (event, locId) => {
                 return;
             }
 
-            if (isReserved && !isExpired) {
-                const rTime = new Date(reservedTime);
+            if (isReserved) {
+                const rTime = new Date(data.reservedAt || 0);
                 const timeStr = `${rTime.getHours()}:${String(rTime.getMinutes()).padStart(2, '0')}`;
 
                 if (confirm(`[${locId}] 로케이션은 현재 [${reserverName}]님이 ${timeStr}부터 사용(예약) 중입니다.\n강제로 예약을 뺏어오시겠습니까?`)) {
