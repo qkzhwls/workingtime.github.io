@@ -411,7 +411,7 @@ window.syncIncomingData = async () => {
                 'source': row.source || '기타',
                 ...row
             };
-        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0);
+        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['공장출고예상일'] && row['공장출고예상일'].toString().trim() !== ''); // 수정: 날짜 없는 항목 제외 조건 추가
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
@@ -895,6 +895,10 @@ window.renderIncomingQueue = function() {
     list = list.filter(item => {
         if(filterSource !== 'all' && item.source !== filterSource) return false;
         if(existingLocMap[item['상품코드']]) return false; 
+        
+        // 추가: 도착일(공장출고예상일)이 비어있는 경우 리스트에서 제외
+        if(!item['공장출고예상일'] || item['공장출고예상일'].toString().trim() === '') return false;
+        
         return true;
     });
 
