@@ -27,11 +27,16 @@
         .usage-table td { padding: 8px 12px; border: 1px solid #ddd; }
         .usage-table tr:nth-child(even) { background-color: #f9f9f9; }
 
-        /* 업로드 영역 스타일 (3개로 분할) */
-        .upload-compact { display: flex; align-items: center; background: white; padding: 8px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 13px; gap: 10px; }
-        .upload-section { display: flex; align-items: center; gap: 5px; }
-        .upload-divider { width: 1px; height: 20px; background: #ccc; margin: 0 5px; }
-        .upload-compact input { font-size: 11px; width: 150px; }
+        /* [신규] 공간 절약형 업로드 드롭다운 메뉴 스타일 */
+        .upload-dropdown { position: relative; display: inline-block; }
+        .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
+        .btn-main-upload:hover { background: #555; }
+        .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
+        .upload-dropdown:hover .upload-menu { display: block; }
+        .upload-menu label { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
+        .upload-menu label:hover { background: #f0f4ff; color: var(--primary); }
+        .upload-menu label:last-child { border-bottom: none; }
+        .upload-menu input[type="file"] { display: none; } /* 기존 못생긴 파일 선택기 숨김 */
 
         .action-bar { margin: 0 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; background: white; padding: 10px 15px; border-radius: 8px; border: 1px solid #ddd; }
         .action-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 150px; }
@@ -102,8 +107,6 @@
         .btn-modal-save { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
         .btn-modal-cancel { padding: 8px 16px; background: #888; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
 
-        #firebase-guide { display: none; background: #ffebee; border: 2px solid #ff5252; margin: 20px; padding: 20px; border-radius: 8px; }
-
         .loc-copy-cell {
             cursor: copy;
             font-weight: bold;
@@ -147,9 +150,31 @@
             opacity: 1;
             bottom: 50px;
         }
+
+        /* [신규] 전체 화면 로딩 오버레이 (클릭 차단) */
+        .loading-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.75); z-index: 999999; 
+            flex-direction: column; justify-content: center; align-items: center; color: white;
+            backdrop-filter: blur(3px);
+        }
+        .spinner {
+            border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--primary);
+            border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loading-text { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
+        .loading-subtext { font-size: 13px; color: #ccc; margin-top: 10px; }
     </style>
 </head>
 <body onclick="closeAllPopups()">
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loading-text">데이터 동기화 중입니다...</div>
+        <div class="loading-subtext">창을 닫거나 새로고침하지 마세요. (클릭 방지 작동 중)</div>
+    </div>
+
     <div id="firebase-guide">
         <pre>match /Locations/{document=**} { allow read, write: if true; }</pre>
     </div>
@@ -167,20 +192,21 @@
             </div>
         </div>
         
-        <div class="upload-compact">
-            <div class="upload-section">
-                <strong style="color:var(--primary);">A창고(로케이션):</strong> 
-                <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv" title="기존 로케이션 엑셀 업로드">
-            </div>
-            <div class="upload-divider"></div>
-            <div class="upload-section">
-                <strong style="color:#d32f2f;">직진배송데이터:</strong> 
-                <input type="file" id="excel-upload-b-zikjin" accept=".xls,.xlsx,.csv" title="직진배송 엑셀 업로드">
-            </div>
-            <div class="upload-divider"></div>
-            <div class="upload-section">
-                <strong style="color:#4caf50;">주차별데이터:</strong> 
-                <input type="file" id="excel-upload-b-weekly" accept=".xls,.xlsx,.csv" title="주차별데이터 엑셀 업로드">
+        <div class="upload-dropdown">
+            <button class="btn-main-upload">📥 엑셀 데이터 업로드 ▼</button>
+            <div class="upload-menu">
+                <label>
+                    <span style="color:var(--primary);">A창고</span> (현재 로케이션)
+                    <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv">
+                </label>
+                <label>
+                    <span style="color:#d32f2f;">B창고</span> (직진배송데이터)
+                    <input type="file" id="excel-upload-b-zikjin" accept=".xls,.xlsx,.csv">
+                </label>
+                <label>
+                    <span style="color:#4caf50;">B창고</span> (주차별데이터)
+                    <input type="file" id="excel-upload-b-weekly" accept=".xls,.xlsx,.csv">
+                </label>
             </div>
         </div>
     </div>
