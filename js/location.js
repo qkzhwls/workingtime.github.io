@@ -301,42 +301,36 @@ window.saveSheetUrl = async () => {
 };
 
 
-// [핵심 업그레이드] 3중 다이렉트 통신 로직 (방화벽 우회용)
+// [강력 텍스트 정제 함수] 줄바꿈, 띄어쓰기, 괄호 등 모든 불필요한 기호를 파괴하고 글자만 남김
+const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
+
 window.syncIncomingData = async () => {
     if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
-    window.showLoading("🔄 원본 시트에서 데이터를 가져오는 중입니다. (방화벽 통과 시도)");
+    window.showLoading("🔄 원본 시트에서 데이터를 가져오는 중입니다...");
     
     try {
         let combinedData = [];
 
-        // 데이터를 가져오고 파싱하는 독립 함수
         const fetchAndParse = async (url) => {
             if (!url) return [];
             
             let arrayBuffer;
-            
             try {
-                // 1차 시도: 구글 서버로 돌직구 다이렉트 접속 (프록시 안 거침)
-                console.log("1차 시도: 구글 다이렉트 접속 시도...");
+                console.log("1차 다이렉트 통신 시도...");
                 const res1 = await fetch(url);
                 if (!res1.ok) throw new Error("1차 다이렉트 연결 실패");
                 arrayBuffer = await res1.arrayBuffer();
-                console.log("✅ 1차 다이렉트 접속 성공!");
             } catch (e1) {
-                console.log("1차 다이렉트 접속 차단됨. 2차 allorigins 프록시 시도...");
+                console.log("1차 실패, 2차 우회 통로 시도...");
                 try {
-                    // 2차 시도: allorigins.win (가장 안정적인 프록시)
                     const res2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
-                    if (!res2.ok) throw new Error("2차 프록시 응답 실패");
+                    if (!res2.ok) throw new Error("2차 프록시 실패");
                     arrayBuffer = await res2.arrayBuffer();
-                    console.log("✅ 2차 우회 통로 성공!");
                 } catch (e2) {
-                    console.log("2차 우회 차단됨. 마지막 3차 corsproxy.io 시도...");
-                    // 3차 시도: corsproxy.io
+                    console.log("2차 실패, 3차 우회 통로 시도...");
                     const res3 = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
-                    if (!res3.ok) throw new Error("3차 프록시 응답 실패");
+                    if (!res3.ok) throw new Error("3차 프록시 실패");
                     arrayBuffer = await res3.arrayBuffer();
-                    console.log("✅ 3차 우회 통로 성공!");
                 }
             }
 
@@ -344,15 +338,18 @@ window.syncIncomingData = async () => {
             const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
             
             let headerRowIndex = -1;
-            let cleanHeaders = [];
+            let pureHeaders = [];
             
-            // 시트 위에서부터 최대 15줄까지만 탐색하여 진짜 제목 줄 찾기
-            for (let i = 0; i < Math.min(15, rawData.length); i++) {
+            // 시트 위에서 20줄까지만 탐색 (완벽 정제 알고리즘 적용)
+            for (let i = 0; i < Math.min(20, rawData.length); i++) {
                 const row = rawData[i];
-                const joined = row.join('').replace(/\s+/g, ''); 
-                if (joined.includes('어드민상품코드') || joined.includes('상품코드')) {
+                // 각 칸의 줄바꿈과 공백을 싹 다 지운 순수 글자 배열 생성
+                const cleanRow = row.map(h => cleanKey(h));
+                
+                // 순수 글자 중에 '어드민상품코드' 또는 '상품코드'가 있는지 확인
+                if (cleanRow.includes('어드민상품코드') || cleanRow.includes('상품코드')) {
                     headerRowIndex = i;
-                    cleanHeaders = row.map(h => (h||'').toString().replace(/\s+/g, ''));
+                    pureHeaders = cleanRow; // 정제된 헤더를 기준키로 사용
                     break;
                 }
             }
@@ -363,11 +360,11 @@ window.syncIncomingData = async () => {
             for (let i = headerRowIndex + 1; i < rawData.length; i++) {
                 let rowObj = {};
                 let isEmpty = true;
-                for (let j = 0; j < cleanHeaders.length; j++) {
-                    const key = cleanHeaders[j];
+                for (let j = 0; j < pureHeaders.length; j++) {
+                    const key = pureHeaders[j];
                     if (key) {
                         rowObj[key] = rawData[i][j];
-                        if (rawData[i][j]) isEmpty = false;
+                        if (rawData[i][j] !== "") isEmpty = false;
                     }
                 }
                 if (!isEmpty) parsedList.push(rowObj);
@@ -375,7 +372,6 @@ window.syncIncomingData = async () => {
             return parsedList;
         };
 
-        // 오더리스트와 사입리스트 병렬 다운로드
         const [orderData, buyData] = await Promise.all([
             fetchAndParse(window.sheetUrlOrder),
             fetchAndParse(window.sheetUrlBuy)
@@ -383,10 +379,12 @@ window.syncIncomingData = async () => {
 
         combinedData = [...orderData, ...buyData];
 
+        // 정제된 헤더키(공백, 괄호 없음)를 기준으로 맵핑
         const finalJson = combinedData.map(row => {
             let code = row['어드민상품코드'] || row['상품코드'] || '';
             let name = row['상품명'] || row['공급처상품명'] || '';
-            let qty = row['총미입고수량(본사입고기준)'] || row['오더수량'] || row['미입고수량'] || 0;
+            // 총미입고수량(본사입고기준) -> 정제 후 '총미입고수량본사입고기준'
+            let qty = row['총미입고수량본사입고기준'] || row['오더수량'] || row['미입고수량'] || 0;
             return {
                 '상품코드': code,
                 '상품명': name,
@@ -394,7 +392,7 @@ window.syncIncomingData = async () => {
                 '입고대기수량': qty,
                 ...row
             };
-        }).filter(row => row['상품코드']); 
+        }).filter(row => row['상품코드']); // 상품코드가 없는 빈 줄은 버림
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
@@ -402,11 +400,11 @@ window.syncIncomingData = async () => {
             alert(`✅ 입고 대기 상품 연동 완료!\n(오더리스트 ${orderData.length}건, 사입리스트 ${buyData.length}건)`);
         } else { 
             window.hideLoading(); 
-            alert("시트에서 데이터를 찾지 못했습니다. 원본 파일에 '어드민 상품코드' 항목이 있는지 확인해주세요."); 
+            alert("시트에서 데이터를 찾지 못했습니다.\n원본 파일 상단에 '어드민 상품코드' 또는 '상품코드' 항목이 존재하는지 확인해주세요."); 
         }
     } catch (error) { 
         window.hideLoading(); 
-        alert(`🚨 3중 통신망이 모두 차단되었습니다.\n\n사내 보안 프로그램(방화벽)이 시스템의 외부 데이터 요청을 완전히 막고 있습니다.\n이 경우 엑셀 다운로드 후 수동 업로드를 이용하셔야 합니다.`); 
+        alert(`🚨 연결 실패!\n사내 방화벽이 외부 접근을 막고 있거나 링크가 잘못되었습니다.\n(${error.message})`); 
         console.error("데이터 동기화 실패:", error);
     }
 };
