@@ -27,15 +27,14 @@
         .usage-table td { padding: 8px 12px; border: 1px solid #ddd; }
         .usage-table tr:nth-child(even) { background-color: #f9f9f9; }
 
-        /* [수정] 공간 절약형 업로드 드롭다운 메뉴 스타일 (hover 기능 제거) */
         .upload-dropdown { position: relative; display: inline-block; margin-left: 10px; }
         .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
         .btn-main-upload:hover { background: #555; }
         .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
-        .upload-menu label { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
-        .upload-menu label:hover { background: #f0f4ff; color: var(--primary); }
-        .upload-menu label:last-child { border-bottom: none; }
-        .upload-menu input[type="file"] { display: none; } /* 기존 못생긴 파일 선택기 숨김 */
+        .upload-menu label, .upload-menu div.menu-item { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
+        .upload-menu label:hover, .upload-menu div.menu-item:hover { background: #f0f4ff; color: var(--primary); }
+        .upload-menu input[type="file"] { display: none; } 
+        .menu-divider { border-top: 2px solid #ddd; margin: 0; }
 
         .action-bar { margin: 0 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; background: white; padding: 10px 15px; border-radius: 8px; border: 1px solid #ddd; }
         .action-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 150px; }
@@ -94,7 +93,7 @@
             background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;
         }
         .modal-content {
-            background: white; padding: 25px; border-radius: 10px; width: 350px;
+            background: white; padding: 25px; border-radius: 10px; width: 400px;
             box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         }
         .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #333; }
@@ -106,62 +105,15 @@
         .btn-modal-save { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
         .btn-modal-cancel { padding: 8px 16px; background: #888; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
 
-        .loc-copy-cell {
-            cursor: copy;
-            font-weight: bold;
-            font-size: 15px;
-            transition: color 0.2s;
-        }
-        .loc-copy-cell:hover {
-            color: var(--primary);
-            text-decoration: underline;
-        }
-        .badge-reserved {
-            display: inline-block;
-            background: #ff9800; 
-            color: white;
-            font-weight: bold;
-            font-size: 11px;
-            padding: 3px 6px;
-            border-radius: 4px;
-            margin-top: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        #toast {
-            visibility: hidden;
-            min-width: 250px;
-            background-color: #333;
-            color: #fff;
-            text-align: center;
-            border-radius: 8px;
-            padding: 12px;
-            position: fixed;
-            z-index: 10001;
-            left: 50%;
-            bottom: 30px;
-            transform: translateX(-50%);
-            font-size: 14px;
-            opacity: 0;
-            transition: opacity 0.3s, bottom 0.3s;
-        }
-        #toast.show {
-            visibility: visible;
-            opacity: 1;
-            bottom: 50px;
-        }
+        .loc-copy-cell { cursor: copy; font-weight: bold; font-size: 15px; transition: color 0.2s; }
+        .loc-copy-cell:hover { color: var(--primary); text-decoration: underline; }
+        .badge-reserved { display: inline-block; background: #ff9800; color: white; font-weight: bold; font-size: 11px; padding: 3px 6px; border-radius: 4px; margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        
+        #toast { visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center; border-radius: 8px; padding: 12px; position: fixed; z-index: 10001; left: 50%; bottom: 30px; transform: translateX(-50%); font-size: 14px; opacity: 0; transition: opacity 0.3s, bottom 0.3s; }
+        #toast.show { visibility: visible; opacity: 1; bottom: 50px; }
 
-        /* 전체 화면 로딩 오버레이 (클릭 차단) */
-        .loading-overlay {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0, 0, 0, 0.75); z-index: 999999; 
-            flex-direction: column; justify-content: center; align-items: center; color: white;
-            backdrop-filter: blur(3px);
-        }
-        .spinner {
-            border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--primary);
-            border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite;
-            margin-bottom: 20px;
-        }
+        .loading-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75); z-index: 999999; flex-direction: column; justify-content: center; align-items: center; color: white; backdrop-filter: blur(3px); }
+        .spinner { border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--primary); border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 20px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .loading-text { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
         .loading-subtext { font-size: 13px; color: #ccc; margin-top: 10px; }
@@ -174,9 +126,7 @@
         <div class="loading-subtext">창을 닫거나 새로고침하지 마세요. (클릭 방지 작동 중)</div>
     </div>
 
-    <div id="firebase-guide">
-        <pre>match /Locations/{document=**} { allow read, write: if true; }</pre>
-    </div>
+    <div id="firebase-guide" style="display:none;"><pre>match /Locations/{document=**} { allow read, write: if true; }</pre></div>
 
     <div class="controls-header">
         <div class="tabs">
@@ -185,14 +135,12 @@
             
             <div class="usage-container">
                 <button class="btn-usage" onclick="toggleUsagePopup(event)">📊 사용률</button>
-                <div class="usage-popup" id="usage-popup" onclick="event.stopPropagation()">
-                    <div style="padding: 10px; color: #888;">사용률 계산 중...</div>
-                </div>
+                <div class="usage-popup" id="usage-popup" onclick="event.stopPropagation()"></div>
             </div>
         </div>
         
         <div class="upload-dropdown">
-            <button class="btn-main-upload" onclick="toggleUploadMenu(event)">📥 엑셀 데이터 업로드 ▼</button>
+            <button class="btn-main-upload" onclick="toggleUploadMenu(event)">📥 데이터 연동/업로드 ▼</button>
             <div class="upload-menu" id="upload-menu" onclick="event.stopPropagation()">
                 <label>
                     <span style="color:var(--primary);">로케이션최신화</span>
@@ -206,6 +154,13 @@
                     <span style="color:#4caf50;">주차별데이터</span>
                     <input type="file" id="excel-upload-b-weekly" accept=".xls,.xlsx,.csv">
                 </label>
+                <div class="menu-divider"></div>
+                <div class="menu-item" style="text-align:center; color:#ff9800;" onclick="syncIncomingData()">
+                    🔄 <strong>입고예정(구글시트) 동기화</strong>
+                </div>
+                <div class="menu-item" style="text-align:center; color:#888; font-size:12px;" onclick="openSheetModal(event)">
+                    ⚙️ 구글시트 링크 설정
+                </div>
             </div>
         </div>
     </div>
@@ -225,51 +180,14 @@
             <table class="list-table">
                 <thead>
                     <tr>
-                        <th class="checkbox-cell">
-                            <input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)">
-                        </th>
-                        <th style="width: 80px;">
-                            <div class="th-content">
-                                <span class="title-text">동</span>
-                                <span class="filter-btn" id="btn-filter-dong" onclick="toggleFilterPopup(event, 'pop-dong')">▼</span>
-                            </div>
-                        </th>
-                        <th style="width: 80px;">
-                            <div class="th-content">
-                                <span class="title-text">위치</span>
-                                <span class="filter-btn" id="btn-filter-pos" onclick="toggleFilterPopup(event, 'pop-pos')">▼</span>
-                            </div>
-                        </th>
-                        <th style="width: 150px;">
-                            <div class="th-content">
-                                <span class="title-text">로케이션</span>
-                                <span class="filter-btn" id="btn-filter-loc" onclick="toggleFilterPopup(event, 'pop-loc')">▼</span>
-                            </div>
-                        </th>
-                        <th style="width: 150px;">
-                            <div class="th-content">
-                                <span class="title-text">상품코드</span>
-                                <span class="filter-btn" id="btn-filter-code" onclick="toggleFilterPopup(event, 'pop-code')">▼</span>
-                            </div>
-                        </th>
-                        <th>
-                            <div class="th-content">
-                                <span class="title-text">상품명</span>
-                                <span class="filter-btn" id="btn-filter-name" onclick="toggleFilterPopup(event, 'pop-name')">▼</span>
-                            </div>
-                        </th>
-                        <th style="width: 180px;">
-                            <div class="th-content">
-                                <span class="title-text">옵션</span>
-                                <span class="filter-btn" id="btn-filter-option" onclick="toggleFilterPopup(event, 'pop-option')">▼</span>
-                            </div>
-                        </th>
-                        <th style="width: 130px;">
-                            <div class="th-content">
-                                <span class="title-text">정상재고</span>
-                                <span class="filter-btn" id="btn-filter-stock" onclick="toggleFilterPopup(event, 'pop-stock')">▼</span>
-                            </div>
-                        </th>
+                        <th class="checkbox-cell"><input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)"></th>
+                        <th style="width: 80px;"><div class="th-content"><span class="title-text">동</span><span class="filter-btn" id="btn-filter-dong" onclick="toggleFilterPopup(event, 'pop-dong')">▼</span></div></th>
+                        <th style="width: 80px;"><div class="th-content"><span class="title-text">위치</span><span class="filter-btn" id="btn-filter-pos" onclick="toggleFilterPopup(event, 'pop-pos')">▼</span></div></th>
+                        <th style="width: 150px;"><div class="th-content"><span class="title-text">로케이션</span><span class="filter-btn" id="btn-filter-loc" onclick="toggleFilterPopup(event, 'pop-loc')">▼</span></div></th>
+                        <th style="width: 150px;"><div class="th-content"><span class="title-text">상품코드</span><span class="filter-btn" id="btn-filter-code" onclick="toggleFilterPopup(event, 'pop-code')">▼</span></div></th>
+                        <th><div class="th-content"><span class="title-text">상품명</span><span class="filter-btn" id="btn-filter-name" onclick="toggleFilterPopup(event, 'pop-name')">▼</span></div></th>
+                        <th style="width: 180px;"><div class="th-content"><span class="title-text">옵션</span><span class="filter-btn" id="btn-filter-option" onclick="toggleFilterPopup(event, 'pop-option')">▼</span></div></th>
+                        <th style="width: 130px;"><div class="th-content"><span class="title-text">정상재고</span><span class="filter-btn" id="btn-filter-stock" onclick="toggleFilterPopup(event, 'pop-stock')">▼</span></div></th>
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
@@ -280,47 +198,45 @@
     </div>
 
     <div id="view-map" class="content-view" style="display:none;">
-        <div class="map-container" style="text-align:center; padding:100px; background:#fff; margin:20px; border-radius:12px; border:1px solid #ddd;">
-            🚧 도면 보기 기능 준비 중
-        </div>
+        <div class="map-container" style="text-align:center; padding:100px; background:#fff; margin:20px; border-radius:12px; border:1px solid #ddd;">🚧 도면 보기 기능 준비 중</div>
     </div>
 
-    <div id="pop-dong" class="filter-popup"></div>
-    <div id="pop-pos" class="filter-popup"></div>
-    <div id="pop-loc" class="filter-popup"></div>
-    <div id="pop-code" class="filter-popup"></div>
-    <div id="pop-name" class="filter-popup"></div>
-    <div id="pop-option" class="filter-popup"></div>
-    <div id="pop-stock" class="filter-popup"></div>
+    <div id="pop-dong" class="filter-popup"></div><div id="pop-pos" class="filter-popup"></div><div id="pop-loc" class="filter-popup"></div>
+    <div id="pop-code" class="filter-popup"></div><div id="pop-name" class="filter-popup"></div><div id="pop-option" class="filter-popup"></div><div id="pop-stock" class="filter-popup"></div>
 
     <div id="edit-modal" class="modal-overlay" onclick="closeEditModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
             <div class="modal-header">상품 정보 수동 수정</div>
             <div class="modal-body">
-                <label>로케이션 (수정 불가)</label>
-                <input type="text" id="modal-id" readonly>
-                
-                <label>동</label>
-                <input type="text" id="modal-dong" placeholder="예: 1">
-                
-                <label>위치</label>
-                <input type="text" id="modal-pos" placeholder="예: 1">
-                
-                <label>상품코드</label>
-                <input type="text" id="modal-code" placeholder="상품코드 입력">
-                
-                <label>상품명</label>
-                <input type="text" id="modal-name" placeholder="상품명 입력">
-                
-                <label>옵션</label>
-                <input type="text" id="modal-option" placeholder="옵션 입력">
-                
-                <label>정상재고</label>
-                <input type="number" id="modal-stock" placeholder="0">
+                <label>로케이션 (수정 불가)</label><input type="text" id="modal-id" readonly>
+                <label>동</label><input type="text" id="modal-dong" placeholder="예: 1">
+                <label>위치</label><input type="text" id="modal-pos" placeholder="예: 1">
+                <label>상품코드</label><input type="text" id="modal-code" placeholder="상품코드 입력">
+                <label>상품명</label><input type="text" id="modal-name" placeholder="상품명 입력">
+                <label>옵션</label><input type="text" id="modal-option" placeholder="옵션 입력">
+                <label>정상재고</label><input type="number" id="modal-stock" placeholder="0">
             </div>
             <div class="modal-footer">
                 <button class="btn-modal-cancel" onclick="closeEditModal()">취소</button>
                 <button class="btn-modal-save" onclick="saveManualEdit()">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="sheet-modal" class="modal-overlay" onclick="closeSheetModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">입고예정 구글시트 연동 설정</div>
+            <div class="modal-body">
+                <label style="color:var(--primary);">구글시트 CSV 배포 링크</label>
+                <input type="text" id="modal-sheet-url" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
+                <div style="font-size:11px; color:#666; margin-top:5px; line-height:1.4;">
+                    ※ 구글시트 상단 메뉴의 <strong>[파일] > [공유] > [웹에 게시]</strong> 를 클릭하고,<br>
+                    형식을 '웹페이지'가 아닌 <strong>'CSV'</strong>로 변경한 뒤 생성된 링크를 넣으세요.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal-cancel" onclick="closeSheetModal()">취소</button>
+                <button class="btn-modal-save" onclick="saveSheetUrl()">저장</button>
             </div>
         </div>
     </div>
@@ -343,7 +259,6 @@
             const pop = document.getElementById(id);
             const isVisible = pop.style.display === 'block';
             closeAllPopups();
-            
             if (!isVisible) {
                 const rect = e.target.getBoundingClientRect();
                 pop.style.display = 'block';
@@ -352,18 +267,14 @@
             }
         }
 
-        // [신규] 업로드 메뉴 토글 함수
         function toggleUploadMenu(e) {
             e.stopPropagation();
             const menu = document.getElementById('upload-menu');
             const isVisible = menu.style.display === 'block';
             closeAllPopups(); 
-            if (!isVisible) {
-                menu.style.display = 'block';
-            }
+            if (!isVisible) { menu.style.display = 'block'; }
         }
 
-        // [수정] 창을 닫을 때 업로드 메뉴도 함께 닫히도록 추가
         window.closeAllPopups = function() {
             document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
             const usagePop = document.getElementById('usage-popup');
@@ -372,16 +283,15 @@
             if(uploadMenu) uploadMenu.style.display = 'none';
         }
         
-        document.querySelectorAll('.filter-popup').forEach(p => {
-            p.addEventListener('click', function(e) {
-                e.stopPropagation();
-            });
-        });
+        document.querySelectorAll('.filter-popup').forEach(p => { p.addEventListener('click', function(e) { e.stopPropagation(); }); });
 
         window.closeEditModal = function(e) {
-            if (!e || e.target.id === 'edit-modal') {
-                document.getElementById('edit-modal').style.display = 'none';
-            }
+            if (!e || e.target.id === 'edit-modal') document.getElementById('edit-modal').style.display = 'none';
+        }
+        
+        // [신규] 구글시트 모달 닫기
+        window.closeSheetModal = function(e) {
+            if (!e || e.target.id === 'sheet-modal') document.getElementById('sheet-modal').style.display = 'none';
         }
     </script>
 </body>
