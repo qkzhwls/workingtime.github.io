@@ -27,12 +27,11 @@
         .usage-table td { padding: 8px 12px; border: 1px solid #ddd; }
         .usage-table tr:nth-child(even) { background-color: #f9f9f9; }
 
-        /* [신규] 공간 절약형 업로드 드롭다운 메뉴 스타일 */
-        .upload-dropdown { position: relative; display: inline-block; }
+        /* [수정] 공간 절약형 업로드 드롭다운 메뉴 스타일 (hover 기능 제거) */
+        .upload-dropdown { position: relative; display: inline-block; margin-left: 10px; }
         .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
         .btn-main-upload:hover { background: #555; }
         .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
-        .upload-dropdown:hover .upload-menu { display: block; }
         .upload-menu label { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
         .upload-menu label:hover { background: #f0f4ff; color: var(--primary); }
         .upload-menu label:last-child { border-bottom: none; }
@@ -151,7 +150,7 @@
             bottom: 50px;
         }
 
-        /* [신규] 전체 화면 로딩 오버레이 (클릭 차단) */
+        /* 전체 화면 로딩 오버레이 (클릭 차단) */
         .loading-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.75); z-index: 999999; 
@@ -193,18 +192,18 @@
         </div>
         
         <div class="upload-dropdown">
-            <button class="btn-main-upload">📥 엑셀 데이터 업로드 ▼</button>
-            <div class="upload-menu">
+            <button class="btn-main-upload" onclick="toggleUploadMenu(event)">📥 엑셀 데이터 업로드 ▼</button>
+            <div class="upload-menu" id="upload-menu" onclick="event.stopPropagation()">
                 <label>
-                    <span style="color:var(--primary);">A창고</span> (현재 로케이션)
+                    <span style="color:var(--primary);">로케이션최신화</span>
                     <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv">
                 </label>
                 <label>
-                    <span style="color:#d32f2f;">B창고</span> (직진배송데이터)
+                    <span style="color:#d32f2f;">직진배송데이터</span>
                     <input type="file" id="excel-upload-b-zikjin" accept=".xls,.xlsx,.csv">
                 </label>
                 <label>
-                    <span style="color:#4caf50;">B창고</span> (주차별데이터)
+                    <span style="color:#4caf50;">주차별데이터</span>
                     <input type="file" id="excel-upload-b-weekly" accept=".xls,.xlsx,.csv">
                 </label>
             </div>
@@ -353,10 +352,24 @@
             }
         }
 
+        // [신규] 업로드 메뉴 토글 함수
+        function toggleUploadMenu(e) {
+            e.stopPropagation();
+            const menu = document.getElementById('upload-menu');
+            const isVisible = menu.style.display === 'block';
+            closeAllPopups(); 
+            if (!isVisible) {
+                menu.style.display = 'block';
+            }
+        }
+
+        // [수정] 창을 닫을 때 업로드 메뉴도 함께 닫히도록 추가
         window.closeAllPopups = function() {
             document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
             const usagePop = document.getElementById('usage-popup');
             if(usagePop) usagePop.style.display = 'none';
+            const uploadMenu = document.getElementById('upload-menu');
+            if(uploadMenu) uploadMenu.style.display = 'none';
         }
         
         document.querySelectorAll('.filter-popup').forEach(p => {
