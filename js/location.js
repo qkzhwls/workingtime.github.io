@@ -387,8 +387,9 @@ window.syncIncomingData = async () => {
             let code = row['어드민상품코드'] || row['상품코드'] || '';
             let name = row['상품명'] || row['공급처상품명'] || '';
             
-            // 수량: 총미입고수량 우선 (오더수량은 무시)
+            // 수량: 총미입고수량, 최종미입고수량(추가입고예정), 미입고수량 순으로 확인
             let rawQty = row['총미입고수량본사입고기준'];
+            if (rawQty === undefined || rawQty === "") rawQty = row['최종미입고수량추가입고예정'];
             if (rawQty === undefined || rawQty === "") rawQty = row['미입고수량'];
             let qty = Number(rawQty) || 0;
             
@@ -411,7 +412,7 @@ window.syncIncomingData = async () => {
                 'source': row.source || '기타',
                 ...row
             };
-        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['공장출고예상일'] && row['공장출고예상일'].toString().trim() !== ''); // 수정: 날짜 없는 항목 제외 조건 추가
+        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['공장출고예상일'] && row['공장출고예상일'].toString().trim() !== ''); // 수정: 날짜 없는 항목 제외 조건 유지
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
