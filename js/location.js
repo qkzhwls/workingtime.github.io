@@ -93,11 +93,9 @@ function setupRealtimeListenerA() {
             if (docSnap.id === 'INFO_CONFIG') {
                 const conf = docSnap.data();
                 if (conf.capacity2F) window.capacity2F = conf.capacity2F;
-                
                 if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
                 if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
                 if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
-
                 if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
                 if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
                 return;
@@ -278,7 +276,6 @@ window.showRecommendation = function() {
     }, 500); 
 };
 
-
 window.openSheetModal = (e) => {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -301,10 +298,8 @@ window.saveSheetUrl = async () => {
 };
 
 
-// [강력 텍스트 정제 함수] 줄바꿈, 띄어쓰기, 괄호 등 완벽하게 파괴
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 
-// [핵심 변경] 바이너리(ArrayBuffer) 방식 폐기 -> 직독직해(Raw Text) 파싱 방식으로 교체
 window.syncIncomingData = async () => {
     if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
     window.showLoading("🔄 원본 시트에서 데이터를 텍스트로 읽어오는 중입니다...");
@@ -312,54 +307,45 @@ window.syncIncomingData = async () => {
     try {
         let combinedData = [];
 
-        const fetchAndParse = async (url) => {
+        // [수정] 출처(제작/사입)를 구분하기 위해 source 인자 추가
+        const fetchAndParse = async (url, sourceName) => {
             if (!url) return [];
             
             let textData = "";
             try {
-                console.log("1차 다이렉트 텍스트 통신 시도...");
                 const res1 = await fetch(url);
                 if (!res1.ok) throw new Error("1차 다이렉트 연결 실패");
-                textData = await res1.text(); // ArrayBuffer가 아닌 Text로 완벽하게 긁어옴
+                textData = await res1.text(); 
             } catch (e1) {
-                console.log("1차 실패, 2차 우회 통로 시도...");
                 try {
                     const res2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
                     if (!res2.ok) throw new Error("2차 프록시 실패");
                     textData = await res2.text();
                 } catch (e2) {
-                    console.log("2차 실패, 3차 우회 통로 시도...");
                     const res3 = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
                     if (!res3.ok) throw new Error("3차 프록시 실패");
                     textData = await res3.text();
                 }
             }
 
-            // CSV 텍스트 데이터를 그대로 XLSX 엔진에 밀어넣기
             const workbook = XLSX.read(textData, { type: 'string' });
             const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
             
             let headerRowIndex = -1;
             let pureHeaders = [];
             
-            // 시트 위에서 최대 20줄까지만 탐색 (완벽 정제 알고리즘 적용)
             for (let i = 0; i < Math.min(20, rawData.length); i++) {
                 const row = rawData[i];
-                // 각 칸의 줄바꿈과 공백을 싹 다 지운 순수 글자 배열 생성
                 const cleanRow = row.map(h => cleanKey(h));
                 
-                // 순수 글자 중에 '어드민상품코드' 또는 '상품코드'가 있는지 확인
                 if (cleanRow.includes('어드민상품코드') || cleanRow.includes('상품코드')) {
                     headerRowIndex = i;
-                    pureHeaders = cleanRow; // 정제된 헤더를 기준키로 사용
+                    pureHeaders = cleanRow; 
                     break;
                 }
             }
 
-            if (headerRowIndex === -1) {
-                console.warn("이 파일에서 헤더를 찾지 못했습니다.", rawData.slice(0, 5));
-                return []; 
-            }
+            if (headerRowIndex === -1) return []; 
 
             const parsedList = [];
             for (let i = headerRowIndex + 1; i < rawData.length; i++) {
@@ -372,28 +358,34 @@ window.syncIncomingData = async () => {
                         if (rawData[i][j] !== "" && rawData[i][j] !== undefined) isEmpty = false;
                     }
                 }
-                if (!isEmpty) parsedList.push(rowObj);
+                if (!isEmpty) {
+                    rowObj.source = sourceName; // 출처 태그 삽입
+                    parsedList.push(rowObj);
+                }
             }
             return parsedList;
         };
 
         const [orderData, buyData] = await Promise.all([
-            fetchAndParse(window.sheetUrlOrder),
-            fetchAndParse(window.sheetUrlBuy)
+            fetchAndParse(window.sheetUrlOrder, '제작'),
+            fetchAndParse(window.sheetUrlBuy, '사입')
         ]);
 
         combinedData = [...orderData, ...buyData];
 
-        // 정제된 헤더키(공백, 괄호 없음)를 기준으로 맵핑
+        // [수정] 공장출고예상일 추출 추가
         const finalJson = combinedData.map(row => {
             let code = row['어드민상품코드'] || row['상품코드'] || '';
             let name = row['상품명'] || row['공급처상품명'] || '';
             let qty = row['총미입고수량본사입고기준'] || row['오더수량'] || row['미입고수량'] || 0;
+            let date = row['공장출고예상일자'] || row['공장출고예상일'] || row['출고예상일'] || '';
             return {
                 '상품코드': code,
                 '상품명': name,
                 '옵션': row['옵션'] || '',
                 '입고대기수량': qty,
+                '공장출고예상일': date,
+                'source': row.source || '기타',
                 ...row
             };
         }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '');
@@ -977,37 +969,88 @@ window.cancelPreAssignment = async () => {
     } catch (error) { console.error(error); alert("선지정 취소 실패"); }
 };
 
-
+// [신규 탑재] 사이드바 내 필터링 및 렌더링 함수
 window.renderIncomingQueue = function() {
     const container = document.getElementById('incoming-list');
     if(!container) return;
 
+    // 필터 값 읽기
+    const filterSource = document.getElementById('filter-source')?.value || 'all';
+    const filterLoc = document.getElementById('filter-loc')?.value || 'unassigned';
+    const sortType = document.getElementById('sort-incoming')?.value || 'qty-desc';
+
+    // 기존 배치 및 선지정 카운트 추적
     let assignedMap = {};
+    let existingLocMap = {}; 
     originalData.forEach(loc => {
         if(loc.preAssigned && loc.preAssignedCode) {
             assignedMap[loc.preAssignedCode] = (assignedMap[loc.preAssignedCode] || 0) + 1;
+            existingLocMap[loc.preAssignedCode] = true;
+        }
+        if(loc.code && loc.code !== loc.id) {
+            existingLocMap[loc.code] = true;
         }
     });
 
-    let html = '';
+    let list = [];
     for(let code in incomingData) {
-        let item = incomingData[code];
+        list.push(incomingData[code]);
+    }
+
+    // 1차: 필터링 적용
+    list = list.filter(item => {
+        // 출처 분리 (제작/사입)
+        if(filterSource !== 'all' && item.source !== filterSource) return false;
+        
+        // 수량이 없는 과거 데이터 완벽 차단
+        if(!item['입고대기수량'] || Number(item['입고대기수량']) <= 0) return false;
+        
+        // 로케이션 미지정 상품만 보기
+        if(filterLoc === 'unassigned') {
+            if(existingLocMap[item['상품코드']]) return false;
+        }
+        return true;
+    });
+
+    // 2차: 정렬 적용
+    list.sort((a, b) => {
+        if(sortType === 'qty-desc') {
+            let qA = Number(a['입고대기수량'] || 0);
+            let qB = Number(b['입고대기수량'] || 0);
+            return qB - qA;
+        } else if(sortType === 'date-asc') {
+            let dA = a['공장출고예상일'] || '9999-99-99';
+            let dB = b['공장출고예상일'] || '9999-99-99';
+            return dA.localeCompare(dB);
+        }
+        return 0;
+    });
+
+    let html = '';
+    list.forEach(item => {
+        let code = item['상품코드'];
         let qty = item['입고대기수량'] || 0;
         let name = item['상품명'] || '';
+        let date = item['공장출고예상일'] || '-';
+        let src = item.source || '-';
         let assignedCount = assignedMap[code] || 0;
 
         html += `
             <div class="incoming-item" onclick="activatePreAssignMode('${code}', '${name.replace(/'/g, "\\'")}', '${qty}')">
-                <div style="font-weight:bold; color:var(--primary); font-size:14px; margin-bottom:4px;">${code}</div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <div style="font-weight:bold; color:var(--primary); font-size:14px;">${code}</div>
+                    <span style="font-size:10px; background:${src==='제작'?'#e3f2fd':'#fbe9e7'}; color:${src==='제작'?'#1976d2':'#d84315'}; padding:2px 5px; border-radius:3px; font-weight:bold;">${src}</span>
+                </div>
                 <div style="font-size:12px; color:#333; margin-bottom:6px;">${name}</div>
+                <div style="font-size:11px; color:#555; margin-bottom:6px;">출고예상일: <b style="color:#d32f2f;">${date}</b></div>
                 <div style="display:flex; justify-content:space-between; font-size:11px;">
                     <span style="color:#e65100; font-weight:bold;">대기: ${qty}개</span>
                     <span style="color:#888;">지정된 칸: <b style="color:#333;">${assignedCount}</b>칸</span>
                 </div>
             </div>
         `;
-    }
-    container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">입고 대기 상품이 없습니다.</div>';
+    });
+    container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">조건에 맞는 상품이 없습니다.</div>';
 };
 
 window.activatePreAssignMode = function(code, name, qty) {
