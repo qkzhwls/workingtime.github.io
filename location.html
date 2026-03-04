@@ -35,7 +35,6 @@
         .btn-settings { background: #607d8b; padding: 8px 12px; border-radius: 6px; font-weight: bold; border: none; color: white; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
         .btn-settings:hover { background: #455a64; }
         
-        /* [신규] 선지정 패널 열기 버튼 */
         .btn-incoming-panel { background: #e65100; padding: 8px 12px; border-radius: 6px; font-weight: bold; border: none; color: white; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
         .btn-incoming-panel:hover { background: #bf360c; }
 
@@ -127,7 +126,6 @@
         .loading-text { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
         .loading-subtext { font-size: 13px; color: #ccc; margin-top: 10px; }
 
-        /* [신규] 입고대기 사이드바 패널 */
         .incoming-sidebar { position: fixed; right: -360px; top: 0; width: 340px; height: 100vh; background: #fafafa; box-shadow: -4px 0 15px rgba(0,0,0,0.15); z-index: 9999; transition: right 0.3s ease; display: flex; flex-direction: column; }
         .incoming-sidebar.open { right: 0; }
         .incoming-header { background: #e65100; color: white; padding: 15px 20px; font-weight: bold; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
@@ -135,7 +133,6 @@
         .incoming-item { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 12px; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .incoming-item:hover { border-color: #e65100; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(230,81,0,0.15); }
         
-        /* [신규] 선지정 작동중 상단 배너 */
         .pre-assign-banner { display: none; position: fixed; top: 15px; left: 50%; transform: translateX(-50%); background: #e65100; color: white; padding: 12px 25px; border-radius: 30px; font-weight: bold; z-index: 10002; box-shadow: 0 4px 15px rgba(0,0,0,0.3); align-items: center; gap: 20px; font-size: 15px; }
         .pre-assign-banner button { background: white; color: #e65100; border: none; padding: 6px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .pre-assign-banner button:hover { background: #ffe0b2; }
@@ -201,7 +198,7 @@
                 <div class="upload-menu" id="upload-menu-2" onclick="event.stopPropagation()">
                     <label>
                         <span style="color:#d32f2f;">📂 1. 배송/주차별 데이터 업로드</span><br>
-                        <span style="font-size:11px; color:#666; font-weight:normal;">(파일을 여러 개 한 번에 선택 가능)</span>
+                        <span style="font-size:11px; color:#666; font-weight:normal;">(파일 다중 선택 가능)</span>
                         <input type="file" id="excel-upload-combined" accept=".xls,.xlsx,.csv,.html,.htm" multiple>
                     </label>
                     <div class="menu-divider"></div>
@@ -291,14 +288,18 @@
     </div>
 
     <div id="sheet-modal" class="modal-overlay" onclick="closeSheetModal(event)">
-        <div class="modal-content" onclick="event.stopPropagation()">
-            <div class="modal-header">입고예정 구글시트 연동 설정</div>
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 450px;">
+            <div class="modal-header">입고예정 구글시트 연동 설정 (2개)</div>
             <div class="modal-body">
-                <label style="color:var(--primary);">구글시트 CSV 배포 링크</label>
-                <input type="text" id="modal-sheet-url" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
-                <div style="font-size:11px; color:#666; margin-top:5px; line-height:1.4;">
-                    ※ 구글시트 상단 메뉴의 <strong>[파일] > [공유] > [웹에 게시]</strong> 를 클릭하고,<br>
-                    형식을 '웹페이지'가 아닌 <strong>'CSV'</strong>로 변경한 뒤 생성된 링크를 넣으세요.
+                <label style="color:var(--primary);">① 오더리스트(제작) CSV 링크</label>
+                <input type="text" id="modal-sheet-url-order" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
+                
+                <label style="color:var(--primary); margin-top:15px;">② 사입리스트 CSV 링크</label>
+                <input type="text" id="modal-sheet-url-buy" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
+                
+                <div style="font-size:11px; color:#666; margin-top:10px; line-height:1.4; background:#f9f9f9; padding:10px; border-radius:6px; border:1px solid #ddd;">
+                    ※ 각 원본 시트의 해당 탭(시트)을 선택한 후 <strong>[파일] > [공유] > [웹에 게시]</strong> 클릭<br>
+                    ※ 형식을 '웹페이지'가 아닌 <strong>'CSV'</strong>로 변경한 뒤 각각 생성된 링크를 칸에 맞게 붙여넣으세요.
                 </div>
             </div>
             <div class="modal-footer">
@@ -381,7 +382,6 @@
         window.closeRecommendModal = function(e) { if (!e || e.target.id === 'recommend-modal') document.getElementById('recommend-modal').style.display = 'none'; }
         window.closeSettingsModal = function(e) { if (!e || e.target.id === 'settings-modal') document.getElementById('settings-modal').style.display = 'none'; }
         
-        // 사이드바 토글
         window.toggleIncomingSidebar = function(e) {
             if(e) e.stopPropagation();
             closeAllPopups();
