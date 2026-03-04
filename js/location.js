@@ -7,8 +7,8 @@ const { db, auth, db2 } = initializeFirebase();
 const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
-let zikjinData = {}; // B창고 - 직진배송 데이터
-let weeklyData = {}; // B창고 - 주차별 데이터
+let zikjinData = {}; // B창고 - 직진배송 데이터 (향후 알고리즘용)
+let weeklyData = {}; // B창고 - 주차별 데이터 (향후 알고리즘용)
 let sortConfig = { key: 'id', direction: 'asc' }; 
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
 
@@ -24,7 +24,19 @@ onAuthStateChanged(auth, (user) => {
 
 const RESERVE_EXPIRE_MS = 1800000; 
 
-// [신규] B창고(직진배송/주차별) 실시간 수신 리스너
+// [신규] 로딩 오버레이 제어 함수
+window.showLoading = function(text) {
+    const loadingText = document.getElementById('loading-text');
+    if(loadingText) loadingText.innerText = text;
+    document.getElementById('loading-overlay').style.display = 'flex';
+};
+
+window.hideLoading = function() {
+    document.getElementById('loading-overlay').style.display = 'none';
+};
+
+
+// B창고(직진배송/주차별) 실시간 수신 리스너
 function setupRealtimeListenerB() {
     if (!db2) return;
     
@@ -415,46 +427,72 @@ function renderTable(data) {
 }
 
 // ==========================================
-// [신규] B창고: 직진배송 엑셀 업로드 처리
+// [개선] 엑셀 업로드 시 로딩 화면 적용 로직
 // ==========================================
+
+// B창고: 직진배송 엑셀
 const fileInputZikjin = document.getElementById('excel-upload-b-zikjin');
 if (fileInputZikjin) {
     fileInputZikjin.addEventListener('change', function(e) {
-        handleExcelUpload(e.target.files[0], 'ZikjinData', document.getElementById('excel-upload-b-zikjin'));
+        handleExcelUpload(e.target.files[0], 'ZikjinData', document.getElementById('excel-upload-b-zikjin'), '📦 직진배송 데이터를 동기화 중입니다...');
     });
 }
 
-// ==========================================
-// [신규] B창고: 주차별 엑셀 업로드 처리
-// ==========================================
+// B창고: 주차별 엑셀
 const fileInputWeekly = document.getElementById('excel-upload-b-weekly');
 if (fileInputWeekly) {
     fileInputWeekly.addEventListener('change', function(e) {
-        handleExcelUpload(e.target.files[0], 'WeeklyData', document.getElementById('excel-upload-b-weekly'));
+        handleExcelUpload(e.target.files[0], 'WeeklyData', document.getElementById('excel-upload-b-weekly'), '📅 주차별 데이터를 동기화 중입니다...');
     });
 }
 
-// 공통 B창고 업로드 함수
-async function handleExcelUpload(file, collectionName, inputElement) {
+// A창고: 기존 로케이션 엑셀
+const fileInputA = document.getElementById('excel-upload-a');
+if (fileInputA) {
+    fileInputA.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        window.showLoading('A창고(로케이션) 데이터를 동기화 중입니다...');
+        
+        // UI가 로딩 화면을 그릴 수 있도록 약간의 딜레이를 줌
+        setTimeout(() => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+                if (json.length > 0) updateDatabaseA(json);
+                else { window.hideLoading(); alert("데이터가 없습니다."); }
+            };
+            reader.readAsArrayBuffer(file);
+        }, 50);
+    });
+}
+
+// 공통 B창고 업로드 함수 (로딩 적용)
+function handleExcelUpload(file, collectionName, inputElement, loadingMessage) {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, {type: 'array'});
-        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-        if (json.length > 0) updateDatabaseB(json, collectionName, inputElement);
-    };
-    reader.readAsArrayBuffer(file);
+    
+    window.showLoading(loadingMessage);
+    
+    setTimeout(() => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+            if (json.length > 0) updateDatabaseB(json, collectionName, inputElement);
+            else { window.hideLoading(); alert("데이터가 없습니다."); }
+        };
+        reader.readAsArrayBuffer(file);
+    }, 50);
 }
 
 // B창고 데이터 덮어쓰기 로직
 async function updateDatabaseB(rows, collectionName, inputElement) {
-    const tbody = document.getElementById('location-list-body');
     const label = collectionName === 'ZikjinData' ? '직진배송' : '주차별';
     
-    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#d32f2f;">${label} 데이터를 갱신 중입니다. 잠시만 기다려주세요...</td></tr>`;
-    await new Promise(resolve => setTimeout(resolve, 50));
-
     try {
         const querySnapshot = await getDocs(collection(db2, collectionName));
         const docsArray = querySnapshot.docs;
@@ -482,47 +520,18 @@ async function updateDatabaseB(rows, collectionName, inputElement) {
         if (batchCount > 0) await batch.commit();
         
         alert(`✅ B창고 [${label}] 업데이트 완료!\n총 ${updateCount}건의 데이터가 반영되었습니다.`);
-        if(inputElement) inputElement.value = ''; 
-        
     } catch (error) {
         console.error(`${label} 업데이트 실패:`, error);
         alert(`${label} 업데이트 중 오류가 발생했습니다.`);
+    } finally {
         if(inputElement) inputElement.value = ''; 
+        window.hideLoading(); // 작업이 끝나면 무조건 로딩창 숨김
     }
 }
 
-
-// ==========================================
-// 기존 A창고(로케이션) 엑셀 업로드 및 처리
-// ==========================================
-const fileInputA = document.getElementById('excel-upload-a');
-if (fileInputA) {
-    fileInputA.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, {type: 'array'});
-            
-            const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-            
-            if (json.length > 0) {
-                updateDatabaseA(json);
-            }
-        };
-        reader.readAsArrayBuffer(file);
-    });
-}
-
+// A창고 데이터 업데이트 로직
 async function updateDatabaseA(rows) {
     const totalRows = rows.length;
-    
-    const tbody = document.getElementById('location-list-body');
-    if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="8" style="padding:50px; font-weight:bold; color:#3d5afe;">A창고 데이터를 검증 및 동기화 중입니다...</td></tr>`;
-    }
-    await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
         let batch = writeBatch(db); let updateCount = 0; let batchCount = 0;
@@ -587,12 +596,13 @@ async function updateDatabaseA(rows) {
         }
         
         alert(resultMessage);
-        document.getElementById('excel-upload-a').value = ''; 
         
     } catch (error) {
         console.error("실패:", error);
         alert("업데이트 중 오류가 발생했습니다.");
+    } finally {
         document.getElementById('excel-upload-a').value = ''; 
+        window.hideLoading(); // 작업 끝나면 반드시 로딩화면 닫기
     }
 }
 
