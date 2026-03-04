@@ -93,9 +93,11 @@ function setupRealtimeListenerA() {
             if (docSnap.id === 'INFO_CONFIG') {
                 const conf = docSnap.data();
                 if (conf.capacity2F) window.capacity2F = conf.capacity2F;
+                
                 if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
                 if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
                 if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
+
                 if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
                 if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
                 return;
@@ -192,7 +194,6 @@ window.saveHeaderSettings = async () => {
         showToast("✅ 화면 헤더 설정이 저장되었습니다.");
     } catch(e) { console.error(e); alert("저장 실패"); }
 };
-
 
 window.showRecommendation = function() {
     window.showLoading("💡 상품 점수를 계산하고 최적의 로케이션을 매칭 중입니다...");
@@ -300,14 +301,28 @@ window.saveSheetUrl = async () => {
 
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 
+// [핵심 신규 추가] 엑셀 날짜 일련번호(예: 46035)를 YYYY-MM-DD 형태로 예쁘게 변환하는 함수
+function formatExcelDate(excelDate) {
+    if (!excelDate) return '';
+    if (typeof excelDate === 'string' && (excelDate.includes('-') || excelDate.includes('.'))) return excelDate;
+    
+    const num = parseFloat(excelDate);
+    if (isNaN(num)) return excelDate;
+    
+    const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+    const y = date.getUTCFullYear();
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
 window.syncIncomingData = async () => {
     if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
-    window.showLoading("🔄 원본 시트에서 데이터를 텍스트로 읽어오는 중입니다...");
+    window.showLoading("🔄 원본 시트에서 데이터를 분석하여 가져오는 중입니다...");
     
     try {
         let combinedData = [];
 
-        // [수정] 출처(제작/사입)를 구분하기 위해 source 인자 추가
         const fetchAndParse = async (url, sourceName) => {
             if (!url) return [];
             
@@ -359,7 +374,7 @@ window.syncIncomingData = async () => {
                     }
                 }
                 if (!isEmpty) {
-                    rowObj.source = sourceName; // 출처 태그 삽입
+                    rowObj.source = sourceName; 
                     parsedList.push(rowObj);
                 }
             }
@@ -373,12 +388,19 @@ window.syncIncomingData = async () => {
 
         combinedData = [...orderData, ...buyData];
 
-        // [수정] 공장출고예상일 추출 추가
+        // [핵심 변경] 수량 0개 완벽 차단 및 날짜 변환 적용
         const finalJson = combinedData.map(row => {
             let code = row['어드민상품코드'] || row['상품코드'] || '';
             let name = row['상품명'] || row['공급처상품명'] || '';
-            let qty = row['총미입고수량본사입고기준'] || row['오더수량'] || row['미입고수량'] || 0;
-            let date = row['공장출고예상일자'] || row['공장출고예상일'] || row['출고예상일'] || '';
+            
+            // 오더수량을 버리고, 순수 미입고수량 열만 체크
+            let rawQty = row['총미입고수량본사입고기준'];
+            if (rawQty === undefined || rawQty === "") rawQty = row['미입고수량'];
+            let qty = Number(rawQty) || 0;
+            
+            // 엑셀 숫자 포맷 날짜를 YYYY-MM-DD 로 변환
+            let date = formatExcelDate(row['공장출고예상일자'] || row['공장출고예상일'] || row['출고예상일'] || '');
+
             return {
                 '상품코드': code,
                 '상품명': name,
@@ -388,7 +410,7 @@ window.syncIncomingData = async () => {
                 'source': row.source || '기타',
                 ...row
             };
-        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '');
+        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0); // 수량이 0개 이하면 DB 저장 단계부터 완벽 삭제
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
@@ -396,7 +418,7 @@ window.syncIncomingData = async () => {
             alert(`✅ 입고 대기 상품 연동 완료!\n(오더리스트 ${orderData.length}건, 사입리스트 ${buyData.length}건)`);
         } else { 
             window.hideLoading(); 
-            alert("시트에서 데이터를 찾지 못했습니다.\n원본 파일 상단에 '어드민 상품코드' 또는 '상품코드' 항목이 존재하는지 확인해주세요."); 
+            alert("입고 대기(수량 1개 이상) 상품이 없거나 데이터를 찾지 못했습니다."); 
         }
     } catch (error) { 
         window.hideLoading(); 
@@ -969,22 +991,19 @@ window.cancelPreAssignment = async () => {
     } catch (error) { console.error(error); alert("선지정 취소 실패"); }
 };
 
-// [신규 탑재] 사이드바 내 필터링 및 렌더링 함수
+
+// [핵심 변경] 선지정 완료 또는 기존 배정된 상품 완전 제거 및 불필요 문구 삭제
 window.renderIncomingQueue = function() {
     const container = document.getElementById('incoming-list');
     if(!container) return;
 
-    // 필터 값 읽기
     const filterSource = document.getElementById('filter-source')?.value || 'all';
-    const filterLoc = document.getElementById('filter-loc')?.value || 'unassigned';
     const sortType = document.getElementById('sort-incoming')?.value || 'qty-desc';
 
-    // 기존 배치 및 선지정 카운트 추적
-    let assignedMap = {};
+    // 1. 이미 자리가 있는 녀석들(현재고, 선지정) 색출
     let existingLocMap = {}; 
     originalData.forEach(loc => {
         if(loc.preAssigned && loc.preAssignedCode) {
-            assignedMap[loc.preAssignedCode] = (assignedMap[loc.preAssignedCode] || 0) + 1;
             existingLocMap[loc.preAssignedCode] = true;
         }
         if(loc.code && loc.code !== loc.id) {
@@ -997,22 +1016,14 @@ window.renderIncomingQueue = function() {
         list.push(incomingData[code]);
     }
 
-    // 1차: 필터링 적용
+    // 2. 완벽한 필터링: 자리가 이미 있거나 수량이 0인 녀석들은 목록에서 강제 추방
     list = list.filter(item => {
-        // 출처 분리 (제작/사입)
         if(filterSource !== 'all' && item.source !== filterSource) return false;
-        
-        // 수량이 없는 과거 데이터 완벽 차단
-        if(!item['입고대기수량'] || Number(item['입고대기수량']) <= 0) return false;
-        
-        // 로케이션 미지정 상품만 보기
-        if(filterLoc === 'unassigned') {
-            if(existingLocMap[item['상품코드']]) return false;
-        }
+        if(existingLocMap[item['상품코드']]) return false; // 이미 자리있음 -> 탈락
         return true;
     });
 
-    // 2차: 정렬 적용
+    // 3. 정렬 적용
     list.sort((a, b) => {
         if(sortType === 'qty-desc') {
             let qA = Number(a['입고대기수량'] || 0);
@@ -1026,6 +1037,7 @@ window.renderIncomingQueue = function() {
         return 0;
     });
 
+    // 4. HTML 생성 (지정된 칸수 텍스트 완전히 삭제)
     let html = '';
     list.forEach(item => {
         let code = item['상품코드'];
@@ -1033,7 +1045,6 @@ window.renderIncomingQueue = function() {
         let name = item['상품명'] || '';
         let date = item['공장출고예상일'] || '-';
         let src = item.source || '-';
-        let assignedCount = assignedMap[code] || 0;
 
         html += `
             <div class="incoming-item" onclick="activatePreAssignMode('${code}', '${name.replace(/'/g, "\\'")}', '${qty}')">
@@ -1042,15 +1053,15 @@ window.renderIncomingQueue = function() {
                     <span style="font-size:10px; background:${src==='제작'?'#e3f2fd':'#fbe9e7'}; color:${src==='제작'?'#1976d2':'#d84315'}; padding:2px 5px; border-radius:3px; font-weight:bold;">${src}</span>
                 </div>
                 <div style="font-size:12px; color:#333; margin-bottom:6px;">${name}</div>
-                <div style="font-size:11px; color:#555; margin-bottom:6px;">출고예상일: <b style="color:#d32f2f;">${date}</b></div>
-                <div style="display:flex; justify-content:space-between; font-size:11px;">
-                    <span style="color:#e65100; font-weight:bold;">대기: ${qty}개</span>
-                    <span style="color:#888;">지정된 칸: <b style="color:#333;">${assignedCount}</b>칸</span>
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px;">
+                    <span style="color:#555;">출고예상일: <b style="color:#d32f2f;">${date}</b></span>
+                    <span style="color:#e65100; font-weight:bold; font-size:12px;">대기: ${qty}개</span>
                 </div>
             </div>
         `;
     });
-    container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">조건에 맞는 상품이 없습니다.</div>';
+    
+    container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">선지정이 필요한 대기 상품이 없습니다.</div>';
 };
 
 window.activatePreAssignMode = function(code, name, qty) {
