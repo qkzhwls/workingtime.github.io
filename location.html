@@ -130,10 +130,9 @@
         .incoming-sidebar.open { right: 0; }
         .incoming-header { background: #e65100; color: white; padding: 15px 20px; font-weight: bold; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
         
-        /* [신규] 사이드바 필터 컨테이너 */
-        .incoming-filters { padding: 12px 15px; background: #f5f5f5; border-bottom: 1px solid #ddd; display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+        .incoming-filters { padding: 15px; background: #f5f5f5; border-bottom: 1px solid #ddd; display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
         .incoming-filters > div { display: flex; justify-content: space-between; align-items: center; }
-        .incoming-filters select { padding: 4px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; width: 170px; background: white; }
+        .incoming-filters select { padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; width: 160px; background: white; font-weight:bold; color:#333; }
         
         .incoming-list { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
         .incoming-item { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 12px; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
@@ -152,15 +151,15 @@
 
     <div id="incoming-sidebar" class="incoming-sidebar">
         <div class="incoming-header">
-            <span>📦 입고 대기 목록</span>
+            <span>📦 입고 대기 목록 (신규)</span>
             <button onclick="toggleIncomingSidebar()" style="background:none; border:none; color:white; font-size:24px; cursor:pointer;">×</button>
         </div>
-        <div style="padding:8px 15px; background:#fff3e0; border-bottom:1px solid #ffe0b2; font-size:11px; color:#e65100; font-weight:bold; line-height:1.4;">
-            👇 리스트에서 상품 선택 후, 텅 빈 로케이션을 클릭하세요!
+        <div style="padding:10px 15px; background:#fff3e0; border-bottom:1px solid #ffe0b2; font-size:11px; color:#e65100; font-weight:bold; line-height:1.4;">
+            ※ 미입고수량 0개, 기존 로케이션 배정 완료, 선지정 완료된 상품은 목록에서 자동으로 숨겨집니다.
         </div>
         <div class="incoming-filters">
             <div>
-                <b>구분</b>
+                <b>📂 분류</b>
                 <select id="filter-source" onchange="renderIncomingQueue()">
                     <option value="all">전체보기 (제작+사입)</option>
                     <option value="제작">제작 (오더리스트)</option>
@@ -168,14 +167,7 @@
                 </select>
             </div>
             <div>
-                <b>상태</b>
-                <select id="filter-loc" onchange="renderIncomingQueue()">
-                    <option value="unassigned">로케이션 미지정 상품만 보기</option>
-                    <option value="all">전체 상품 보기</option>
-                </select>
-            </div>
-            <div>
-                <b>정렬</b>
+                <b>🔄 정렬</b>
                 <select id="sort-incoming" onchange="renderIncomingQueue()">
                     <option value="qty-desc">미입고수량 많은 순</option>
                     <option value="date-asc">출고예상일 빠른 순</option>
