@@ -19,7 +19,6 @@ let appConfig = null;
 window.currentUsageTab = '3F';
 window.capacity2F = 200000;
 
-// [신규] 듀얼 링크 변수
 window.sheetUrlOrder = ''; 
 window.sheetUrlBuy = ''; 
 
@@ -95,10 +94,9 @@ function setupRealtimeListenerA() {
                 const conf = docSnap.data();
                 if (conf.capacity2F) window.capacity2F = conf.capacity2F;
                 
-                // [신규] 듀얼 링크 불러오기
                 if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
                 if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
-                if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl; // 레거시 연동
+                if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
 
                 if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
                 if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
@@ -233,7 +231,6 @@ window.showRecommendation = function() {
 
         scoredItems.sort((a, b) => b.score - a.score);
 
-        // 빈칸 & 선지정 안된 완벽한 빈자리만 추출
         let emptyLocs = originalData.filter(d => {
             const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
             return !hasContent && !d.preAssigned; 
@@ -303,41 +300,52 @@ window.saveSheetUrl = async () => {
     } catch(e) { console.error("링크 저장 실패:", e); alert("오류가 발생했습니다."); }
 };
 
-// [강력한 업그레이드] 듀얼 시트 동시 파싱 및 스마트 헤더 탐지 로직
+
+// [핵심] 방화벽/CORS 에러를 막기 위한 듀얼 프록시 엔진 탑재
 window.syncIncomingData = async () => {
     if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
     window.showLoading("🔄 원본 시트에서 입고예정 데이터를 가져오고 있습니다...");
     
     try {
-        const proxyUrl = 'https://corsproxy.io/?'; 
         let combinedData = [];
 
         const fetchAndParse = async (url) => {
             if (!url) return [];
-            const response = await fetch(proxyUrl + encodeURIComponent(url));
-            if (!response.ok) throw new Error("응답 오류");
+            
+            // 1순위: allorigins 프록시 시도 (가장 안정적임)
+            let proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+            let response;
+            
+            try {
+                response = await fetch(proxyUrl);
+                if (!response.ok) throw new Error("1차 프록시 응답 실패");
+            } catch (e) {
+                // 1순위 실패 시 2순위: corsproxy.io 시도
+                console.log("1차 우회 통로 실패. 2차 통로 접속 시도 중...");
+                proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+                response = await fetch(proxyUrl);
+                if (!response.ok) throw new Error("2차 프록시 응답 실패");
+            }
+
             const arrayBuffer = await response.arrayBuffer();
             const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-            
-            // 상단 빈칸/불필요한 텍스트를 무시하기 위해 배열 형태로 1차 추출
             const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
             
             let headerRowIndex = -1;
             let cleanHeaders = [];
             
-            // 위에서부터 10번째 줄까지만 '어드민상품코드' 또는 '상품코드' 글자가 있는지 훑어봄
+            // 시트 위에서부터 최대 15줄까지만 탐색하여 진짜 제목 줄 찾기
             for (let i = 0; i < Math.min(15, rawData.length); i++) {
                 const row = rawData[i];
-                const joined = row.join('').replace(/\s+/g, ''); // 공백 제거 후 뭉침
+                const joined = row.join('').replace(/\s+/g, ''); 
                 if (joined.includes('어드민상품코드') || joined.includes('상품코드')) {
                     headerRowIndex = i;
-                    // 헤더 내부의 띄어쓰기, 줄바꿈 완전 제거하여 깨끗한 키값 생성
                     cleanHeaders = row.map(h => (h||'').toString().replace(/\s+/g, ''));
                     break;
                 }
             }
 
-            if (headerRowIndex === -1) return []; // 헤더를 못 찾으면 빈 배열 반환
+            if (headerRowIndex === -1) return []; 
 
             const parsedList = [];
             for (let i = headerRowIndex + 1; i < rawData.length; i++) {
@@ -355,7 +363,6 @@ window.syncIncomingData = async () => {
             return parsedList;
         };
 
-        // 두 개의 시트를 동시에 병렬로 가져옴 (속도 2배)
         const [orderData, buyData] = await Promise.all([
             fetchAndParse(window.sheetUrlOrder),
             fetchAndParse(window.sheetUrlBuy)
@@ -363,7 +370,6 @@ window.syncIncomingData = async () => {
 
         combinedData = [...orderData, ...buyData];
 
-        // 흩어진 헤더 이름들을 통합 포맷으로 예쁘게 맵핑
         const finalJson = combinedData.map(row => {
             let code = row['어드민상품코드'] || row['상품코드'] || '';
             let name = row['상품명'] || row['공급처상품명'] || '';
@@ -375,7 +381,7 @@ window.syncIncomingData = async () => {
                 '입고대기수량': qty,
                 ...row
             };
-        }).filter(row => row['상품코드']); // 상품코드가 없는 빈 줄은 필터링
+        }).filter(row => row['상품코드']); 
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
@@ -387,7 +393,7 @@ window.syncIncomingData = async () => {
         }
     } catch (error) { 
         window.hideLoading(); 
-        alert("연결 실패. 방화벽이나 링크 설정을 확인하세요."); 
+        alert(`연결 실패.\n\n[확인사항]\n1. 링크를 제대로 붙여넣으셨는지 확인\n2. 사내 보안 방화벽 문제일 수 있습니다.`); 
         console.error(error);
     }
 };
@@ -560,7 +566,6 @@ function applyFiltersAndSort() {
     renderTable(filtered);
 }
 
-// 행(Row) 클릭 시 선지정 또는 수동수정 모달 작동
 window.handleRowClick = async function(event, locId) {
     if (event.target.tagName === 'INPUT') return;
 
@@ -743,7 +748,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            let code = row['상품코드']?.toString().trim();
+            let code = (row['어드민상품코드'] || row['상품코드'])?.toString().trim();
             if (!code) continue;
 
             const docRef = doc(db2, collectionName, code);
