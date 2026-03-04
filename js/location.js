@@ -301,12 +301,13 @@ window.saveSheetUrl = async () => {
 };
 
 
-// [강력 텍스트 정제 함수] 줄바꿈, 띄어쓰기, 괄호 등 모든 불필요한 기호를 파괴하고 글자만 남김
+// [강력 텍스트 정제 함수] 줄바꿈, 띄어쓰기, 괄호 등 완벽하게 파괴
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 
+// [핵심 변경] 바이너리(ArrayBuffer) 방식 폐기 -> 직독직해(Raw Text) 파싱 방식으로 교체
 window.syncIncomingData = async () => {
     if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
-    window.showLoading("🔄 원본 시트에서 데이터를 가져오는 중입니다...");
+    window.showLoading("🔄 원본 시트에서 데이터를 텍스트로 읽어오는 중입니다...");
     
     try {
         let combinedData = [];
@@ -314,33 +315,34 @@ window.syncIncomingData = async () => {
         const fetchAndParse = async (url) => {
             if (!url) return [];
             
-            let arrayBuffer;
+            let textData = "";
             try {
-                console.log("1차 다이렉트 통신 시도...");
+                console.log("1차 다이렉트 텍스트 통신 시도...");
                 const res1 = await fetch(url);
                 if (!res1.ok) throw new Error("1차 다이렉트 연결 실패");
-                arrayBuffer = await res1.arrayBuffer();
+                textData = await res1.text(); // ArrayBuffer가 아닌 Text로 완벽하게 긁어옴
             } catch (e1) {
                 console.log("1차 실패, 2차 우회 통로 시도...");
                 try {
                     const res2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
                     if (!res2.ok) throw new Error("2차 프록시 실패");
-                    arrayBuffer = await res2.arrayBuffer();
+                    textData = await res2.text();
                 } catch (e2) {
                     console.log("2차 실패, 3차 우회 통로 시도...");
                     const res3 = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
                     if (!res3.ok) throw new Error("3차 프록시 실패");
-                    arrayBuffer = await res3.arrayBuffer();
+                    textData = await res3.text();
                 }
             }
 
-            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+            // CSV 텍스트 데이터를 그대로 XLSX 엔진에 밀어넣기
+            const workbook = XLSX.read(textData, { type: 'string' });
             const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
             
             let headerRowIndex = -1;
             let pureHeaders = [];
             
-            // 시트 위에서 20줄까지만 탐색 (완벽 정제 알고리즘 적용)
+            // 시트 위에서 최대 20줄까지만 탐색 (완벽 정제 알고리즘 적용)
             for (let i = 0; i < Math.min(20, rawData.length); i++) {
                 const row = rawData[i];
                 // 각 칸의 줄바꿈과 공백을 싹 다 지운 순수 글자 배열 생성
@@ -354,7 +356,10 @@ window.syncIncomingData = async () => {
                 }
             }
 
-            if (headerRowIndex === -1) return []; 
+            if (headerRowIndex === -1) {
+                console.warn("이 파일에서 헤더를 찾지 못했습니다.", rawData.slice(0, 5));
+                return []; 
+            }
 
             const parsedList = [];
             for (let i = headerRowIndex + 1; i < rawData.length; i++) {
@@ -364,7 +369,7 @@ window.syncIncomingData = async () => {
                     const key = pureHeaders[j];
                     if (key) {
                         rowObj[key] = rawData[i][j];
-                        if (rawData[i][j] !== "") isEmpty = false;
+                        if (rawData[i][j] !== "" && rawData[i][j] !== undefined) isEmpty = false;
                     }
                 }
                 if (!isEmpty) parsedList.push(rowObj);
@@ -383,7 +388,6 @@ window.syncIncomingData = async () => {
         const finalJson = combinedData.map(row => {
             let code = row['어드민상품코드'] || row['상품코드'] || '';
             let name = row['상품명'] || row['공급처상품명'] || '';
-            // 총미입고수량(본사입고기준) -> 정제 후 '총미입고수량본사입고기준'
             let qty = row['총미입고수량본사입고기준'] || row['오더수량'] || row['미입고수량'] || 0;
             return {
                 '상품코드': code,
@@ -392,7 +396,7 @@ window.syncIncomingData = async () => {
                 '입고대기수량': qty,
                 ...row
             };
-        }).filter(row => row['상품코드']); // 상품코드가 없는 빈 줄은 버림
+        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '');
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
@@ -404,7 +408,7 @@ window.syncIncomingData = async () => {
         }
     } catch (error) { 
         window.hideLoading(); 
-        alert(`🚨 연결 실패!\n사내 방화벽이 외부 접근을 막고 있거나 링크가 잘못되었습니다.\n(${error.message})`); 
+        alert(`🚨 연결 실패!\n데이터를 가져오지 못했습니다.\n(${error.message})`); 
         console.error("데이터 동기화 실패:", error);
     }
 };
