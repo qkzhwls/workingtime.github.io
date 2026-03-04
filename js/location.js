@@ -102,12 +102,11 @@ window.onload = () => {
     setupRealtimeListenerB();
 };
 
-// [신규] 💡 스마트 로케이션 추천 (핵심 알고리즘)
+// 💡 스마트 로케이션 추천 (핵심 알고리즘)
 window.showRecommendation = function() {
     window.showLoading("💡 상품 점수를 계산하고 최적의 로케이션을 매칭 중입니다...");
 
     setTimeout(() => {
-        // 1단계: B창고(직진+주차별)에 있는 모든 상품코드 수집
         const allCodes = new Set([...Object.keys(zikjinData), ...Object.keys(weeklyData)]);
         let scoredItems = [];
 
@@ -117,66 +116,50 @@ window.showRecommendation = function() {
             let name = zItem['상품명'] || wItem['상품명'] || '알 수 없음';
             
             let score = 0;
-            let zQty = Number(zItem['수량'] || 0); // 직진배송 수량
-            let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0); // 주차별 수량
+            let zQty = Number(zItem['수량'] || 0); 
+            let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0); 
             
-            // 기본 공식: (직진수량 * 10) + (주차별수량 * 2)
             score += (zQty * 10);
             score += (wQty * 2);
 
-            // 트렌드 예측 공식 (최근 날짜 3일 vs 이전 날짜 3일 비교)
-            // YYYYMMDD 형태의 날짜 키(Key)값만 추출
             let dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
             if (dates.length >= 6) {
                 let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
                 let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
-                
-                // 최근 상승세(모멘텀)를 보이면 최종 점수에 1.2배 가산점 부여
-                if (recent3 > prev3) {
-                    score *= 1.2;
-                }
+                if (recent3 > prev3) score *= 1.2;
             }
 
-            // 점수가 0점 초과인 상품만 추천 리스트에 편입
             if (score > 0) {
-                // 현재 해당 상품이 있는 로케이션 위치 찾기 (없으면 '신규배치')
                 let currentLocs = originalData.filter(d => d.code === code).map(d => d.id).join(', ');
                 if (!currentLocs) currentLocs = '신규배치 (없음)';
-
                 scoredItems.push({ code, name, score, currentLocs });
             }
         });
 
-        // 점수가 높은 순으로 내림차순 정렬 (1등부터)
         scoredItems.sort((a, b) => b.score - a.score);
 
-        // 2단계: 현재 3층 창고의 '빈 로케이션' 목록 전부 가져오기
         let emptyLocs = originalData.filter(d => {
             const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
             return !hasContent;
         });
 
-        // 우선순위 정렬 공식: 동(1->6) -> 위치(2->3->4->1->5)
         const posPriority = { '2': 1, '3': 2, '4': 3, '1': 4, '5': 5 };
         const getPosRank = (p) => posPriority[p?.toString().trim()] || 99;
 
         emptyLocs.sort((a, b) => {
             let dongA = a.dong || '';
             let dongB = b.dong || '';
-            if (dongA !== dongB) return dongA.localeCompare(dongB); // 1. 동 우선 (오름차순)
-            
+            if (dongA !== dongB) return dongA.localeCompare(dongB); 
             let posRankA = getPosRank(a.pos);
             let posRankB = getPosRank(b.pos);
-            if (posRankA !== posRankB) return posRankA - posRankB; // 2. 지정된 위치 순서 우선
-            
-            return a.id.localeCompare(b.id); // 3. 그래도 같으면 로케이션 이름순
+            if (posRankA !== posRankB) return posRankA - posRankB; 
+            return a.id.localeCompare(b.id); 
         });
 
-        // 3단계: 점수 1등 상품과 1순위 빈칸을 1:1로 매칭시켜 모달창에 렌더링
         const tbody = document.getElementById('recommend-tbody');
         let html = '';
-        
         let matchCount = Math.min(scoredItems.length, emptyLocs.length);
+        
         if (matchCount === 0) {
             html = '<tr><td colspan="5" style="padding:40px;">데이터가 부족하거나 추천할 빈 로케이션이 없습니다.</td></tr>';
         } else {
@@ -199,7 +182,7 @@ window.showRecommendation = function() {
         window.hideLoading();
         document.getElementById('recommend-modal').style.display = 'flex';
 
-    }, 500); // 로딩창 애니메이션을 위한 약간의 딜레이
+    }, 500); 
 };
 
 
@@ -416,17 +399,55 @@ function renderTable(data) {
     if (checkAllBtn && allCheckboxes.length > 0) checkAllBtn.checked = document.querySelectorAll('.loc-check:checked').length === allCheckboxes.length;
 }
 
-const fileInputZikjin = document.getElementById('excel-upload-b-zikjin');
-if (fileInputZikjin) {
-    fileInputZikjin.addEventListener('change', function(e) {
-        handleExcelUpload(e.target.files[0], 'ZikjinData', document.getElementById('excel-upload-b-zikjin'), '📦 직진배송 데이터를 동기화 중입니다...');
-    });
-}
+// [신규] 직진배송/주차별 데이터 통합 업로드 (다중 파일 선택, 자동 분류)
+const fileInputCombined = document.getElementById('excel-upload-combined');
+if (fileInputCombined) {
+    fileInputCombined.addEventListener('change', async function(e) {
+        const files = e.target.files;
+        if (files.length === 0) return;
 
-const fileInputWeekly = document.getElementById('excel-upload-b-weekly');
-if (fileInputWeekly) {
-    fileInputWeekly.addEventListener('change', function(e) {
-        handleExcelUpload(e.target.files[0], 'WeeklyData', document.getElementById('excel-upload-b-weekly'), '📅 주차별 데이터를 동기화 중입니다...');
+        window.showLoading('데이터(직진/주차별)를 분석 및 동기화 중입니다...');
+
+        try {
+            let zikjinCount = 0;
+            let weeklyCount = 0;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                
+                const data = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = e => resolve(new Uint8Array(e.target.result));
+                    reader.onerror = e => reject(e);
+                    reader.readAsArrayBuffer(file);
+                });
+
+                const workbook = XLSX.read(data, {type: 'array'});
+                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+
+                if (json.length === 0) continue;
+
+                // 데이터 항목(헤더) 검사로 파일 종류 자동 인식
+                const headers = Object.keys(json[0]);
+                const isWeekly = headers.includes('기간발주수량') || headers.includes('기간배송수량');
+                const collectionName = isWeekly ? 'WeeklyData' : 'ZikjinData';
+
+                if (isWeekly) weeklyCount++;
+                else zikjinCount++;
+
+                // silent=true 옵션으로 내부 alert 무시
+                await updateDatabaseB(json, collectionName, null, true);
+            }
+
+            window.hideLoading();
+            alert(`✅ 선택하신 데이터의 동기화가 완료되었습니다!\n(인식된 파일: 직진배송 ${zikjinCount}개 / 주차별 ${weeklyCount}개)`);
+        } catch(error) {
+            window.hideLoading();
+            alert('데이터 동기화 중 오류가 발생했습니다.');
+            console.error(error);
+        } finally {
+            fileInputCombined.value = '';
+        }
     });
 }
 
@@ -450,23 +471,8 @@ if (fileInputA) {
     });
 }
 
-function handleExcelUpload(file, collectionName, inputElement, loadingMessage) {
-    if (!file) return;
-    window.showLoading(loadingMessage);
-    setTimeout(() => {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, {type: 'array'});
-            const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-            if (json.length > 0) updateDatabaseB(json, collectionName, inputElement);
-            else { window.hideLoading(); alert("데이터가 없습니다."); }
-        };
-        reader.readAsArrayBuffer(file);
-    }, 50);
-}
-
-async function updateDatabaseB(rows, collectionName, inputElement) {
+// [수정] silent 매개변수를 추가하여 여러 개의 파일을 올릴 때 팝업이 중복으로 뜨는 것을 방지
+async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = '데이터';
     if (collectionName === 'ZikjinData') label = '직진배송';
     if (collectionName === 'WeeklyData') label = '주차별';
@@ -497,13 +503,14 @@ async function updateDatabaseB(rows, collectionName, inputElement) {
         }
         
         if (batchCount > 0) await batch.commit();
-        alert(`✅ [${label}] 업데이트 완료!\n총 ${updateCount}건의 데이터가 반영되었습니다.`);
+        if (!silent) alert(`✅ [${label}] 업데이트 완료!\n총 ${updateCount}건의 데이터가 반영되었습니다.`);
     } catch (error) {
         console.error(`${label} 업데이트 실패:`, error);
-        alert(`${label} 업데이트 중 오류가 발생했습니다.`);
+        if (!silent) alert(`${label} 업데이트 중 오류가 발생했습니다.`);
+        throw error;
     } finally {
-        if(inputElement) inputElement.value = ''; 
-        window.hideLoading();
+        if(inputElement && !silent) inputElement.value = ''; 
+        if (!silent) window.hideLoading();
     }
 }
 
