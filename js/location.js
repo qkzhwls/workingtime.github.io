@@ -12,7 +12,6 @@ let weeklyData = {}; // B창고 - 주차별 데이터
 let sortConfig = { key: 'id', direction: 'asc' }; 
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
 
-// [수정] 30분 타이머 제거 -> Infinity(무한대)로 설정하여 엑셀 업로드 전까지 영구 유지
 const RESERVE_EXPIRE_MS = Infinity; 
 
 let currentUserName = "비로그인 작업자";
@@ -20,23 +19,20 @@ let appConfig = null;
 window.currentUsageTab = '3F';
 window.capacity2F = 200000;
 
-// [신규] 설정 파일(config)을 불러와 진짜 이름 매칭 준비
 loadAppConfig(db).then(config => {
     appConfig = config;
     if (auth.currentUser) updateCurrentUserName(auth.currentUser);
 });
 
-// [신규] 이메일 기반으로 config.js의 진짜 이름 찾기 함수
 function updateCurrentUserName(user) {
     if (!user) return;
     let email = user.email || "";
     let name = user.displayName || email.split('@')[0];
     
-    // config.js의 memberEmails 데이터에서 이메일과 일치하는 '이름' 찾기
     if (appConfig && appConfig.memberEmails) {
         for (let key in appConfig.memberEmails) {
             if (appConfig.memberEmails[key] === email) {
-                name = key; // 진짜 이름으로 교체
+                name = key; 
                 break;
             }
         }
@@ -58,6 +54,11 @@ window.showLoading = function(text) {
     const loadingText = document.getElementById('loading-text');
     if(loadingText) loadingText.innerText = text;
     document.getElementById('loading-overlay').style.display = 'flex';
+    
+    // 파일 업로드 시 업로드 메뉴도 자동으로 닫히도록 호출
+    if (typeof window.closeAllPopups === 'function') {
+        window.closeAllPopups();
+    }
 };
 
 window.hideLoading = function() {
@@ -420,7 +421,6 @@ function renderTable(data) {
 
     data.forEach(loc => {
         let displayCode = (loc.code === loc.id) ? '' : (loc.code || '');
-        // [수정] 무제한 예약 확인 (단순히 reserved 상태만 확인)
         let isReserved = loc.reserved === true;
         let rowStyle = isReserved ? 'background-color: #fffde7;' : '';
         let reserverName = loc.reservedBy || '누군가';
@@ -477,7 +477,7 @@ if (fileInputA) {
         const file = e.target.files[0];
         if (!file) return;
         
-        window.showLoading('A창고(로케이션) 데이터를 동기화 중입니다...');
+        window.showLoading('로케이션을 최신화 중입니다...');
         
         setTimeout(() => {
             const reader = new FileReader();
@@ -493,7 +493,7 @@ if (fileInputA) {
     });
 }
 
-// 공통 B창고 업로드 함수 (로딩 적용)
+// 공통 B창고 업로드 함수
 function handleExcelUpload(file, collectionName, inputElement, loadingMessage) {
     if (!file) return;
     
@@ -542,7 +542,7 @@ async function updateDatabaseB(rows, collectionName, inputElement) {
         
         if (batchCount > 0) await batch.commit();
         
-        alert(`✅ B창고 [${label}] 업데이트 완료!\n총 ${updateCount}건의 데이터가 반영되었습니다.`);
+        alert(`✅ [${label}] 업데이트 완료!\n총 ${updateCount}건의 데이터가 반영되었습니다.`);
     } catch (error) {
         console.error(`${label} 업데이트 실패:`, error);
         alert(`${label} 업데이트 중 오류가 발생했습니다.`);
@@ -629,7 +629,6 @@ async function updateDatabaseA(rows) {
     }
 }
 
-// 부가 기능 (예약 복사, 모달 등 유지)
 window.copyLocationToClipboard = async (event, locId) => {
     event.stopPropagation(); 
     try {
@@ -640,7 +639,6 @@ window.copyLocationToClipboard = async (event, locId) => {
             const data = snap.data();
             const now = new Date().getTime();
             
-            // [수정] 무제한 예약 확인 (시간 체크 안함)
             const isReserved = data.reserved === true;
             const reserverName = data.reservedBy || '다른 작업자';
 
