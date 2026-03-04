@@ -42,6 +42,8 @@
         .btn-add:hover { background: #324ee0; }
         .btn-delete-bulk { padding: 6px 12px; background: #ff5252; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
         .btn-delete-bulk:hover { background: #e04848; }
+        .btn-smart-recommend { padding: 6px 12px; background: #4caf50; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-right: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .btn-smart-recommend:hover { background: #43a047; }
 
         .list-container { 
             overflow: auto; 
@@ -169,9 +171,10 @@
         <div>
             <button class="btn-delete-bulk" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
         </div>
-        <div>
+        <div style="display: flex; align-items: center;">
+            <button class="btn-smart-recommend" onclick="showRecommendation()">💡 스마트 로케이션 추천</button>
             <input type="text" id="new-loc-id" class="action-input" placeholder="예: A-1-001" onkeypress="if(event.key === 'Enter') addSingleLocation()">
-            <button class="btn-add" onclick="addSingleLocation()">➕ 빈 로케이션 추가</button>
+            <button class="btn-add" onclick="addSingleLocation()" style="margin-left: 5px;">➕ 빈 로케이션 추가</button>
         </div>
     </div>
 
@@ -241,6 +244,34 @@
         </div>
     </div>
 
+    <div id="recommend-modal" class="modal-overlay" onclick="closeRecommendModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 850px; max-width: 95vw; padding: 25px 20px;">
+            <div class="modal-header" style="color: #4caf50;">💡 스마트 로케이션 추천 이동 지시서</div>
+            <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
+                ※ 산출 공식: (직진배송수량×10점) + (주차별수량×2점) + (최근 트렌드 상승 시 1.2배 가산점)<br>
+                ※ 배정 기준: 빈 로케이션을 <strong>1동➔6동</strong>, 위치 <strong>2➔3➔4➔1➔5</strong> 순으로 명당을 찾아 자동 짝지음
+            </div>
+            <div class="modal-body" style="max-height: 60vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
+                    <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <tr>
+                            <th style="width: 90px; border-top:none;">순위(점수)</th>
+                            <th style="width: 130px; border-top:none;">상품코드</th>
+                            <th style="border-top:none;">상품명</th>
+                            <th style="width: 140px; border-top:none;">현재 위치</th>
+                            <th style="width: 160px; background:#e8f5e9; color:#2e7d32; border-top:none;">➡️ 추천 로케이션 (빈칸)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recommend-tbody">
+                        </tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="closeRecommendModal()">닫기</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -288,10 +319,11 @@
         window.closeEditModal = function(e) {
             if (!e || e.target.id === 'edit-modal') document.getElementById('edit-modal').style.display = 'none';
         }
-        
-        // [신규] 구글시트 모달 닫기
         window.closeSheetModal = function(e) {
             if (!e || e.target.id === 'sheet-modal') document.getElementById('sheet-modal').style.display = 'none';
+        }
+        window.closeRecommendModal = function(e) {
+            if (!e || e.target.id === 'recommend-modal') document.getElementById('recommend-modal').style.display = 'none';
         }
     </script>
 </body>
