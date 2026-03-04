@@ -18,12 +18,14 @@ let currentUserName = "비로그인 작업자";
 let appConfig = null;
 window.currentUsageTab = '3F';
 window.capacity2F = 200000;
-window.sheetUrl = ''; 
+
+// [신규] 듀얼 링크 변수
+window.sheetUrlOrder = ''; 
+window.sheetUrlBuy = ''; 
 
 window.visibleColumns = ['std_dong', 'std_pos', 'std_id', 'std_code', 'std_name', 'std_option', 'std_stock'];
 window.excelHeaders = []; 
 
-// [신규] 선지정 모드 관리용 상태 변수
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
@@ -92,7 +94,12 @@ function setupRealtimeListenerA() {
             if (docSnap.id === 'INFO_CONFIG') {
                 const conf = docSnap.data();
                 if (conf.capacity2F) window.capacity2F = conf.capacity2F;
-                if (conf.sheetUrl) window.sheetUrl = conf.sheetUrl;
+                
+                // [신규] 듀얼 링크 불러오기
+                if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
+                if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
+                if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl; // 레거시 연동
+
                 if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
                 if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
                 return;
@@ -226,7 +233,7 @@ window.showRecommendation = function() {
 
         scoredItems.sort((a, b) => b.score - a.score);
 
-        // [수정] 텅 비어있으면서 동시에 선지정(락)도 안 걸려있는 순수 빈자리만 추출
+        // 빈칸 & 선지정 안된 완벽한 빈자리만 추출
         let emptyLocs = originalData.filter(d => {
             const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
             return !hasContent && !d.preAssigned; 
@@ -278,51 +285,111 @@ window.showRecommendation = function() {
 window.openSheetModal = (e) => {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
-    document.getElementById('modal-sheet-url').value = window.sheetUrl || '';
+    document.getElementById('modal-sheet-url-order').value = window.sheetUrlOrder || '';
+    document.getElementById('modal-sheet-url-buy').value = window.sheetUrlBuy || '';
     document.getElementById('sheet-modal').style.display = 'flex';
 };
 
 window.saveSheetUrl = async () => {
-    const url = document.getElementById('modal-sheet-url').value.trim();
-    if (!url.includes('docs.google.com/spreadsheets') || !url.includes('output=csv')) {
-        alert("올바른 구글시트 CSV 링크가 아닙니다.\n[웹에 게시] 기능을 통해 생성된 CSV 링크를 확인해주세요.");
-        return;
-    }
+    const urlOrder = document.getElementById('modal-sheet-url-order').value.trim();
+    const urlBuy = document.getElementById('modal-sheet-url-buy').value.trim();
+    
     try {
-        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { sheetUrl: url }, { merge: true });
-        window.sheetUrl = url;
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { sheetUrlOrder: urlOrder, sheetUrlBuy: urlBuy }, { merge: true });
+        window.sheetUrlOrder = urlOrder;
+        window.sheetUrlBuy = urlBuy;
         alert("✅ 구글시트 링크가 안전하게 저장되었습니다.");
         if (typeof window.closeSheetModal === 'function') window.closeSheetModal();
     } catch(e) { console.error("링크 저장 실패:", e); alert("오류가 발생했습니다."); }
 };
 
-// [수정] 복잡한 헤더(줄바꿈, 띄어쓰기 등)를 정제하여 다이렉트로 흡수
+// [강력한 업그레이드] 듀얼 시트 동시 파싱 및 스마트 헤더 탐지 로직
 window.syncIncomingData = async () => {
-    if (!window.sheetUrl) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
+    if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
     window.showLoading("🔄 원본 시트에서 입고예정 데이터를 가져오고 있습니다...");
+    
     try {
         const proxyUrl = 'https://corsproxy.io/?'; 
-        const response = await fetch(proxyUrl + encodeURIComponent(window.sheetUrl));
-        if (!response.ok) throw new Error("응답 오류");
-        const arrayBuffer = await response.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        
-        // 기본 JSON 추출 (빈 값은 빈 문자열로)
-        const rawJson = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
-        
-        // 헤더 텍스트 공백/줄바꿈 제거 후 새 객체 조립
-        const cleanJson = rawJson.map(row => {
-            let newRow = {};
-            for(let key in row) {
-                let cleanKey = key.replace(/\s+/g, '');
-                newRow[cleanKey] = row[key];
-            }
-            return newRow;
-        });
+        let combinedData = [];
 
-        if (cleanJson.length > 0) updateDatabaseB(cleanJson, 'IncomingData', null);
-        else { window.hideLoading(); alert("시트에 데이터가 없습니다."); }
-    } catch (error) { window.hideLoading(); alert("연결 실패. 방화벽이나 링크 설정을 확인하세요."); }
+        const fetchAndParse = async (url) => {
+            if (!url) return [];
+            const response = await fetch(proxyUrl + encodeURIComponent(url));
+            if (!response.ok) throw new Error("응답 오류");
+            const arrayBuffer = await response.arrayBuffer();
+            const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+            
+            // 상단 빈칸/불필요한 텍스트를 무시하기 위해 배열 형태로 1차 추출
+            const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
+            
+            let headerRowIndex = -1;
+            let cleanHeaders = [];
+            
+            // 위에서부터 10번째 줄까지만 '어드민상품코드' 또는 '상품코드' 글자가 있는지 훑어봄
+            for (let i = 0; i < Math.min(15, rawData.length); i++) {
+                const row = rawData[i];
+                const joined = row.join('').replace(/\s+/g, ''); // 공백 제거 후 뭉침
+                if (joined.includes('어드민상품코드') || joined.includes('상품코드')) {
+                    headerRowIndex = i;
+                    // 헤더 내부의 띄어쓰기, 줄바꿈 완전 제거하여 깨끗한 키값 생성
+                    cleanHeaders = row.map(h => (h||'').toString().replace(/\s+/g, ''));
+                    break;
+                }
+            }
+
+            if (headerRowIndex === -1) return []; // 헤더를 못 찾으면 빈 배열 반환
+
+            const parsedList = [];
+            for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+                let rowObj = {};
+                let isEmpty = true;
+                for (let j = 0; j < cleanHeaders.length; j++) {
+                    const key = cleanHeaders[j];
+                    if (key) {
+                        rowObj[key] = rawData[i][j];
+                        if (rawData[i][j]) isEmpty = false;
+                    }
+                }
+                if (!isEmpty) parsedList.push(rowObj);
+            }
+            return parsedList;
+        };
+
+        // 두 개의 시트를 동시에 병렬로 가져옴 (속도 2배)
+        const [orderData, buyData] = await Promise.all([
+            fetchAndParse(window.sheetUrlOrder),
+            fetchAndParse(window.sheetUrlBuy)
+        ]);
+
+        combinedData = [...orderData, ...buyData];
+
+        // 흩어진 헤더 이름들을 통합 포맷으로 예쁘게 맵핑
+        const finalJson = combinedData.map(row => {
+            let code = row['어드민상품코드'] || row['상품코드'] || '';
+            let name = row['상품명'] || row['공급처상품명'] || '';
+            let qty = row['총미입고수량(본사입고기준)'] || row['오더수량'] || row['미입고수량'] || 0;
+            return {
+                '상품코드': code,
+                '상품명': name,
+                '옵션': row['옵션'] || '',
+                '입고대기수량': qty,
+                ...row
+            };
+        }).filter(row => row['상품코드']); // 상품코드가 없는 빈 줄은 필터링
+
+        if (finalJson.length > 0) {
+            await updateDatabaseB(finalJson, 'IncomingData', null, true);
+            window.hideLoading();
+            alert(`✅ 입고 대기 상품 연동 완료!\n(오더리스트 ${orderData.length}건, 사입리스트 ${buyData.length}건)`);
+        } else { 
+            window.hideLoading(); 
+            alert("시트에서 데이터를 찾지 못했습니다. 원본 파일에 '어드민 상품코드' 항목이 있는지 확인해주세요."); 
+        }
+    } catch (error) { 
+        window.hideLoading(); 
+        alert("연결 실패. 방화벽이나 링크 설정을 확인하세요."); 
+        console.error(error);
+    }
 };
 
 window.saveCapacity2F = async function() {
@@ -362,7 +429,7 @@ window.calculateAndRenderUsage = function() {
         
         let used = 0; let zoneStats = {};
         let todayReservedCount = 0;
-        let preAssignedCount = 0; // 선지정 카운트 변수
+        let preAssignedCount = 0; 
         
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -493,11 +560,10 @@ function applyFiltersAndSort() {
     renderTable(filtered);
 }
 
-// [수정] 행(Row) 클릭 시 동작하는 공통 함수
+// 행(Row) 클릭 시 선지정 또는 수동수정 모달 작동
 window.handleRowClick = async function(event, locId) {
     if (event.target.tagName === 'INPUT') return;
 
-    // 1. 선지정 락온(Lock) 모드일 때의 동작
     if (window.isPreAssignMode && window.selectedPreAssignItem) {
         const loc = originalData.find(d => d.id === locId);
         if (!loc) return;
@@ -524,12 +590,11 @@ window.handleRowClick = async function(event, locId) {
             }, { merge: true });
             
             showToast(`[${locId}] 자리에 선지정 락(Lock)이 완료되었습니다!`);
-            window.cancelPreAssignMode(); // 선지정 후 자동 모드 종료
+            window.cancelPreAssignMode(); 
         } catch(e) { console.error(e); alert("선지정 저장 오류"); }
         return;
     }
 
-    // 2. 일반 모드일 때는 수동 수정 모달 띄우기
     openEditModal(locId);
 };
 
@@ -563,7 +628,6 @@ function renderTable(data) {
 
         let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
 
-        // [수정] onclick을 별도의 공통 핸들러로 라우팅
         html += `<tr onclick="handleRowClick(event, '${loc.id}')" style="${rowStyle}">`;
         html += `<td onclick="event.stopPropagation()"><input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked}></td>`;
         
@@ -679,7 +743,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            let code = (row['어드민상품코드'] || row['상품코드'])?.toString().trim();
+            let code = row['상품코드']?.toString().trim();
             if (!code) continue;
 
             const docRef = doc(db2, collectionName, code);
@@ -741,7 +805,6 @@ async function updateDatabaseA(rows) {
                         let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: row };
                         
                         if (finalCode && finalCode.trim() !== '') {
-                            // [핵심] 실제 엑셀이 업로드되어 물건 코드가 채워지면 선지정 락온 완전 해제
                             updateData.preAssigned = false;
                             updateData.preAssignedCode = '';
                             updateData.preAssignedName = '';
@@ -861,7 +924,6 @@ window.openEditModal = (id) => {
     document.getElementById('modal-option').value = targetData.option || '';
     document.getElementById('modal-stock').value = targetData.stock || '0';
     
-    // 선지정 취소 버튼 제어
     const unassignBtn = document.getElementById('btn-modal-unassign');
     if (targetData.preAssigned) {
         unassignBtn.style.display = 'inline-block';
@@ -885,7 +947,6 @@ window.saveManualEdit = async () => {
     } catch (error) { console.error("수정 실패:", error); }
 };
 
-// [신규] 모달 내 선지정 수동 취소
 window.cancelPreAssignment = async () => {
     const id = document.getElementById('modal-id').value;
     if(!confirm(`[${id}] 자리의 선지정(Lock)을 취소하시겠습니까?`)) return;
@@ -897,7 +958,6 @@ window.cancelPreAssignment = async () => {
 };
 
 
-// [신규] 사이드바 입고대기 목록 렌더링 함수
 window.renderIncomingQueue = function() {
     const container = document.getElementById('incoming-list');
     if(!container) return;
@@ -912,8 +972,8 @@ window.renderIncomingQueue = function() {
     let html = '';
     for(let code in incomingData) {
         let item = incomingData[code];
-        let qty = item.qty || 0;
-        let name = item.name || '';
+        let qty = item['입고대기수량'] || 0;
+        let name = item['상품명'] || '';
         let assignedCount = assignedMap[code] || 0;
 
         html += `
@@ -930,14 +990,12 @@ window.renderIncomingQueue = function() {
     container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">입고 대기 상품이 없습니다.</div>';
 };
 
-// [신규] 선지정 모드 활성화 / 비활성화
 window.activatePreAssignMode = function(code, name, qty) {
     window.isPreAssignMode = true;
     window.selectedPreAssignItem = { code, name, qty };
     document.getElementById('pre-assign-banner-text').innerText = `${code} (${name})`;
     document.getElementById('pre-assign-banner').style.display = 'flex';
     
-    // 모바일 등 화면이 작을 때는 누르자마자 사이드바 닫기
     if (window.innerWidth < 1100) {
         document.getElementById('incoming-sidebar').classList.remove('open');
     }
