@@ -439,15 +439,12 @@ window.saveCapacity2F = async function() {
 };
 
 window.switchUsageTab = function(tab) { window.currentUsageTab = tab; window.calculateAndRenderUsage(); };
+
 window.applyUsageFilter = function(zone, state) {
     filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
     if (zone !== 'all') filters.loc = [zone];
     if (state === 'used') filters.code = 'not-empty'; else if (state === 'empty') filters.code = 'empty';
     setupFilterPopups();
-    ['loc', 'code', 'dong', 'pos', 'stock'].forEach(id => {
-        const btn = document.getElementById('btn-filter-' + id);
-        if (btn) { if (filters[id] === 'all' && (id!=='loc' || filters.loc.length===0)) btn.classList.remove('active'); else btn.classList.add('active'); }
-    });
     applyFiltersAndSort();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
 };
@@ -539,11 +536,30 @@ function updateLocPopupUI() {
     locPop.innerHTML = locHtml;
 }
 
+// 화면 필터 상태 재설정 (새로고침시 파란색 표시 유지)
+function updateFilterButtonStates() {
+    const btnId = document.getElementById('btn-filter-id'); // 기존 'loc' 오타 수정
+    if (btnId) {
+        if (filters.loc.length === 0) btnId.classList.remove('active');
+        else btnId.classList.add('active');
+    }
+    
+    ['code', 'dong', 'pos', 'stock'].forEach(type => {
+        const btn = document.getElementById('btn-filter-' + type);
+        if (btn) {
+            if (filters[type] === 'all') btn.classList.remove('active');
+            else btn.classList.add('active');
+        }
+    });
+}
+
 function setupFilterPopups() {
     const codePop = document.getElementById('pop-code'); const namePop = document.getElementById('pop-name');
     const optionPop = document.getElementById('pop-option'); const stockPop = document.getElementById('pop-stock');
     const dongPop = document.getElementById('pop-dong'); const posPop = document.getElementById('pop-pos');
+    
     updateLocPopupUI();
+    
     let codeHtml = getSortButtonsHtml('code') + `<div class="filter-option ${filters.code === 'all' ? 'selected' : ''}" onclick="setFilter('code', 'all')">${filters.code === 'all' ? '✔️ ' : ''}전체보기</div><div class="filter-option ${filters.code === 'empty' ? 'selected' : ''}" onclick="setFilter('code', 'empty')">${filters.code === 'empty' ? '✔️ ' : ''}빈칸</div><div class="filter-option ${filters.code === 'not-empty' ? 'selected' : ''}" onclick="setFilter('code', 'not-empty')">${filters.code === 'not-empty' ? '✔️ ' : ''}내용있음</div>`;
     if(codePop) codePop.innerHTML = codeHtml;
     if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
@@ -560,11 +576,26 @@ function setupFilterPopups() {
     let stockHtml = getSortButtonsHtml('stock') + `<div class="filter-option ${filters.stock === 'all' ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${filters.stock === 'all' ? '✔️ ' : ''}전체보기</div>`;
     stocks.forEach(s => { stockHtml += `<div class="filter-option ${filters.stock === s ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${filters.stock === s ? '✔️ ' : ''}${s}</div>`; });
     if(stockPop) stockPop.innerHTML = stockHtml;
+
+    updateFilterButtonStates(); // 팝업 및 헤더 리렌더링 후 파란색 다시 유지
 }
 
 window.executeSort = (key, direction) => { sortConfig = { key: key, direction: direction }; setupFilterPopups(); applyFiltersAndSort(); if (typeof window.closeAllPopups === 'function') window.closeAllPopups(); };
-window.toggleLocFilter = (val) => { if (val === 'all') filters.loc = []; else { if (filters.loc.includes(val)) filters.loc = filters.loc.filter(v => v !== val); else filters.loc.push(val); } setupFilterPopups(); const btn = document.getElementById('btn-filter-loc'); if (btn) { if (filters.loc.length === 0) btn.classList.remove('active'); else btn.classList.add('active'); } applyFiltersAndSort(); };
-window.setFilter = (type, value) => { filters[type] = value; setupFilterPopups(); const btnId = `btn-filter-${type}`; const btn = document.getElementById(btnId); if (btn) { if (value === 'all') btn.classList.remove('active'); else btn.classList.add('active'); } applyFiltersAndSort(); if (typeof window.closeAllPopups === 'function') window.closeAllPopups(); };
+window.toggleLocFilter = (val) => { 
+    if (val === 'all') filters.loc = []; 
+    else { 
+        if (filters.loc.includes(val)) filters.loc = filters.loc.filter(v => v !== val); 
+        else filters.loc.push(val); 
+    } 
+    setupFilterPopups(); 
+    applyFiltersAndSort(); 
+};
+window.setFilter = (type, value) => { 
+    filters[type] = value; 
+    setupFilterPopups(); 
+    applyFiltersAndSort(); 
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups(); 
+};
 
 function applyFiltersAndSort() {
     let filtered = originalData.filter(item => {
@@ -593,7 +624,6 @@ window.handleRowClick = async function(event, locId) {
         const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== "") || (loc.name && loc.name.trim() !== "");
         if (hasContent) { alert("🚨 이미 물건이 들어있는 자리입니다. 텅 빈 빈칸을 선택해주세요."); return; }
         
-        // 추가: 선지정 모드일 때 동일 상품 셀을 한 번 더 누르면 바로 취소되도록
         if (loc.preAssigned) { 
             if (loc.preAssignedCode === window.selectedPreAssignItem.code) {
                 if (confirm(`이미 '${loc.preAssignedCode}' 상품으로 선지정된 자리입니다.\n지정을 해제(취소)하시겠습니까?`)) {
@@ -605,7 +635,6 @@ window.handleRowClick = async function(event, locId) {
                     return;
                 } else return;
             }
-            // 다른 상품이 선지정되어 있는 경우
             if (!confirm(`이미 다른 상품(${loc.preAssignedCode})이 선지정된 자리입니다.\n기존 선지정을 무시하고 덮어쓰시겠습니까?`)) return; 
         }
         
@@ -800,7 +829,6 @@ window.copyLocationToClipboard = async (event, locId) => {
             const data = snap.data(); const now = new Date().getTime();
             const isReserved = data.reserved === true; const reserverName = data.reservedBy || '다른 작업자';
             
-            // 1. 일반 작업자 예약 취소
             if (isReserved && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n해제하시겠습니까?`)) {
                     await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '', assignedAt: 0 }, { merge: true });
@@ -809,7 +837,6 @@ window.copyLocationToClipboard = async (event, locId) => {
                 return;
             }
             
-            // 2. 다른 사람의 예약 강제 취소/가져오기
             if (isReserved) {
                 if (confirm(`[${locId}]은 현재 [${reserverName}]님이 사용 중입니다.\n강제로 예약을 가져오시겠습니까?`)) {
                     await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
@@ -818,18 +845,16 @@ window.copyLocationToClipboard = async (event, locId) => {
                 return; 
             }
             
-            // 3. 추가: 선지정된 자리의 ID를 클릭했을 때 예약 취소처럼 동일하게 물어보기
             if (data.preAssigned) { 
                 if (confirm(`📦 [${locId}]는 입고예정(${data.preAssignedCode}) 선지정 구역입니다.\n선지정을 해제(취소)하시겠습니까?`)) {
                     await setDoc(docRef, { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '' }, { merge: true });
                     showToast(`[${locId}] 선지정 해제 완료!`);
-                    return; // 취소 후 종료
+                    return; 
                 } else {
                     if (!confirm(`무시하고 일반 작업을 위해 예약(🔒)하시겠습니까?`)) return;
                 }
             }
             
-            // 4. 일반 예약 등록
             await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
             navigator.clipboard.writeText(locId).then(() => { showToast(`[${locId}] 복사 및 예약 완료!`); });
         }
