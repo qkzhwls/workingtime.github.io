@@ -20,9 +20,12 @@ window.currentUsageTab = '3F';
 window.capacity2F = 200000;
 window.sheetUrl = ''; 
 
-// 동적 컬럼 관리를 위한 변수 선언
 window.visibleColumns = ['std_dong', 'std_pos', 'std_id', 'std_code', 'std_name', 'std_option', 'std_stock'];
 window.excelHeaders = []; 
+
+// [신규] 선지정 모드 관리용 상태 변수
+window.isPreAssignMode = false;
+window.selectedPreAssignItem = null;
 
 loadAppConfig(db).then(config => {
     appConfig = config;
@@ -57,7 +60,6 @@ window.hideLoading = function() {
     document.getElementById('loading-overlay').style.display = 'none';
 };
 
-// B창고 데이터 리스너
 function setupRealtimeListenerB() {
     if (!db2) return;
     onSnapshot(collection(db2, 'ZikjinData'), (snapshot) => {
@@ -75,11 +77,11 @@ function setupRealtimeListenerB() {
     onSnapshot(collection(db2, 'IncomingData'), (snapshot) => {
         incomingData = {};
         snapshot.forEach(docSnap => { incomingData[docSnap.id] = docSnap.data(); });
+        if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
         applyFiltersAndSort();
     }, (error) => console.error("입고예정데이터 오류:", error));
 }
 
-// A창고 데이터 리스너
 function setupRealtimeListenerA() {
     const q = collection(db, LOC_COLLECTION);
     onSnapshot(q, (snapshot) => {
@@ -100,6 +102,7 @@ function setupRealtimeListenerA() {
         
         renderTableHeader(); 
         applyFiltersAndSort(); 
+        if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
         
         const pop = document.getElementById('usage-popup');
         if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
@@ -111,7 +114,6 @@ window.onload = () => {
     setupRealtimeListenerB();
 };
 
-// 동적 테이블 헤더 생성 로직
 function renderTableHeader() {
     const theadTr = document.getElementById('dynamic-thead-tr');
     const popupContainer = document.getElementById('dynamic-popups');
@@ -147,8 +149,6 @@ function createTh(key, label, width, hasFilter) {
     return `<th ${widthStyle}><div class="th-content"><span class="title-text">${label}</span>${filterHtml}</div></th>`;
 }
 
-
-// 환경설정 모달 제어 로직
 window.openSettingsModal = (e) => {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -191,7 +191,6 @@ window.saveHeaderSettings = async () => {
 };
 
 
-// 스마트 로케이션 추천 알고리즘
 window.showRecommendation = function() {
     window.showLoading("💡 상품 점수를 계산하고 최적의 로케이션을 매칭 중입니다...");
 
@@ -227,9 +226,10 @@ window.showRecommendation = function() {
 
         scoredItems.sort((a, b) => b.score - a.score);
 
+        // [수정] 텅 비어있으면서 동시에 선지정(락)도 안 걸려있는 순수 빈자리만 추출
         let emptyLocs = originalData.filter(d => {
             const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
-            return !hasContent;
+            return !hasContent && !d.preAssigned; 
         });
 
         const posPriority = { '2': 1, '3': 2, '4': 3, '1': 4, '5': 5 };
@@ -296,17 +296,31 @@ window.saveSheetUrl = async () => {
     } catch(e) { console.error("링크 저장 실패:", e); alert("오류가 발생했습니다."); }
 };
 
+// [수정] 복잡한 헤더(줄바꿈, 띄어쓰기 등)를 정제하여 다이렉트로 흡수
 window.syncIncomingData = async () => {
     if (!window.sheetUrl) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
-    window.showLoading("🔄 입고예정 데이터를 구글시트에서 가져오고 있습니다...");
+    window.showLoading("🔄 원본 시트에서 입고예정 데이터를 가져오고 있습니다...");
     try {
         const proxyUrl = 'https://corsproxy.io/?'; 
         const response = await fetch(proxyUrl + encodeURIComponent(window.sheetUrl));
         if (!response.ok) throw new Error("응답 오류");
         const arrayBuffer = await response.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-        if (json.length > 0) updateDatabaseB(json, 'IncomingData', null);
+        
+        // 기본 JSON 추출 (빈 값은 빈 문자열로)
+        const rawJson = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+        
+        // 헤더 텍스트 공백/줄바꿈 제거 후 새 객체 조립
+        const cleanJson = rawJson.map(row => {
+            let newRow = {};
+            for(let key in row) {
+                let cleanKey = key.replace(/\s+/g, '');
+                newRow[cleanKey] = row[key];
+            }
+            return newRow;
+        });
+
+        if (cleanJson.length > 0) updateDatabaseB(cleanJson, 'IncomingData', null);
         else { window.hideLoading(); alert("시트에 데이터가 없습니다."); }
     } catch (error) { window.hideLoading(); alert("연결 실패. 방화벽이나 링크 설정을 확인하세요."); }
 };
@@ -347,9 +361,9 @@ window.calculateAndRenderUsage = function() {
         if (total === 0) { popup.innerHTML = html + '<div style="padding: 10px;">데이터가 없습니다.</div>'; return; }
         
         let used = 0; let zoneStats = {};
-        
-        // [수정] 당일지정수량 로직: 엑셀 최신화로 자물쇠가 풀려도 assignedAt 기록으로 카운트 유지
         let todayReservedCount = 0;
+        let preAssignedCount = 0; // 선지정 카운트 변수
+        
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
@@ -357,9 +371,11 @@ window.calculateAndRenderUsage = function() {
             const isUsed = (loc.code && loc.code.trim() !== '' && loc.code !== loc.id) || (loc.name && loc.name.trim() !== '');
             if (isUsed) used++;
             
-            // 예약되었거나, 오늘 예약(클릭)된 기록(assignedAt)이 있으면 당일 카운트 포함
             if ((loc.assignedAt && loc.assignedAt >= todayStart) || (loc.reserved && loc.reservedAt >= todayStart)) {
                 todayReservedCount++;
+            }
+            if (loc.preAssigned) {
+                preAssignedCount++;
             }
 
             const zone = loc.id.charAt(0).toUpperCase();
@@ -379,7 +395,7 @@ window.calculateAndRenderUsage = function() {
                 <div style="width:1px; background:#ccc;"></div>
                 <div style="text-align:center;">
                     <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량(준비중)</div>
-                    <div style="font-size:18px; color:#ff9800; font-weight:900;">0</div>
+                    <div style="font-size:18px; color:#e65100; font-weight:900;">${preAssignedCount}</div>
                 </div>
             </div>
             <div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div>
@@ -477,6 +493,46 @@ function applyFiltersAndSort() {
     renderTable(filtered);
 }
 
+// [수정] 행(Row) 클릭 시 동작하는 공통 함수
+window.handleRowClick = async function(event, locId) {
+    if (event.target.tagName === 'INPUT') return;
+
+    // 1. 선지정 락온(Lock) 모드일 때의 동작
+    if (window.isPreAssignMode && window.selectedPreAssignItem) {
+        const loc = originalData.find(d => d.id === locId);
+        if (!loc) return;
+
+        const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== "") || (loc.name && loc.name.trim() !== "");
+        if (hasContent) {
+            alert("🚨 이미 물건이 들어있는 자리입니다. 텅 빈 빈칸을 선택해주세요.");
+            return;
+        }
+
+        if (loc.preAssigned) {
+            if (!confirm(`이미 다른 상품(${loc.preAssignedCode})이 선지정된 자리입니다.\n기존 선지정을 무시하고 덮어쓰시겠습니까?`)) {
+                return;
+            }
+        }
+
+        try {
+            await setDoc(doc(db, LOC_COLLECTION, locId), {
+                preAssigned: true,
+                preAssignedCode: window.selectedPreAssignItem.code,
+                preAssignedName: window.selectedPreAssignItem.name,
+                preAssignedQty: window.selectedPreAssignItem.qty,
+                updatedAt: new Date()
+            }, { merge: true });
+            
+            showToast(`[${locId}] 자리에 선지정 락(Lock)이 완료되었습니다!`);
+            window.cancelPreAssignMode(); // 선지정 후 자동 모드 종료
+        } catch(e) { console.error(e); alert("선지정 저장 오류"); }
+        return;
+    }
+
+    // 2. 일반 모드일 때는 수동 수정 모달 띄우기
+    openEditModal(locId);
+};
+
 function renderTable(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody) return;
@@ -484,16 +540,31 @@ function renderTable(data) {
     const checkedBoxes = document.querySelectorAll('.loc-check:checked');
     const checkedIds = new Set(Array.from(checkedBoxes).map(cb => cb.value));
 
-    let html = ''; const now = new Date().getTime();
+    let html = ''; 
 
     data.forEach(loc => {
         let isReserved = loc.reserved === true;
-        let rowStyle = isReserved ? 'background-color: #fffde7;' : '';
-        let reserverName = loc.reservedBy || '누군가';
-        let badgeHtml = isReserved ? `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>` : '';
+        let isPreAssigned = loc.preAssigned === true;
+
+        let rowStyle = '';
+        let badgeHtml = '';
+
+        if (isReserved) {
+            rowStyle = 'background-color: #fffde7;';
+            let reserverName = loc.reservedBy || '누군가';
+            badgeHtml = `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>`;
+        } else if (isPreAssigned) {
+            rowStyle = 'background-color: #fff3e0;';
+        }
+        
+        if (isPreAssigned) {
+            badgeHtml += `<br><span class="badge-incoming">📦 입고선지정: ${loc.preAssignedCode}</span>`;
+        }
+
         let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
 
-        html += `<tr onclick="if(event.target.tagName !== 'INPUT') openEditModal('${loc.id}')" style="${rowStyle}">`;
+        // [수정] onclick을 별도의 공통 핸들러로 라우팅
+        html += `<tr onclick="handleRowClick(event, '${loc.id}')" style="${rowStyle}">`;
         html += `<td onclick="event.stopPropagation()"><input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked}></td>`;
         
         window.visibleColumns.forEach(col => {
@@ -608,7 +679,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
 
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            const code = row['상품코드']?.toString().trim();
+            let code = (row['어드민상품코드'] || row['상품코드'])?.toString().trim();
             if (!code) continue;
 
             const docRef = doc(db2, collectionName, code);
@@ -667,9 +738,16 @@ async function updateDatabaseA(rows) {
                         const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                         const docRef = doc(db, LOC_COLLECTION, cleanLocId);
 
-                        // [수정] 엑셀 업데이트 시 기존 assignedAt(당일지정기록)을 파괴하지 않고 유지하도록 변경
                         let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: row };
                         
+                        if (finalCode && finalCode.trim() !== '') {
+                            // [핵심] 실제 엑셀이 업로드되어 물건 코드가 채워지면 선지정 락온 완전 해제
+                            updateData.preAssigned = false;
+                            updateData.preAssignedCode = '';
+                            updateData.preAssignedName = '';
+                            updateData.preAssignedQty = '';
+                        }
+
                         if (finalCode) updateData.code = finalCode;
                         updateData.name = row['상품명']?.toString().trim() || '';
                         updateData.option = row['옵션']?.toString().trim() || '';
@@ -696,7 +774,6 @@ async function updateDatabaseA(rows) {
     finally { document.getElementById('excel-upload-a').value = ''; window.hideLoading(); }
 }
 
-// [수정] 예약 및 해제 시 assignedAt 타이머 동작 로직 개선
 window.copyLocationToClipboard = async (event, locId) => {
     event.stopPropagation(); 
     try {
@@ -708,7 +785,6 @@ window.copyLocationToClipboard = async (event, locId) => {
 
             if (isReserved && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n예약을 해제(취소)하시겠습니까?`)) {
-                    // [핵심] 예약 취소 시 assignedAt을 0으로 되돌려 당일 카운트에서 뺌
                     await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '', assignedAt: 0 }, { merge: true });
                     showToast(`[${locId}] 예약 해제 완료`);
                 } else { navigator.clipboard.writeText(locId); showToast(`[${locId}] 내 예약 복사 완료!`); }
@@ -719,14 +795,18 @@ window.copyLocationToClipboard = async (event, locId) => {
                 const rTime = new Date(data.reservedAt || 0);
                 const timeStr = `${rTime.getHours()}:${String(rTime.getMinutes()).padStart(2, '0')}`;
                 if (confirm(`[${locId}] 로케이션은 현재 [${reserverName}]님이 ${timeStr}부터 사용(예약) 중입니다.\n강제로 예약을 뺏어오시겠습니까?`)) {
-                    // 강제로 뺏어올 때도 당일 지정 기록 갱신
                     await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
                     navigator.clipboard.writeText(locId); showToast(`[${locId}] 예약을 뺏어와 복사했습니다.`);
                 }
                 return; 
             }
 
-            // [핵심] 새로운 예약 시 assignedAt(당일 지정 메모리)에 현재 시간 기록
+            if (data.preAssigned) {
+                if (!confirm(`🚨 [${locId}] 자리는 입고예정 상품(${data.preAssignedCode})을 위해 찜(선지정)된 구역입니다.\n\n그래도 무시하고 이 자리에 예약을 진행하시겠습니까?`)) {
+                    return;
+                }
+            }
+
             await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
             navigator.clipboard.writeText(locId).then(() => { showToast(`[${locId}] 복사 및 예약 완료!`); });
         }
@@ -780,6 +860,15 @@ window.openEditModal = (id) => {
     document.getElementById('modal-name').value = targetData.name || '';
     document.getElementById('modal-option').value = targetData.option || '';
     document.getElementById('modal-stock').value = targetData.stock || '0';
+    
+    // 선지정 취소 버튼 제어
+    const unassignBtn = document.getElementById('btn-modal-unassign');
+    if (targetData.preAssigned) {
+        unassignBtn.style.display = 'inline-block';
+    } else {
+        unassignBtn.style.display = 'none';
+    }
+
     document.getElementById('edit-modal').style.display = 'flex';
 };
 
@@ -794,6 +883,70 @@ window.saveManualEdit = async () => {
         await setDoc(doc(db, LOC_COLLECTION, id), updateData, { merge: true });
         document.getElementById('edit-modal').style.display = 'none'; 
     } catch (error) { console.error("수정 실패:", error); }
+};
+
+// [신규] 모달 내 선지정 수동 취소
+window.cancelPreAssignment = async () => {
+    const id = document.getElementById('modal-id').value;
+    if(!confirm(`[${id}] 자리의 선지정(Lock)을 취소하시겠습니까?`)) return;
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, id), { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '' }, { merge: true });
+        document.getElementById('edit-modal').style.display = 'none';
+        showToast("선지정이 정상적으로 취소되었습니다.");
+    } catch (error) { console.error(error); alert("선지정 취소 실패"); }
+};
+
+
+// [신규] 사이드바 입고대기 목록 렌더링 함수
+window.renderIncomingQueue = function() {
+    const container = document.getElementById('incoming-list');
+    if(!container) return;
+
+    let assignedMap = {};
+    originalData.forEach(loc => {
+        if(loc.preAssigned && loc.preAssignedCode) {
+            assignedMap[loc.preAssignedCode] = (assignedMap[loc.preAssignedCode] || 0) + 1;
+        }
+    });
+
+    let html = '';
+    for(let code in incomingData) {
+        let item = incomingData[code];
+        let qty = item.qty || 0;
+        let name = item.name || '';
+        let assignedCount = assignedMap[code] || 0;
+
+        html += `
+            <div class="incoming-item" onclick="activatePreAssignMode('${code}', '${name.replace(/'/g, "\\'")}', '${qty}')">
+                <div style="font-weight:bold; color:var(--primary); font-size:14px; margin-bottom:4px;">${code}</div>
+                <div style="font-size:12px; color:#333; margin-bottom:6px;">${name}</div>
+                <div style="display:flex; justify-content:space-between; font-size:11px;">
+                    <span style="color:#e65100; font-weight:bold;">대기: ${qty}개</span>
+                    <span style="color:#888;">지정된 칸: <b style="color:#333;">${assignedCount}</b>칸</span>
+                </div>
+            </div>
+        `;
+    }
+    container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">입고 대기 상품이 없습니다.</div>';
+};
+
+// [신규] 선지정 모드 활성화 / 비활성화
+window.activatePreAssignMode = function(code, name, qty) {
+    window.isPreAssignMode = true;
+    window.selectedPreAssignItem = { code, name, qty };
+    document.getElementById('pre-assign-banner-text').innerText = `${code} (${name})`;
+    document.getElementById('pre-assign-banner').style.display = 'flex';
+    
+    // 모바일 등 화면이 작을 때는 누르자마자 사이드바 닫기
+    if (window.innerWidth < 1100) {
+        document.getElementById('incoming-sidebar').classList.remove('open');
+    }
+};
+
+window.cancelPreAssignMode = function() {
+    window.isPreAssignMode = false;
+    window.selectedPreAssignItem = null;
+    document.getElementById('pre-assign-banner').style.display = 'none';
 };
 
 window.addEventListener('keydown', function(e) { if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) { e.preventDefault(); alert("🚨 실시간 동기화 모드 작동 중입니다.\n과도한 요금 발생을 막기 위해 새로고침을 차단했습니다."); } });
