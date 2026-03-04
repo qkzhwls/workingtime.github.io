@@ -387,18 +387,16 @@ window.syncIncomingData = async () => {
             let code = row['어드민상품코드'] || row['상품코드'] || '';
             let name = row['상품명'] || row['공급처상품명'] || '';
             
-            // 수량: 총미입고수량, 최종미입고수량(추가입고예정), 미입고수량 순으로 확인
             let rawQty = row['총미입고수량본사입고기준'];
             if (rawQty === undefined || rawQty === "") rawQty = row['최종미입고수량추가입고예정'];
             if (rawQty === undefined || rawQty === "") rawQty = row['미입고수량'];
             let qty = Number(rawQty) || 0;
             
-            // [수정] 날짜 기준 엄격 분리: 제작은 출고예상일, 사입은 검수창고도착일만 참조
             let rawDate = "";
             if (row.source === '제작') {
                 rawDate = row['공장출고예상일자'] || row['공장출고예상일'] || row['출고예상일'];
             } else if (row.source === '사입') {
-                rawDate = row['검수창고도착일']; // 사입은 오직 이 열만 확인
+                rawDate = row['검수창고도착일'];
             }
             
             let date = formatExcelDate(rawDate);
@@ -412,7 +410,7 @@ window.syncIncomingData = async () => {
                 'source': row.source || '기타',
                 ...row
             };
-        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['공장출고예상일'] && row['공장출고예상일'].toString().trim() !== ''); // 수정: 날짜 없는 항목 제외 조건 유지
+        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['공장출고예상일'] && row['공장출고예상일'].toString().trim() !== '');
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
@@ -594,7 +592,23 @@ window.handleRowClick = async function(event, locId) {
         if (!loc) return;
         const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== "") || (loc.name && loc.name.trim() !== "");
         if (hasContent) { alert("🚨 이미 물건이 들어있는 자리입니다. 텅 빈 빈칸을 선택해주세요."); return; }
-        if (loc.preAssigned) { if (!confirm(`이미 다른 상품(${loc.preAssignedCode})이 선지정된 자리입니다.\n기존 선지정을 무시하고 덮어쓰시겠습니까?`)) return; }
+        
+        // 추가: 선지정 모드일 때 동일 상품 셀을 한 번 더 누르면 바로 취소되도록
+        if (loc.preAssigned) { 
+            if (loc.preAssignedCode === window.selectedPreAssignItem.code) {
+                if (confirm(`이미 '${loc.preAssignedCode}' 상품으로 선지정된 자리입니다.\n지정을 해제(취소)하시겠습니까?`)) {
+                    await setDoc(doc(db, LOC_COLLECTION, locId), {
+                        preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: ''
+                    }, { merge: true });
+                    showToast(`[${locId}] 선지정 취소 완료`);
+                    window.cancelPreAssignMode();
+                    return;
+                } else return;
+            }
+            // 다른 상품이 선지정되어 있는 경우
+            if (!confirm(`이미 다른 상품(${loc.preAssignedCode})이 선지정된 자리입니다.\n기존 선지정을 무시하고 덮어쓰시겠습니까?`)) return; 
+        }
+        
         try {
             await setDoc(doc(db, LOC_COLLECTION, locId), {
                 preAssigned: true,
@@ -785,6 +799,8 @@ window.copyLocationToClipboard = async (event, locId) => {
         if (snap.exists()) {
             const data = snap.data(); const now = new Date().getTime();
             const isReserved = data.reserved === true; const reserverName = data.reservedBy || '다른 작업자';
+            
+            // 1. 일반 작업자 예약 취소
             if (isReserved && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n해제하시겠습니까?`)) {
                     await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '', assignedAt: 0 }, { merge: true });
@@ -792,6 +808,8 @@ window.copyLocationToClipboard = async (event, locId) => {
                 } else { navigator.clipboard.writeText(locId); showToast(`[${locId}] 복사 완료!`); }
                 return;
             }
+            
+            // 2. 다른 사람의 예약 강제 취소/가져오기
             if (isReserved) {
                 if (confirm(`[${locId}]은 현재 [${reserverName}]님이 사용 중입니다.\n강제로 예약을 가져오시겠습니까?`)) {
                     await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
@@ -799,7 +817,19 @@ window.copyLocationToClipboard = async (event, locId) => {
                 }
                 return; 
             }
-            if (data.preAssigned) { if (!confirm(`🚨 [${locId}]는 입고예정(${data.preAssignedCode}) 선지정 구역입니다.\n무시하고 예약하시겠습니까?`)) return; }
+            
+            // 3. 추가: 선지정된 자리의 ID를 클릭했을 때 예약 취소처럼 동일하게 물어보기
+            if (data.preAssigned) { 
+                if (confirm(`📦 [${locId}]는 입고예정(${data.preAssignedCode}) 선지정 구역입니다.\n선지정을 해제(취소)하시겠습니까?`)) {
+                    await setDoc(docRef, { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '' }, { merge: true });
+                    showToast(`[${locId}] 선지정 해제 완료!`);
+                    return; // 취소 후 종료
+                } else {
+                    if (!confirm(`무시하고 일반 작업을 위해 예약(🔒)하시겠습니까?`)) return;
+                }
+            }
+            
+            // 4. 일반 예약 등록
             await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
             navigator.clipboard.writeText(locId).then(() => { showToast(`[${locId}] 복사 및 예약 완료!`); });
         }
@@ -897,7 +927,6 @@ window.renderIncomingQueue = function() {
         if(filterSource !== 'all' && item.source !== filterSource) return false;
         if(existingLocMap[item['상품코드']]) return false; 
         
-        // 추가: 도착일(공장출고예상일)이 비어있는 경우 리스트에서 제외
         if(!item['공장출고예상일'] || item['공장출고예상일'].toString().trim() === '') return false;
         
         return true;
