@@ -32,6 +32,8 @@
         .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
         .btn-main-upload:hover { filter: brightness(1.2); }
         .btn-smart { background: #4caf50; }
+        .btn-settings { background: #607d8b; padding: 8px 12px; border-radius: 6px; font-weight: bold; border: none; color: white; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
+        .btn-settings:hover { background: #455a64; }
         
         .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
         .upload-menu label, .upload-menu div.menu-item { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
@@ -39,7 +41,6 @@
         .upload-menu input[type="file"] { display: none; } 
         .menu-divider { border-top: 2px solid #ddd; margin: 0; }
 
-        .action-bar { margin: 0 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; background: white; padding: 10px 15px; border-radius: 8px; border: 1px solid #ddd; }
         .action-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 150px; }
         .btn-add { padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
         .btn-add:hover { background: #324ee0; }
@@ -49,11 +50,11 @@
         .list-container { 
             overflow: auto; 
             background: white; 
-            margin: 0 20px;
+            margin: 0 20px 10px 20px;
             padding: 0; 
             border-radius: 12px; 
             border: 1px solid #ccc; 
-            height: calc(100vh - 170px);
+            height: calc(100vh - 120px); /* 공간 확보 */
         }
         .list-table { width: 100%; border-collapse: collapse; min-width: 1000px; table-layout: fixed; }
         .list-table th, .list-table td { 
@@ -76,7 +77,7 @@
             box-shadow: inset 0 -1px 0 #ccc, inset 0 1px 0 #ccc; 
         }
         .th-content { display: flex; justify-content: center; align-items: center; gap: 8px; }
-        .title-text { font-size: 16px; font-weight: 800; color: #222; }
+        .title-text { font-size: 15px; font-weight: 800; color: #222; }
         
         .filter-btn { cursor: pointer; padding: 2px 6px; border-radius: 4px; color: #666; font-size: 12px; background: #e0e0e0; transition: 0.2s; }
         .filter-btn:hover { background: #d0d0d0; color: var(--primary); }
@@ -165,7 +166,7 @@
                 <div class="upload-menu" id="upload-menu-2" onclick="event.stopPropagation()">
                     <label>
                         <span style="color:#d32f2f;">📂 1. 배송/주차별 데이터 업로드</span><br>
-                        <span style="font-size:11px; color:#666; font-weight:normal;">(파일을 여러 개 한 번에 선택 가능합니다)</span>
+                        <span style="font-size:11px; color:#666; font-weight:normal;">(파일을 여러 개 한 번에 선택 가능)</span>
                         <input type="file" id="excel-upload-combined" accept=".xls,.xlsx,.csv,.html,.htm" multiple>
                     </label>
                     <div class="menu-divider"></div>
@@ -174,16 +175,8 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
 
-    <div class="action-bar" id="action-bar">
-        <div>
-            <button class="btn-delete-bulk" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
-        </div>
-        <div style="display: flex; align-items: center;">
-            <input type="text" id="new-loc-id" class="action-input" placeholder="예: A-1-001" onkeypress="if(event.key === 'Enter') addSingleLocation()">
-            <button class="btn-add" onclick="addSingleLocation()" style="margin-left: 5px;">➕ 빈 로케이션 추가</button>
+            <button class="btn-settings" onclick="openSettingsModal(event)">⚙️ 환경설정</button>
         </div>
     </div>
 
@@ -191,19 +184,13 @@
         <div class="list-container" id="list-container">
             <table class="list-table">
                 <thead>
-                    <tr>
+                    <tr id="dynamic-thead-tr">
                         <th class="checkbox-cell"><input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)"></th>
-                        <th style="width: 80px;"><div class="th-content"><span class="title-text">동</span><span class="filter-btn" id="btn-filter-dong" onclick="toggleFilterPopup(event, 'pop-dong')">▼</span></div></th>
-                        <th style="width: 80px;"><div class="th-content"><span class="title-text">위치</span><span class="filter-btn" id="btn-filter-pos" onclick="toggleFilterPopup(event, 'pop-pos')">▼</span></div></th>
-                        <th style="width: 150px;"><div class="th-content"><span class="title-text">로케이션</span><span class="filter-btn" id="btn-filter-loc" onclick="toggleFilterPopup(event, 'pop-loc')">▼</span></div></th>
-                        <th style="width: 150px;"><div class="th-content"><span class="title-text">상품코드</span><span class="filter-btn" id="btn-filter-code" onclick="toggleFilterPopup(event, 'pop-code')">▼</span></div></th>
-                        <th><div class="th-content"><span class="title-text">상품명</span><span class="filter-btn" id="btn-filter-name" onclick="toggleFilterPopup(event, 'pop-name')">▼</span></div></th>
-                        <th style="width: 180px;"><div class="th-content"><span class="title-text">옵션</span><span class="filter-btn" id="btn-filter-option" onclick="toggleFilterPopup(event, 'pop-option')">▼</span></div></th>
-                        <th style="width: 130px;"><div class="th-content"><span class="title-text">정상재고</span><span class="filter-btn" id="btn-filter-stock" onclick="toggleFilterPopup(event, 'pop-stock')">▼</span></div></th>
+                        <th style="width: 80px;"><div class="th-content"><span class="title-text">동</span></div></th>
                     </tr>
                 </thead>
                 <tbody id="location-list-body">
-                    <tr><td colspan="8" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
+                    <tr><td colspan="10" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -213,8 +200,37 @@
         <div class="map-container" style="text-align:center; padding:100px; background:#fff; margin:20px; border-radius:12px; border:1px solid #ddd;">🚧 도면 보기 기능 준비 중</div>
     </div>
 
-    <div id="pop-dong" class="filter-popup"></div><div id="pop-pos" class="filter-popup"></div><div id="pop-loc" class="filter-popup"></div>
-    <div id="pop-code" class="filter-popup"></div><div id="pop-name" class="filter-popup"></div><div id="pop-option" class="filter-popup"></div><div id="pop-stock" class="filter-popup"></div>
+    <div id="dynamic-popups"></div>
+
+    <div id="settings-modal" class="modal-overlay" onclick="closeSettingsModal(event)">
+        <div class="modal-content" style="width: 450px;" onclick="event.stopPropagation()">
+            <div class="modal-header">⚙️ 시스템 환경설정</div>
+            
+            <div style="margin-bottom: 25px;">
+                <h4 style="margin-bottom: 10px; font-size:14px; border-bottom: 2px solid #eee; padding-bottom: 5px; color:var(--primary);">1. 빈 로케이션 추가 / 삭제</h4>
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <input type="text" id="setting-new-loc" class="action-input" placeholder="예: A-1-001" style="flex:1;" onkeypress="if(event.key === 'Enter') addSingleLocationFromSetting()">
+                    <button class="btn-add" onclick="addSingleLocationFromSetting()">➕ 개별 추가</button>
+                </div>
+                <div style="font-size: 12px; color: #555; background:#f9f9f9; padding:8px; border-radius:6px; border:1px solid #ddd;">
+                    ※ 삭제 방법: 바깥의 메인 데이터 리스트에서 체크박스를 선택한 후 아래 버튼을 누르세요.<br>
+                    <button class="btn-delete-bulk" style="margin-top:8px; width:100%;" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
+                </div>
+            </div>
+
+            <div>
+                <h4 style="margin-bottom: 10px; font-size:14px; border-bottom: 2px solid #eee; padding-bottom: 5px; color:var(--primary);">2. 화면 표시 헤더(열) 설정</h4>
+                <div style="font-size:11px; color:#888; margin-bottom:8px;">※ 체크한 항목만 리스트 화면에 표시됩니다. (주황색은 엑셀에서 새로 추가된 항목)</div>
+                <div id="setting-headers-container" style="display: flex; flex-wrap: wrap; gap: 10px; max-height: 200px; overflow-y: auto; padding: 12px; border: 1px solid #ccc; border-radius: 5px; background:#fcfcfc;">
+                    </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn-modal-cancel" onclick="closeSettingsModal()">닫기</button>
+                <button class="btn-modal-save" onclick="saveHeaderSettings()">설정 저장</button>
+            </div>
+        </div>
+    </div>
 
     <div id="edit-modal" class="modal-overlay" onclick="closeEditModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
@@ -271,8 +287,7 @@
                             <th style="width: 160px; background:#e8f5e9; color:#2e7d32; border-top:none;">➡️ 추천 로케이션 (빈칸)</th>
                         </tr>
                     </thead>
-                    <tbody id="recommend-tbody">
-                        </tbody>
+                    <tbody id="recommend-tbody"></tbody>
                 </table>
             </div>
             <div class="modal-footer">
@@ -288,7 +303,6 @@
     <script>
         function switchView(view) {
             document.getElementById('view-list').style.display = view === 'list' ? 'block' : 'none';
-            document.getElementById('action-bar').style.display = view === 'list' ? 'flex' : 'none';
             document.getElementById('view-map').style.display = view === 'map' ? 'block' : 'none';
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             event.currentTarget.classList.add('active');
@@ -299,7 +313,7 @@
             const pop = document.getElementById(id);
             const isVisible = pop.style.display === 'block';
             closeAllPopups();
-            if (!isVisible) {
+            if (!isVisible && pop) {
                 const rect = e.target.getBoundingClientRect();
                 pop.style.display = 'block';
                 pop.style.top = (rect.bottom + window.scrollY + 5) + 'px';
@@ -307,7 +321,6 @@
             }
         }
 
-        // [수정] 여러 드롭다운 메뉴를 제어하도록 파라미터(id) 추가
         function toggleUploadMenu(e, menuId) {
             e.stopPropagation();
             const menu = document.getElementById(menuId);
@@ -316,7 +329,6 @@
             if (!isVisible) { menu.style.display = 'block'; }
         }
 
-        // [수정] 모든 업로드 메뉴가 창 닫힐 때 같이 닫히도록 수정
         window.closeAllPopups = function() {
             document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
             const usagePop = document.getElementById('usage-popup');
@@ -326,15 +338,10 @@
         
         document.querySelectorAll('.filter-popup').forEach(p => { p.addEventListener('click', function(e) { e.stopPropagation(); }); });
 
-        window.closeEditModal = function(e) {
-            if (!e || e.target.id === 'edit-modal') document.getElementById('edit-modal').style.display = 'none';
-        }
-        window.closeSheetModal = function(e) {
-            if (!e || e.target.id === 'sheet-modal') document.getElementById('sheet-modal').style.display = 'none';
-        }
-        window.closeRecommendModal = function(e) {
-            if (!e || e.target.id === 'recommend-modal') document.getElementById('recommend-modal').style.display = 'none';
-        }
+        window.closeEditModal = function(e) { if (!e || e.target.id === 'edit-modal') document.getElementById('edit-modal').style.display = 'none'; }
+        window.closeSheetModal = function(e) { if (!e || e.target.id === 'sheet-modal') document.getElementById('sheet-modal').style.display = 'none'; }
+        window.closeRecommendModal = function(e) { if (!e || e.target.id === 'recommend-modal') document.getElementById('recommend-modal').style.display = 'none'; }
+        window.closeSettingsModal = function(e) { if (!e || e.target.id === 'settings-modal') document.getElementById('settings-modal').style.display = 'none'; }
     </script>
 </body>
 </html>
