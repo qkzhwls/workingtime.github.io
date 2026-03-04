@@ -301,33 +301,45 @@ window.saveSheetUrl = async () => {
 };
 
 
-// [핵심] 방화벽/CORS 에러를 막기 위한 듀얼 프록시 엔진 탑재
+// [핵심 업그레이드] 3중 다이렉트 통신 로직 (방화벽 우회용)
 window.syncIncomingData = async () => {
     if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
-    window.showLoading("🔄 원본 시트에서 입고예정 데이터를 가져오고 있습니다...");
+    window.showLoading("🔄 원본 시트에서 데이터를 가져오는 중입니다. (방화벽 통과 시도)");
     
     try {
         let combinedData = [];
 
+        // 데이터를 가져오고 파싱하는 독립 함수
         const fetchAndParse = async (url) => {
             if (!url) return [];
             
-            // 1순위: allorigins 프록시 시도 (가장 안정적임)
-            let proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-            let response;
+            let arrayBuffer;
             
             try {
-                response = await fetch(proxyUrl);
-                if (!response.ok) throw new Error("1차 프록시 응답 실패");
-            } catch (e) {
-                // 1순위 실패 시 2순위: corsproxy.io 시도
-                console.log("1차 우회 통로 실패. 2차 통로 접속 시도 중...");
-                proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-                response = await fetch(proxyUrl);
-                if (!response.ok) throw new Error("2차 프록시 응답 실패");
+                // 1차 시도: 구글 서버로 돌직구 다이렉트 접속 (프록시 안 거침)
+                console.log("1차 시도: 구글 다이렉트 접속 시도...");
+                const res1 = await fetch(url);
+                if (!res1.ok) throw new Error("1차 다이렉트 연결 실패");
+                arrayBuffer = await res1.arrayBuffer();
+                console.log("✅ 1차 다이렉트 접속 성공!");
+            } catch (e1) {
+                console.log("1차 다이렉트 접속 차단됨. 2차 allorigins 프록시 시도...");
+                try {
+                    // 2차 시도: allorigins.win (가장 안정적인 프록시)
+                    const res2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+                    if (!res2.ok) throw new Error("2차 프록시 응답 실패");
+                    arrayBuffer = await res2.arrayBuffer();
+                    console.log("✅ 2차 우회 통로 성공!");
+                } catch (e2) {
+                    console.log("2차 우회 차단됨. 마지막 3차 corsproxy.io 시도...");
+                    // 3차 시도: corsproxy.io
+                    const res3 = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+                    if (!res3.ok) throw new Error("3차 프록시 응답 실패");
+                    arrayBuffer = await res3.arrayBuffer();
+                    console.log("✅ 3차 우회 통로 성공!");
+                }
             }
 
-            const arrayBuffer = await response.arrayBuffer();
             const workbook = XLSX.read(arrayBuffer, { type: 'array' });
             const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
             
@@ -363,6 +375,7 @@ window.syncIncomingData = async () => {
             return parsedList;
         };
 
+        // 오더리스트와 사입리스트 병렬 다운로드
         const [orderData, buyData] = await Promise.all([
             fetchAndParse(window.sheetUrlOrder),
             fetchAndParse(window.sheetUrlBuy)
@@ -393,8 +406,8 @@ window.syncIncomingData = async () => {
         }
     } catch (error) { 
         window.hideLoading(); 
-        alert(`연결 실패.\n\n[확인사항]\n1. 링크를 제대로 붙여넣으셨는지 확인\n2. 사내 보안 방화벽 문제일 수 있습니다.`); 
-        console.error(error);
+        alert(`🚨 3중 통신망이 모두 차단되었습니다.\n\n사내 보안 프로그램(방화벽)이 시스템의 외부 데이터 요청을 완전히 막고 있습니다.\n이 경우 엑셀 다운로드 후 수동 업로드를 이용하셔야 합니다.`); 
+        console.error("데이터 동기화 실패:", error);
     }
 };
 
