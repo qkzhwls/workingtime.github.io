@@ -807,6 +807,7 @@ async function updateDatabaseA(rows) {
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                     const docRef = doc(db, LOC_COLLECTION, cleanLocId);
                     let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: row };
+                    
                     if (finalCode && finalCode.trim() !== '') {
                         updateData.preAssigned = false;
                         updateData.preAssignedCode = '';
@@ -817,8 +818,16 @@ async function updateDatabaseA(rows) {
                     updateData.name = row['상품명']?.toString().trim() || '';
                     updateData.option = row['옵션']?.toString().trim() || '';
                     updateData.stock = row['정상재고']?.toString().trim() || '0';
-                    updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
-                    updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
+                    
+                    // == [수정] 동, 위치 정보 보존 로직 ==
+                    if ('동' in row || 'dong' in row) {
+                        updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
+                    }
+                    if ('위치' in row || 'pos' in row) {
+                        updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
+                    }
+                    // ===================================
+
                     updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
                     batch.set(docRef, updateData, { merge: true });
                     updateCount++; batchCount++;
