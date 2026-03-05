@@ -1,5 +1,5 @@
 import { initializeFirebase, loadAppConfig } from './config.js';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const { db, auth, db2 } = initializeFirebase();
@@ -84,31 +84,86 @@ function setupRealtimeListenerB() {
 }
 
 function setupRealtimeListenerA() {
-    const q = collection(db, LOC_COLLECTION);
+    // 1. 설정값은 실시간 리스닝 (updatedAt 조건에서 제외)
+    onSnapshot(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), (docSnap) => {
+        if(docSnap.exists()){
+            const conf = docSnap.data();
+            if (conf.capacity2F) window.capacity2F = conf.capacity2F;
+            if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
+            if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
+            if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
+            if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
+            if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
+            
+            renderTableHeader(); 
+            applyFiltersAndSort();
+        }
+    });
+
+    // 2. 브라우저 캐시(임시저장소) 데이터 불러오기
+    let localCacheMap = {};
+    try {
+        localCacheMap = JSON.parse(localStorage.getItem('locCacheMap') || '{}');
+    } catch(e) { localCacheMap = {}; }
+    
+    let lastSyncTime = parseInt(localStorage.getItem('locLastSyncTime') || '0');
+    
+    // 12시간(반나절) 단위로 전체 강제 동기화 (하드 삭제된 항목 반영 목적)
+    const nowTime = new Date().getTime();
+    if (nowTime - lastSyncTime > 12 * 60 * 60 * 1000) {
+        localCacheMap = {};
+        lastSyncTime = 0;
+    }
+
+    // 캐시에 있는 데이터로 화면을 먼저 그립니다 (속도 향상)
+    originalData = Object.values(localCacheMap);
+    renderTableHeader();
+    applyFiltersAndSort();
+
+    // 3. 마지막 동기화 이후 변경된 로케이션만 골라서 가져오기 (비용 99% 절약)
+    let q;
+    if (lastSyncTime > 0) {
+        const syncDate = new Date(lastSyncTime - 5000); // 약간의 오차 방지용 5초 전 시간
+        q = query(collection(db, LOC_COLLECTION), where("updatedAt", ">=", syncDate));
+    } else {
+        q = collection(db, LOC_COLLECTION);
+    }
+
     onSnapshot(q, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
-        originalData = [];
-        snapshot.forEach(docSnap => {
-            if (docSnap.id === 'INFO_USAGE_STATS') return;
-            if (docSnap.id === 'INFO_CONFIG') {
-                const conf = docSnap.data();
-                if (conf.capacity2F) window.capacity2F = conf.capacity2F;
-                if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
-                if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
-                if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
-                if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
-                if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
-                return;
+        
+        let hasChanges = false;
+        snapshot.docChanges().forEach((change) => {
+            const docSnap = change.doc;
+            if (docSnap.id === 'INFO_USAGE_STATS' || docSnap.id === 'INFO_CONFIG') return;
+
+            if (change.type === 'added' || change.type === 'modified') {
+                localCacheMap[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+                hasChanges = true;
+            } else if (change.type === 'removed') {
+                delete localCacheMap[docSnap.id];
+                hasChanges = true;
             }
-            originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
-        
-        renderTableHeader(); 
-        applyFiltersAndSort(); 
-        if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
-        
-        const pop = document.getElementById('usage-popup');
-        if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
+
+        // 변경사항이 있거나 처음 접속했을 때만 화면 업데이트 및 캐시 저장
+        if (hasChanges || lastSyncTime === 0) {
+            originalData = Object.values(localCacheMap);
+            
+            try {
+                localStorage.setItem('locCacheMap', JSON.stringify(localCacheMap));
+                localStorage.setItem('locLastSyncTime', new Date().getTime().toString());
+            } catch(e) {
+                console.warn("로컬 캐시 한도 초과", e);
+            }
+            
+            renderTableHeader(); 
+            applyFiltersAndSort(); 
+            if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
+            
+            const pop = document.getElementById('usage-popup');
+            if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
+        }
     }, (error) => { console.error("A창고 오류:", error); });
 }
 
@@ -628,7 +683,7 @@ window.handleRowClick = async function(event, locId) {
                 if (confirm(`이미 '${loc.preAssignedCode}' 상품으로 선지정된 자리입니다.\n지정을 해제(취소)하시겠습니까?`)) {
                     await setDoc(doc(db, LOC_COLLECTION, locId), {
                         preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '',
-                        code: '', name: '', option: '', stock: '0' 
+                        code: '', name: '', option: '', stock: '0', updatedAt: new Date()
                     }, { merge: true });
                     showToast(`[${locId}] 선지정 취소 완료`);
                     window.cancelPreAssignMode();
@@ -650,6 +705,9 @@ window.handleRowClick = async function(event, locId) {
                 name: window.selectedPreAssignItem.name,
                 option: window.selectedPreAssignItem.option || '',
                 stock: window.selectedPreAssignItem.qty.toString(), 
+                reserved: false, 
+                reservedBy: '',
+                reservedAt: 0,
                 updatedAt: new Date()
             }, { merge: true });
             showToast(`[${locId}] 자리에 선지정 락(Lock)이 완료되었습니다!`);
@@ -669,17 +727,24 @@ function renderTable(data) {
     data.forEach(loc => {
         let isReserved = loc.reserved === true;
         let isPreAssigned = loc.preAssigned === true;
-        let rowStyle = ''; let badgeHtml = '';
+        let rowStyle = ''; 
+        let badgeHtml = '';
         
-        if (isReserved) {
-            rowStyle = 'background-color: #fffde7;';
-            let reserverName = loc.reservedBy || '누군가';
-            badgeHtml = `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>`;
-        } else if (isPreAssigned) { 
-            rowStyle = 'background-color: #ffe0b2;'; 
+        // 중요: 선지정(주황색)이 기존 예약(노란색)보다 무조건 최우선 적용되도록 강제(!important)
+        if (isPreAssigned) { 
+            rowStyle = 'background-color: #ffe0b2 !important;'; 
+        } else if (isReserved) {
+            rowStyle = 'background-color: #fffde7 !important;';
         }
         
-        if (isPreAssigned) badgeHtml += `<br><span class="badge-incoming" style="background-color:#e65100; color:white; padding:2px 4px; border-radius:3px; font-size:11px;">📦 입고선지정: ${loc.preAssignedQty}개 대기중</span>`;
+        if (isReserved && !isPreAssigned) {
+            let reserverName = loc.reservedBy || '누군가';
+            badgeHtml += `<br><span class="badge-reserved" style="color:#f57f17; font-size:11px;">🔒 ${reserverName} 작업중</span>`;
+        }
+        
+        if (isPreAssigned) {
+            badgeHtml += `<br><span class="badge-incoming" style="background-color:#e65100; color:white; padding:2px 4px; border-radius:3px; font-size:11px; display:inline-block; margin-top:2px;">📦 입고선지정: ${loc.preAssignedQty}개 대기중</span>`;
+        }
         
         let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
         html += `<tr onclick="handleRowClick(event, '${loc.id}')" style="${rowStyle}">`;
@@ -819,14 +884,12 @@ async function updateDatabaseA(rows) {
                     updateData.option = row['옵션']?.toString().trim() || '';
                     updateData.stock = row['정상재고']?.toString().trim() || '0';
                     
-                    // == [수정] 동, 위치 정보 보존 로직 ==
                     if ('동' in row || 'dong' in row) {
                         updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
                     }
                     if ('위치' in row || 'pos' in row) {
                         updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
                     }
-                    // ===================================
 
                     updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
                     batch.set(docRef, updateData, { merge: true });
@@ -857,7 +920,7 @@ window.copyLocationToClipboard = async (event, locId) => {
             
             if (isReserved && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n해제하시겠습니까?`)) {
-                    await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '', assignedAt: 0 }, { merge: true });
+                    await setDoc(docRef, { reserved: false, reservedAt: 0, reservedBy: '', assignedAt: 0, updatedAt: new Date() }, { merge: true });
                     showToast(`[${locId}] 해제 완료`);
                 } else { navigator.clipboard.writeText(locId); showToast(`[${locId}] 복사 완료!`); }
                 return;
@@ -865,7 +928,7 @@ window.copyLocationToClipboard = async (event, locId) => {
             
             if (isReserved) {
                 if (confirm(`[${locId}]은 현재 [${reserverName}]님이 사용 중입니다.\n강제로 예약을 가져오시겠습니까?`)) {
-                    await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
+                    await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName, updatedAt: new Date() }, { merge: true });
                     navigator.clipboard.writeText(locId); showToast(`[${locId}] 강제 복사 완료!`);
                 }
                 return; 
@@ -873,7 +936,7 @@ window.copyLocationToClipboard = async (event, locId) => {
             
             if (data.preAssigned) { 
                 if (confirm(`📦 [${locId}]는 입고예정(${data.preAssignedCode}) 선지정 구역입니다.\n선지정을 해제(취소)하시겠습니까?`)) {
-                    await setDoc(docRef, { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0' }, { merge: true });
+                    await setDoc(docRef, { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0', updatedAt: new Date() }, { merge: true });
                     showToast(`[${locId}] 선지정 해제 완료!`);
                     return; 
                 } else {
@@ -881,7 +944,7 @@ window.copyLocationToClipboard = async (event, locId) => {
                 }
             }
             
-            await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName }, { merge: true });
+            await setDoc(docRef, { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName, updatedAt: new Date() }, { merge: true });
             navigator.clipboard.writeText(locId).then(() => { showToast(`[${locId}] 복사 및 예약 완료!`); });
         }
     } catch (error) { alert('예약 처리 오류'); }
@@ -953,7 +1016,7 @@ window.cancelPreAssignment = async () => {
     const id = document.getElementById('modal-id').value;
     if(!confirm(`[${id}] 선지정을 취소하시겠습니까?`)) return;
     try {
-        await setDoc(doc(db, LOC_COLLECTION, id), { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0' }, { merge: true });
+        await setDoc(doc(db, LOC_COLLECTION, id), { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0', updatedAt: new Date() }, { merge: true });
         document.getElementById('edit-modal').style.display = 'none';
         showToast("취소되었습니다.");
     } catch (error) { console.error(error); }
