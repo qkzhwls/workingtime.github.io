@@ -1,5 +1,5 @@
 import { initializeFirebase, loadAppConfig } from './config.js';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs, query, where } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const { db, auth, db2 } = initializeFirebase();
@@ -84,86 +84,31 @@ function setupRealtimeListenerB() {
 }
 
 function setupRealtimeListenerA() {
-    // 1. 설정값은 실시간 리스닝 (updatedAt 조건에서 제외)
-    onSnapshot(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), (docSnap) => {
-        if(docSnap.exists()){
-            const conf = docSnap.data();
-            if (conf.capacity2F) window.capacity2F = conf.capacity2F;
-            if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
-            if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
-            if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
-            if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
-            if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
-            
-            renderTableHeader(); 
-            applyFiltersAndSort();
-        }
-    });
-
-    // 2. 브라우저 캐시(임시저장소) 데이터 불러오기
-    let localCacheMap = {};
-    try {
-        localCacheMap = JSON.parse(localStorage.getItem('locCacheMap') || '{}');
-    } catch(e) { localCacheMap = {}; }
-    
-    let lastSyncTime = parseInt(localStorage.getItem('locLastSyncTime') || '0');
-    
-    // 12시간(반나절) 단위로 전체 강제 동기화 (하드 삭제된 항목 반영 목적)
-    const nowTime = new Date().getTime();
-    if (nowTime - lastSyncTime > 12 * 60 * 60 * 1000) {
-        localCacheMap = {};
-        lastSyncTime = 0;
-    }
-
-    // 캐시에 있는 데이터로 화면을 먼저 그립니다 (속도 향상)
-    originalData = Object.values(localCacheMap);
-    renderTableHeader();
-    applyFiltersAndSort();
-
-    // 3. 마지막 동기화 이후 변경된 로케이션만 골라서 가져오기 (비용 99% 절약)
-    let q;
-    if (lastSyncTime > 0) {
-        const syncDate = new Date(lastSyncTime - 5000); // 약간의 오차 방지용 5초 전 시간
-        q = query(collection(db, LOC_COLLECTION), where("updatedAt", ">=", syncDate));
-    } else {
-        q = collection(db, LOC_COLLECTION);
-    }
-
+    const q = collection(db, LOC_COLLECTION);
     onSnapshot(q, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
-        
-        let hasChanges = false;
-        snapshot.docChanges().forEach((change) => {
-            const docSnap = change.doc;
-            if (docSnap.id === 'INFO_USAGE_STATS' || docSnap.id === 'INFO_CONFIG') return;
-
-            if (change.type === 'added' || change.type === 'modified') {
-                localCacheMap[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
-                hasChanges = true;
-            } else if (change.type === 'removed') {
-                delete localCacheMap[docSnap.id];
-                hasChanges = true;
+        originalData = [];
+        snapshot.forEach(docSnap => {
+            if (docSnap.id === 'INFO_USAGE_STATS') return;
+            if (docSnap.id === 'INFO_CONFIG') {
+                const conf = docSnap.data();
+                if (conf.capacity2F) window.capacity2F = conf.capacity2F;
+                if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
+                if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
+                if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
+                if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
+                if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
+                return;
             }
+            originalData.push({ id: docSnap.id, ...docSnap.data() });
         });
-
-        // 변경사항이 있거나 처음 접속했을 때만 화면 업데이트 및 캐시 저장
-        if (hasChanges || lastSyncTime === 0) {
-            originalData = Object.values(localCacheMap);
-            
-            try {
-                localStorage.setItem('locCacheMap', JSON.stringify(localCacheMap));
-                localStorage.setItem('locLastSyncTime', new Date().getTime().toString());
-            } catch(e) {
-                console.warn("로컬 캐시 한도 초과", e);
-            }
-            
-            renderTableHeader(); 
-            applyFiltersAndSort(); 
-            if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
-            
-            const pop = document.getElementById('usage-popup');
-            if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
-        }
+        
+        renderTableHeader(); 
+        applyFiltersAndSort(); 
+        if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
+        
+        const pop = document.getElementById('usage-popup');
+        if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
     }, (error) => { console.error("A창고 오류:", error); });
 }
 
@@ -858,6 +803,7 @@ async function updateDatabaseA(rows) {
         }
         let batch = writeBatch(db); let updateCount = 0; let batchCount = 0;
         const validLocIds = new Set(originalData.map(d => d.id));
+        
         for (let i = 0; i < totalRows; i++) {
             const row = rows[i]; const rawLoc = row['로케이션']?.toString().trim();
             if (rawLoc) {
@@ -868,6 +814,7 @@ async function updateDatabaseA(rows) {
                     const sIndex = afterParen.indexOf('S');
                     if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
                 } else { cleanLocId = rawLoc; }
+                
                 if (cleanLocId && validLocIds.has(cleanLocId)) {
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                     const docRef = doc(db, LOC_COLLECTION, cleanLocId);
@@ -879,11 +826,14 @@ async function updateDatabaseA(rows) {
                         updateData.preAssignedName = '';
                         updateData.preAssignedQty = '';
                     }
-                    if (finalCode) updateData.code = finalCode;
+                    
+                    // 핵심 수정사항: 엑셀 파일이 비어있다면, DB도 확실하게 빈칸으로 지워버림
+                    updateData.code = finalCode || '';
                     updateData.name = row['상품명']?.toString().trim() || '';
                     updateData.option = row['옵션']?.toString().trim() || '';
                     updateData.stock = row['정상재고']?.toString().trim() || '0';
                     
+                    // 동, 위치는 엑셀 파일에 해당 열이 존재할 때만 업데이트하여 기존 정보를 영구 보호함
                     if ('동' in row || 'dong' in row) {
                         updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
                     }
@@ -892,6 +842,7 @@ async function updateDatabaseA(rows) {
                     }
 
                     updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
+                    
                     batch.set(docRef, updateData, { merge: true });
                     updateCount++; batchCount++;
                     if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
