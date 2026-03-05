@@ -128,7 +128,7 @@ function renderTableHeader() {
     window.visibleColumns.forEach(col => {
         if (col === 'std_dong') { html += createTh('dong', '동', 80, true); popupHtml += `<div id="pop-dong" class="filter-popup"></div>`; }
         else if (col === 'std_pos') { html += createTh('pos', '위치', 80, true); popupHtml += `<div id="pop-pos" class="filter-popup"></div>`; }
-        else if (col === 'std_id') { html += createTh('id', '로케이션', 150, true); popupHtml += `<div id="pop-id" class="filter-popup"></div>`; } // 수정완료: pop-loc -> pop-id로 이름 일치
+        else if (col === 'std_id') { html += createTh('id', '로케이션', 150, true); popupHtml += `<div id="pop-id" class="filter-popup"></div>`; }
         else if (col === 'std_code') { html += createTh('code', '상품코드', 150, true); popupHtml += `<div id="pop-code" class="filter-popup"></div>`; }
         else if (col === 'std_name') { html += createTh('name', '상품명', 'auto', true); popupHtml += `<div id="pop-name" class="filter-popup"></div>`; }
         else if (col === 'std_option') { html += createTh('option', '옵션', 180, true); popupHtml += `<div id="pop-option" class="filter-popup"></div>`; }
@@ -525,7 +525,7 @@ function getSortButtonsHtml(key) {
 }
 
 function updateLocPopupUI() {
-    const locPop = document.getElementById('pop-id'); // 수정됨: pop-loc -> pop-id
+    const locPop = document.getElementById('pop-id');
     if (!locPop) return;
     let prefixSet = new Set(originalData.map(d => d.id.charAt(0))); prefixSet.add('★');
     const prefixes = [...prefixSet].sort((a, b) => (a === '★' ? -1 : (b === '★' ? 1 : a.localeCompare(b))));
@@ -536,9 +536,8 @@ function updateLocPopupUI() {
     locPop.innerHTML = locHtml;
 }
 
-// 화면 필터 상태 재설정 (새로고침시 파란색 표시 유지)
 function updateFilterButtonStates() {
-    const btnId = document.getElementById('btn-filter-id'); // 수정됨
+    const btnId = document.getElementById('btn-filter-id');
     if (btnId) {
         if (filters.loc.length === 0) btnId.classList.remove('active');
         else btnId.classList.add('active');
@@ -577,7 +576,7 @@ function setupFilterPopups() {
     stocks.forEach(s => { stockHtml += `<div class="filter-option ${filters.stock === s ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${filters.stock === s ? '✔️ ' : ''}${s}</div>`; });
     if(stockPop) stockPop.innerHTML = stockHtml;
 
-    updateFilterButtonStates(); // 팝업 및 헤더 리렌더링 후 파란색 다시 유지
+    updateFilterButtonStates(); 
 }
 
 window.executeSort = (key, direction) => { sortConfig = { key: key, direction: direction }; setupFilterPopups(); applyFiltersAndSort(); if (typeof window.closeAllPopups === 'function') window.closeAllPopups(); };
@@ -618,17 +617,18 @@ function applyFiltersAndSort() {
 
 window.handleRowClick = async function(event, locId) {
     if (event.target.tagName === 'INPUT') return;
+    
     if (window.isPreAssignMode && window.selectedPreAssignItem) {
         const loc = originalData.find(d => d.id === locId);
         if (!loc) return;
         const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== "") || (loc.name && loc.name.trim() !== "");
-        if (hasContent) { alert("🚨 이미 물건이 들어있는 자리입니다. 텅 빈 빈칸을 선택해주세요."); return; }
         
         if (loc.preAssigned) { 
             if (loc.preAssignedCode === window.selectedPreAssignItem.code) {
                 if (confirm(`이미 '${loc.preAssignedCode}' 상품으로 선지정된 자리입니다.\n지정을 해제(취소)하시겠습니까?`)) {
                     await setDoc(doc(db, LOC_COLLECTION, locId), {
-                        preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: ''
+                        preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '',
+                        code: '', name: '', option: '', stock: '0' 
                     }, { merge: true });
                     showToast(`[${locId}] 선지정 취소 완료`);
                     window.cancelPreAssignMode();
@@ -636,6 +636,8 @@ window.handleRowClick = async function(event, locId) {
                 } else return;
             }
             if (!confirm(`이미 다른 상품(${loc.preAssignedCode})이 선지정된 자리입니다.\n기존 선지정을 무시하고 덮어쓰시겠습니까?`)) return; 
+        } else {
+            if (hasContent) { alert("🚨 이미 물건이 들어있는 자리입니다. 텅 빈 빈칸을 선택해주세요."); return; }
         }
         
         try {
@@ -644,6 +646,10 @@ window.handleRowClick = async function(event, locId) {
                 preAssignedCode: window.selectedPreAssignItem.code,
                 preAssignedName: window.selectedPreAssignItem.name,
                 preAssignedQty: window.selectedPreAssignItem.qty,
+                code: window.selectedPreAssignItem.code,
+                name: window.selectedPreAssignItem.name,
+                option: window.selectedPreAssignItem.option || '',
+                stock: window.selectedPreAssignItem.qty.toString(), 
                 updatedAt: new Date()
             }, { merge: true });
             showToast(`[${locId}] 자리에 선지정 락(Lock)이 완료되었습니다!`);
@@ -664,12 +670,17 @@ function renderTable(data) {
         let isReserved = loc.reserved === true;
         let isPreAssigned = loc.preAssigned === true;
         let rowStyle = ''; let badgeHtml = '';
+        
         if (isReserved) {
             rowStyle = 'background-color: #fffde7;';
             let reserverName = loc.reservedBy || '누군가';
             badgeHtml = `<br><span class="badge-reserved">🔒 ${reserverName} 작업중</span>`;
-        } else if (isPreAssigned) { rowStyle = 'background-color: #fff3e0;'; }
-        if (isPreAssigned) badgeHtml += `<br><span class="badge-incoming">📦 입고선지정: ${loc.preAssignedCode}</span>`;
+        } else if (isPreAssigned) { 
+            rowStyle = 'background-color: #ffe0b2;'; 
+        }
+        
+        if (isPreAssigned) badgeHtml += `<br><span class="badge-incoming" style="background-color:#e65100; color:white; padding:2px 4px; border-radius:3px; font-size:11px;">📦 입고선지정: ${loc.preAssignedQty}개 대기중</span>`;
+        
         let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
         html += `<tr onclick="handleRowClick(event, '${loc.id}')" style="${rowStyle}">`;
         html += `<td onclick="event.stopPropagation()"><input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked}></td>`;
@@ -822,6 +833,12 @@ async function updateDatabaseA(rows) {
 
 window.copyLocationToClipboard = async (event, locId) => {
     event.stopPropagation(); 
+    
+    if (window.isPreAssignMode) {
+        window.handleRowClick(event, locId);
+        return;
+    }
+    
     try {
         const docRef = doc(db, LOC_COLLECTION, locId);
         const snap = await getDoc(docRef);
@@ -847,7 +864,7 @@ window.copyLocationToClipboard = async (event, locId) => {
             
             if (data.preAssigned) { 
                 if (confirm(`📦 [${locId}]는 입고예정(${data.preAssignedCode}) 선지정 구역입니다.\n선지정을 해제(취소)하시겠습니까?`)) {
-                    await setDoc(docRef, { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '' }, { merge: true });
+                    await setDoc(docRef, { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0' }, { merge: true });
                     showToast(`[${locId}] 선지정 해제 완료!`);
                     return; 
                 } else {
@@ -927,7 +944,7 @@ window.cancelPreAssignment = async () => {
     const id = document.getElementById('modal-id').value;
     if(!confirm(`[${id}] 선지정을 취소하시겠습니까?`)) return;
     try {
-        await setDoc(doc(db, LOC_COLLECTION, id), { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '' }, { merge: true });
+        await setDoc(doc(db, LOC_COLLECTION, id), { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0' }, { merge: true });
         document.getElementById('edit-modal').style.display = 'none';
         showToast("취소되었습니다.");
     } catch (error) { console.error(error); }
@@ -971,8 +988,9 @@ window.renderIncomingQueue = function() {
         let code = item['상품코드']; let qty = item['입고대기수량'] || 0;
         let name = item['상품명'] || ''; let date = item['공장출고예상일'] || '-';
         let src = item.source || '-';
+        let option = item['옵션'] || '';
         html += `
-            <div class="incoming-item" onclick="activatePreAssignMode('${code}', '${name.replace(/'/g, "\\'")}', '${qty}')">
+            <div class="incoming-item" onclick="activatePreAssignMode('${code}', '${name.replace(/'/g, "\\'")}', '${qty}', '${option.replace(/'/g, "\\'")}')">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                     <div style="font-weight:bold; color:var(--primary); font-size:14px;">${code}</div>
                     <span style="font-size:10px; background:${src==='제작'?'#e3f2fd':'#fbe9e7'}; color:${src==='제작'?'#1976d2':'#d84315'}; padding:2px 5px; border-radius:3px; font-weight:bold;">${src}</span>
@@ -988,9 +1006,9 @@ window.renderIncomingQueue = function() {
     container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">지정이 필요한 상품이 없습니다.</div>';
 };
 
-window.activatePreAssignMode = function(code, name, qty) {
+window.activatePreAssignMode = function(code, name, qty, option = '') {
     window.isPreAssignMode = true;
-    window.selectedPreAssignItem = { code, name, qty };
+    window.selectedPreAssignItem = { code, name, qty, option };
     document.getElementById('pre-assign-banner-text').innerText = `${code} (${name})`;
     document.getElementById('pre-assign-banner').style.display = 'flex';
     if (window.innerWidth < 1100) document.getElementById('incoming-sidebar').classList.remove('open');
