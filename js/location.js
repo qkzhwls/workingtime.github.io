@@ -228,6 +228,19 @@ window.toggleSection = function(id, iconId) {
     }
 };
 
+// ✨ 사용률 팝업 자세히보기 토글
+window.toggleUsageDetails = function() {
+    const content = document.getElementById('usage-details-content');
+    const btn = document.getElementById('usage-details-btn');
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        btn.innerText = '간략히보기 ▲';
+    } else {
+        content.style.display = 'none';
+        btn.innerText = '자세히보기 ▼';
+    }
+};
+
 // ✨ [통합] 비율 및 우선순위 마스터 설정창
 window.openRatioModal = function(e) {
     if(e) e.stopPropagation();
@@ -768,7 +781,10 @@ window.calculateAndRenderUsage = function() {
         let total = locations.length;
         if (total === 0) { popup.innerHTML = html + '<div style="padding: 10px;">데이터가 없습니다.</div>'; return; }
         
-        let used = 0; let zoneStats = {};
+        let used = 0; 
+        let zoneStats = {};
+        let dongStats = {};
+        let posStats = {};
         let todayReservedCount = 0;
         let preAssignedCount = 0; 
         
@@ -782,14 +798,33 @@ window.calculateAndRenderUsage = function() {
                 todayReservedCount++;
             }
             if (loc.preAssigned) preAssignedCount++;
+            
+            // 구역 통계
             const zone = loc.id.charAt(0).toUpperCase();
             if (!zoneStats[zone]) { zoneStats[zone] = { total: 0, used: 0 }; }
             zoneStats[zone].total++;
             if (isUsed) zoneStats[zone].used++;
+            
+            // ✨ 동 통계 추가
+            const dong = (loc.dong || '').toString().trim();
+            if (dong) {
+                if (!dongStats[dong]) dongStats[dong] = { total: 0, used: 0 };
+                dongStats[dong].total++;
+                if (isUsed) dongStats[dong].used++;
+            }
+            
+            // ✨ 위치 통계 추가
+            const pos = (loc.pos || '').toString().trim();
+            if (pos) {
+                if (!posStats[pos]) posStats[pos] = { total: 0, used: 0 };
+                posStats[pos].total++;
+                if (isUsed) posStats[pos].used++;
+            }
         });
 
         const usageRate = ((used / total) * 100).toFixed(1);
         
+        // 1. 공통 상단 (항상 노출)
         html += `
             <div style="display:flex; justify-content: space-around; background: #eef1ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #c5cae9;">
                 <div style="text-align:center;">
@@ -802,16 +837,50 @@ window.calculateAndRenderUsage = function() {
                     <div style="font-size:18px; color:#e65100; font-weight:900;">${preAssignedCount}</div>
                 </div>
             </div>
-            <div style="font-size:15px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div>
-            <div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 숫자를 클릭하면 해당 구역만 보여줍니다.</div>
-            <table class="usage-table" style="width:100%;"><thead><tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody><tr><td style="font-weight:bold; color:#d32f2f;">전체 합계</td><td style="font-weight:bold;">${total}</td><td style="font-weight:bold; color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used')">${used}</td><td style="font-weight:bold; color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty')">${total - used}</td><td style="font-weight:bold; color:#d32f2f;">${usageRate}%</td></tr>`;
-
+            <div style="font-size:16px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div>
+            <div style="font-size:12px; color:#333; text-align:center;">전체 ${total}칸 중 <span style="color:var(--primary); font-weight:bold;">${used}칸 사용</span> / <span style="color:#ff5252; font-weight:bold;">${total - used}칸 빈칸</span></div>
+            <div style="text-align:center; margin-top:10px;">
+                <span onclick="toggleUsageDetails()" id="usage-details-btn" style="color:var(--primary); font-size:13px; text-decoration:underline; cursor:pointer; font-weight:bold;">자세히보기 ▼</span>
+            </div>
+        `;
+        
+        // 2. 상세 내역 (기본적으로 숨김 처리)
+        let detailHtml = `<div id="usage-details-content" style="display:none; margin-top:15px; border-top:1px solid #eee; padding-top:15px;">`;
+        detailHtml += `<div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 구역(알파벳)의 숫자를 클릭하면 해당 구역만 보여줍니다.</div>`;
+        
+        // 구역별 표
+        detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 구역별 사용률</div>`;
+        detailHtml += `<table class="usage-table" style="width:100%; margin-bottom:15px;"><thead><tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
         const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
         zones.forEach(z => {
             const zTotal = zoneStats[z].total; const zUsed = zoneStats[z].used; const zEmpty = zTotal - zUsed; const zRate = ((zUsed / zTotal) * 100).toFixed(1);
-            html += `<tr><td><strong>${z}</strong> 구역</td><td>${zTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')">${zUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')">${zEmpty}</td><td>${zRate}%</td></tr>`;
+            detailHtml += `<tr><td><strong>${z}</strong> 구역</td><td>${zTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')">${zUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')">${zEmpty}</td><td>${zRate}%</td></tr>`;
         });
-        html += `</tbody></table>`;
+        detailHtml += `</tbody></table>`;
+
+        // 동별 표
+        detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 동별 사용률</div>`;
+        detailHtml += `<table class="usage-table" style="width:100%; margin-bottom:15px;"><thead><tr><th>동</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
+        const dongs = Object.keys(dongStats).sort((a,b) => a.localeCompare(b, undefined, {numeric: true}));
+        dongs.forEach(d => {
+            const dTotal = dongStats[d].total; const dUsed = dongStats[d].used; const dEmpty = dTotal - dUsed; const dRate = ((dUsed / dTotal) * 100).toFixed(1);
+            detailHtml += `<tr><td><strong>${d}</strong> 동</td><td>${dTotal}</td><td style="color:var(--primary);">${dUsed}</td><td style="color:#ff5252;">${dEmpty}</td><td>${dRate}%</td></tr>`;
+        });
+        detailHtml += `</tbody></table>`;
+
+        // 위치별 표
+        detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 위치별 사용률</div>`;
+        detailHtml += `<table class="usage-table" style="width:100%;"><thead><tr><th>위치</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
+        const poses = Object.keys(posStats).sort((a,b) => a.localeCompare(b, undefined, {numeric: true}));
+        poses.forEach(p => {
+            const pTotal = posStats[p].total; const pUsed = posStats[p].used; const pEmpty = pTotal - pUsed; const pRate = ((pUsed / pTotal) * 100).toFixed(1);
+            detailHtml += `<tr><td><strong>${p}</strong> 위치</td><td>${pTotal}</td><td style="color:var(--primary);">${pUsed}</td><td style="color:#ff5252;">${pEmpty}</td><td>${pRate}%</td></tr>`;
+        });
+        detailHtml += `</tbody></table>`;
+        detailHtml += `</div>`; 
+
+        html += detailHtml;
+
     } else {
         let sum2F = 0; originalData.forEach(loc => { sum2F += Number(loc.stock2f || 0); });
         let rate2F = ((sum2F / window.capacity2F) * 100).toFixed(1);
