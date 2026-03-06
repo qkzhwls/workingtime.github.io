@@ -98,7 +98,7 @@ function setupRealtimeListenerA() {
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
             if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
             
-            // ✨ 데이터베이스에 저장된 추천 가중치 비율 불러오기
+            // ✨ 데이터베이스에 저장된 추천 비율 불러오기
             if (conf.recommendRatios) window.recommendRatios = conf.recommendRatios;
             
             renderTableHeader(); 
@@ -134,7 +134,7 @@ window.onload = () => {
     setupRealtimeListenerA();
     setupRealtimeListenerB();
 
-    // ✨ HTML을 일일이 수정할 필요 없이 화면 로딩 시 옛날 텍스트들을 자동으로 찾아 새 이름으로 교체!
+    // ✨ HTML 수정 없이 텍스트 자동 변경 처리
     const replaceText = (node) => {
         if (node.nodeType === 3) { 
             if (node.nodeValue.includes('스마트 로케이션 추천이동 지시서')) {
@@ -190,7 +190,6 @@ window.openSettingsModal = (e) => {
     
     const container = document.getElementById('setting-headers-container');
     
-    // ✨ 기존 컬럼 설정 부분과 새로운 가중치 설정 부분을 하나의 창에 통합
     let html = '<div style="margin-bottom:15px; font-weight:bold; color:var(--primary);">■ 화면 헤더(컬럼) 설정</div><div style="display:flex; flex-wrap:wrap; gap:5px;">';
     
     const stdCols = [
@@ -208,18 +207,8 @@ window.openSettingsModal = (e) => {
         const isChecked = window.visibleColumns.includes(colId) ? 'checked' : '';
         html += `<label style="display:flex; align-items:center; gap:5px; width: 45%; color:#e65100;"><input type="checkbox" class="chk-header" value="${colId}" ${isChecked}> ${header}</label>`;
     });
-    
-    html += `</div>`;
-    html += `<hr style="margin:15px 0; border:0; border-top:1px solid #ddd;">`;
-    
-    // ✨ 추천 가중치 설정 UI 추가
-    html += `<div style="margin-bottom:10px; font-weight:bold; color:var(--primary);">■ 로케이션 변경 추천 가중치(비율) 설정</div>`;
-    html += `<div style="display:flex; flex-direction:column; gap:8px;">`;
-    html += `<label style="display:flex; justify-content:space-between; align-items:center; font-size:13px;">직진배송 수량 곱하기 (기본 10) : <input type="number" id="set-ratio-zikjin" value="${window.recommendRatios.zikjin}" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;"></label>`;
-    html += `<label style="display:flex; justify-content:space-between; align-items:center; font-size:13px;">주차별 발주/배송 곱하기 (기본 2) : <input type="number" id="set-ratio-weekly" value="${window.recommendRatios.weekly}" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;"></label>`;
-    html += `<label style="display:flex; justify-content:space-between; align-items:center; font-size:13px;">최근 3일 상승세 곱하기 (기본 1.2) : <input type="number" step="0.1" id="set-ratio-trend" value="${window.recommendRatios.trend}" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;"></label>`;
-    html += `</div>`;
 
+    html += `</div>`;
     container.innerHTML = html;
     document.getElementById('settings-modal').style.display = 'flex';
 };
@@ -228,25 +217,34 @@ window.saveHeaderSettings = async () => {
     const checkboxes = document.querySelectorAll('.chk-header:checked');
     const newVisible = Array.from(checkboxes).map(cb => cb.value);
     
-    // ✨ 설정한 비율값 가져오기
-    const rZikjin = Number(document.getElementById('set-ratio-zikjin').value) || 10;
-    const rWeekly = Number(document.getElementById('set-ratio-weekly').value) || 2;
-    const rTrend = Number(document.getElementById('set-ratio-trend').value) || 1.2;
-    
     try {
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
-            visibleColumns: newVisible,
-            recommendRatios: { zikjin: rZikjin, weekly: rWeekly, trend: rTrend } // DB에 비율 저장
+            visibleColumns: newVisible
         }, { merge: true });
         
         window.visibleColumns = newVisible;
-        window.recommendRatios = { zikjin: rZikjin, weekly: rWeekly, trend: rTrend }; // 메모리에 즉시 적용
-        
         document.getElementById('settings-modal').style.display = 'none';
         renderTableHeader(); 
         applyFiltersAndSort(); 
-        showToast("✅ 설정이 저장되었습니다.");
+        showToast("✅ 화면 헤더 설정이 저장되었습니다.");
     } catch(e) { console.error(e); alert("저장 실패"); }
+};
+
+// ✨ 로케이션 변경 리스트에서 비율 값을 읽어와 파이어베이스에 저장하고 즉시 재계산하는 함수
+window.applyRecRatios = async function() {
+    const rZikjin = Number(document.getElementById('rec-ratio-zikjin').value) / 100;
+    const rWeekly = Number(document.getElementById('rec-ratio-weekly').value) / 100;
+    const rTrend = Number(document.getElementById('rec-ratio-trend').value) / 100;
+    
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
+            recommendRatios: { zikjin: rZikjin, weekly: rWeekly, trend: rTrend }
+        }, { merge: true });
+        
+        window.recommendRatios = { zikjin: rZikjin, weekly: rWeekly, trend: rTrend };
+        showToast("✅ 가중치 비율이 업데이트 되었습니다! 재계산합니다.");
+        window.showRecommendation(); 
+    } catch(e) { console.error(e); alert("비율 설정 저장 실패"); }
 };
 
 window.showRecommendation = function() {
@@ -265,7 +263,7 @@ window.showRecommendation = function() {
             let zQty = Number(zItem['수량'] || 0); 
             let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0); 
             
-            // ✨ 관리자가 설정한 비율을 곱셈 계산식에 실시간 적용
+            // ✨ 설정된 가중치를 곱하여 점수 계산
             score += (zQty * window.recommendRatios.zikjin);
             score += (wQty * window.recommendRatios.weekly);
 
@@ -304,11 +302,26 @@ window.showRecommendation = function() {
         });
 
         const tbody = document.getElementById('recommend-tbody');
-        let html = '';
+        
+        // ✨ 변경 리스트 모달창 테이블 상단에 % 설정 UI 컨트롤러 주입
+        let html = `
+            <tr style="background-color: #eef1ff;">
+                <td colspan="5" style="padding: 12px; text-align: center; border-bottom: 2px solid #c5cae9; font-size:13px;">
+                    <div style="display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:10px;">
+                        <span style="font-weight:bold; color:var(--primary);">⚙️ 계산 비율(%) 설정:</span>
+                        <label>직진배송 <input type="number" id="rec-ratio-zikjin" value="${Math.round(window.recommendRatios.zikjin * 100)}" style="width:55px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;">%</label>
+                        <label>주차별 <input type="number" id="rec-ratio-weekly" value="${Math.round(window.recommendRatios.weekly * 100)}" style="width:55px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;">%</label>
+                        <label>상승세 <input type="number" id="rec-ratio-trend" value="${Math.round(window.recommendRatios.trend * 100)}" style="width:55px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;">%</label>
+                        <button onclick="applyRecRatios()" style="padding:4px 12px; background:var(--primary); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">적용 및 재계산</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+        
         let matchCount = Math.min(scoredItems.length, emptyLocs.length);
         
         if (matchCount === 0) {
-            html = '<tr><td colspan="5" style="padding:40px;">데이터가 부족하거나 추천할 빈 로케이션이 없습니다.</td></tr>';
+            html += '<tr><td colspan="5" style="padding:40px;">데이터가 부족하거나 추천할 빈 로케이션이 없습니다.</td></tr>';
         } else {
             for (let i = 0; i < matchCount; i++) {
                 let item = scoredItems[i];
