@@ -28,22 +28,15 @@ window.excelHeaders = [];
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
-// ✨ 새로운 100% 만점 기준 기본 비율 세팅
+// ✨ 기본 비율 및 우선순위 세팅
 window.recommendRatios = { zikjin: 50, weekly: 30, trend: 20 };
-
-// ✨ 로케이션 기본 우선순위 세팅 (사용자가 알려준 기준 적용)
 window.recommendPriorities = {
-    zones: [
-        ['★'], // 0순위
-        ['A','B','C','D','E','F','G','H','I'], // 1순위
-        ['Z'], // 2순위
-        ['L','M','N','O','P','Q','R','S','T']  // 3순위
-    ],
+    zones: [ ['★'], ['A','B','C','D','E','F','G','H','I'], ['Z'], ['L','M','N','O','P','Q','R','S','T'] ],
     dongs: ['1', '2', '3', '4', '5', '6'],
     poses: ['2', '3', '4', '1', '5']
 };
 
-// 🎨 퍼즐(드래그앤드롭)을 위한 CSS 동적 주입 (HTML 파일 수정 불필요)
+// 🎨 퍼즐(드래그앤드롭)을 위한 CSS 동적 주입
 const injectPuzzleStyle = () => {
     if(document.getElementById('puzzle-style')) return;
     const style = document.createElement('style');
@@ -52,11 +45,17 @@ const injectPuzzleStyle = () => {
         .puzzle-container { display: flex; flex-direction: column; gap: 6px; }
         .puzzle-row { display: flex; align-items: stretch; gap: 8px; }
         .puzzle-label { width: 70px; background: #e0e0e0; font-weight: bold; font-size: 12px; color: #333; display: flex; align-items: center; justify-content: center; border-radius: 6px; text-align: center; }
-        .puzzle-drop-area { flex: 1; min-height: 42px; border: 2px dashed #bbb; border-radius: 6px; padding: 6px; display: flex; flex-wrap: wrap; gap: 5px; background: #fafafa; transition: background 0.2s, border-color 0.2s; }
+        .puzzle-drop-area { flex: 1; min-height: 42px; border: 2px dashed #bbb; border-radius: 6px; padding: 6px; display: flex; flex-wrap: wrap; gap: 5px; background: #fafafa; transition: 0.2s; }
         .puzzle-drop-area.dragover { background: #eef1ff; border-color: var(--primary); }
-        .puzzle-block { width: 28px; height: 28px; background: white; border: 2px solid #666; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.1); user-select: none; transition: transform 0.1s; }
-        .puzzle-block:active { cursor: grabbing; transform: scale(1.1); }
-        .puzzle-block.dragging { opacity: 0.4; }
+        .puzzle-block, .puzzle-sort-block { width: 28px; height: 28px; background: white; border: 2px solid #666; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; cursor: grab; box-shadow: 0 2px 4px rgba(0,0,0,0.1); user-select: none; transition: transform 0.1s; }
+        .puzzle-sort-block { width: 34px; border-color: var(--primary); color: var(--primary); }
+        .puzzle-block:active, .puzzle-sort-block:active { cursor: grabbing; transform: scale(1.1); }
+        .puzzle-block.dragging, .puzzle-sort-block.dragging { opacity: 0.4; border: 2px dashed #999; }
+        .sort-container { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: #f0f4ff; border-radius: 6px; border: 1px solid #c5cae9; min-height: 46px; align-items: center; }
+        .section-toggle { background: #f1f1f1; padding: 10px 15px; border-radius: 6px; font-weight: bold; color: #333; display: flex; justify-content: space-between; cursor: pointer; border: 1px solid #ddd; transition: background 0.2s; }
+        .section-toggle:hover { background: #e8e8e8; }
+        .section-content { display: none; padding: 15px 5px 5px 5px; animation: slideDown 0.2s ease-out; }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
     `;
     document.head.appendChild(style);
 };
@@ -127,13 +126,10 @@ function setupRealtimeListenerA() {
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
             if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
             
-            // 비율 불러오기
             if (conf.recommendRatios) {
                 let r = conf.recommendRatios;
                 if ((r.zikjin + r.weekly + r.trend) === 100) window.recommendRatios = r;
             }
-
-            // 우선순위 셋팅 불러오기
             if (conf.recommendPriorities) {
                 window.recommendPriorities = conf.recommendPriorities;
             }
@@ -172,7 +168,7 @@ window.onload = () => {
     setupRealtimeListenerB();
 };
 
-// 🧩 마우스 드래그 앤 드롭 동작 함수 (퍼즐 조각)
+// 🧩 구역 퍼즐 드래그앤드롭
 window.handleDragStart = (e) => {
     e.target.classList.add('dragging');
     e.dataTransfer.setData('text/plain', e.target.innerText);
@@ -193,7 +189,46 @@ window.handleDrop = (e, targetArea) => {
     if(draggedEl) targetArea.appendChild(draggedEl);
 };
 
-// ✨ [통합] 비율 및 우선순위 마스터 설정창 띄우기
+// 🧩 동/위치 1줄 정렬 퍼즐 드래그앤드롭
+window.handleSortDragOver = (e) => {
+    e.preventDefault();
+    const container = e.currentTarget;
+    const dragging = document.querySelector('.puzzle-sort-block.dragging');
+    if(!dragging) return;
+    const afterElement = getDragAfterElement(container, e.clientX);
+    if (afterElement == null) {
+        container.appendChild(dragging);
+    } else {
+        container.insertBefore(dragging, afterElement);
+    }
+};
+window.getDragAfterElement = (container, x) => {
+    const draggableElements = [...container.querySelectorAll('.puzzle-sort-block:not(.dragging)')];
+    return draggableElements.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = x - box.left - box.width / 2;
+        if (offset < 0 && offset > closest.offset) {
+            return { offset: offset, element: child };
+        } else {
+            return closest;
+        }
+    }, { offset: Number.NEGATIVE_INFINITY }).element;
+};
+
+// ✨ 섹션 접기/펴기 토글 함수
+window.toggleSection = function(id, iconId) {
+    const el = document.getElementById(id);
+    const icon = document.getElementById(iconId);
+    if(el.style.display === 'block') {
+        el.style.display = 'none';
+        icon.innerText = '▼';
+    } else {
+        el.style.display = 'block';
+        icon.innerText = '▲';
+    }
+};
+
+// ✨ [통합] 비율 및 우선순위 마스터 설정창
 window.openRatioModal = function(e) {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -206,11 +241,11 @@ window.openRatioModal = function(e) {
         modal.innerHTML = `
             <div style="background:white; padding:25px; border-radius:12px; width:520px; max-height:90vh; overflow-y:auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
                 <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid var(--primary); padding-bottom:10px; margin-bottom:15px;">
-                    <h2 style="margin:0; color:var(--primary); font-size:20px;">⚙️ 로케이션 추천 마스터 설정</h2>
+                    <h2 style="margin:0; color:var(--primary); font-size:20px;">⚙️ 추천 알고리즘 설정</h2>
                     <button onclick="document.getElementById('ratio-settings-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer;">×</button>
                 </div>
 
-                <div style="background:#f9f9f9; border:1px solid #ddd; border-radius:8px; padding:15px; margin-bottom:15px;">
+                <div style="background:#fcfcfc; border:1px solid #ddd; border-radius:8px; padding:15px; margin-bottom:15px;">
                     <h4 style="margin:0 0 10px 0; color:#333;">📊 점수 반영 비율 (총합 100%)</h4>
                     <div style="display:flex; justify-content:space-between; gap:10px;">
                         <label style="flex:1; display:flex; flex-direction:column; font-size:12px; font-weight:bold;">직진배송 데이터<input type="number" id="mod-ratio-zikjin" style="margin-top:5px; text-align:center; padding:6px; border:1px solid #ccc; border-radius:4px; font-weight:bold;"></label>
@@ -221,46 +256,36 @@ window.openRatioModal = function(e) {
                     </div>
                 </div>
 
-                <div style="background:#fff; border:1px solid #ddd; border-radius:8px; padding:15px; margin-bottom:15px;">
-                    <h4 style="margin:0 0 5px 0; color:#333;">🧩 구역(알파벳) 우선순위 배치</h4>
-                    <p style="margin:0 0 10px 0; font-size:11px; color:#666;">마우스로 알파벳 조각을 끌어서 원하는 순위 칸에 놓으세요.</p>
-                    
-                    <div class="puzzle-container">
-                        <div class="puzzle-row">
-                            <div class="puzzle-label" style="background:#ffd54f;">0순위</div>
-                            <div class="puzzle-drop-area" id="pz-0" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div>
-                        </div>
-                        <div class="puzzle-row">
-                            <div class="puzzle-label" style="background:#81c784;">1순위</div>
-                            <div class="puzzle-drop-area" id="pz-1" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div>
-                        </div>
-                        <div class="puzzle-row">
-                            <div class="puzzle-label" style="background:#64b5f6;">2순위</div>
-                            <div class="puzzle-drop-area" id="pz-2" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div>
-                        </div>
-                        <div class="puzzle-row">
-                            <div class="puzzle-label" style="background:#ba68c8; color:white;">3순위</div>
-                            <div class="puzzle-drop-area" id="pz-3" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div>
-                        </div>
-                        <div class="puzzle-row" style="margin-top:10px;">
-                            <div class="puzzle-label" style="background:#eeeeee; border:1px solid #ccc;">미지정<br>(후순위)</div>
-                            <div class="puzzle-drop-area" id="pz-none" style="background:#f0f0f0; border-color:#ccc;" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div>
+                <div style="margin-bottom:10px;">
+                    <div class="section-toggle" onclick="toggleSection('sec-zone', 'icon-zone')">
+                        <span>🧩 구역(알파벳) 우선순위 배치</span>
+                        <span id="icon-zone">▼</span>
+                    </div>
+                    <div id="sec-zone" class="section-content">
+                        <p style="margin:0 0 10px 0; font-size:11px; color:#666;">※ 마우스로 알파벳 조각을 끌어서 원하는 순위 칸에 놓으세요.</p>
+                        <div class="puzzle-container">
+                            <div class="puzzle-row"><div class="puzzle-label" style="background:#ffd54f;">0순위</div><div class="puzzle-drop-area" id="pz-0" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
+                            <div class="puzzle-row"><div class="puzzle-label" style="background:#81c784;">1순위</div><div class="puzzle-drop-area" id="pz-1" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
+                            <div class="puzzle-row"><div class="puzzle-label" style="background:#64b5f6;">2순위</div><div class="puzzle-drop-area" id="pz-2" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
+                            <div class="puzzle-row"><div class="puzzle-label" style="background:#ba68c8; color:white;">3순위</div><div class="puzzle-drop-area" id="pz-3" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
+                            <div class="puzzle-row" style="margin-top:5px;"><div class="puzzle-label" style="background:#eee; border:1px solid #ccc;">미지정<br>(후순위)</div><div class="puzzle-drop-area" id="pz-none" style="background:#f0f0f0; border-color:#ccc;" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
                         </div>
                     </div>
                 </div>
 
-                <div style="background:#fff; border:1px solid #ddd; border-radius:8px; padding:15px; margin-bottom:20px;">
-                    <h4 style="margin:0 0 10px 0; color:#333;">🏢 동 / 위치 우선순위</h4>
-                    <div style="display:flex; flex-direction:column; gap:10px;">
-                        <label style="display:flex; align-items:center; font-size:13px; font-weight:bold;">
-                            <span style="width:100px;">동 우선순위:</span>
-                            <input type="text" id="mod-pri-dongs" placeholder="예: 1, 2, 3, 4, 5, 6" style="flex:1; padding:6px; border:1px solid #ccc; border-radius:4px;">
-                        </label>
-                        <label style="display:flex; align-items:center; font-size:13px; font-weight:bold;">
-                            <span style="width:100px;">위치 우선순위:</span>
-                            <input type="text" id="mod-pri-poses" placeholder="예: 2, 3, 4, 1, 5" style="flex:1; padding:6px; border:1px solid #ccc; border-radius:4px;">
-                        </label>
-                        <p style="margin:0; font-size:11px; color:#888;">※ 우선순위가 높은 순서대로 쉼표(,)를 사용하여 적어주세요.</p>
+                <div style="margin-bottom:20px;">
+                    <div class="section-toggle" onclick="toggleSection('sec-dongpos', 'icon-dongpos')">
+                        <span>🏢 동 / 위치 우선순위 줄세우기</span>
+                        <span id="icon-dongpos">▼</span>
+                    </div>
+                    <div id="sec-dongpos" class="section-content">
+                        <p style="margin:0 0 10px 0; font-size:11px; color:#666;">※ 마우스로 블록을 잡고 좌우로 끌어서 순서를 맞춰주세요. (왼쪽이 1순위)</p>
+                        
+                        <div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 동 우선순위</div>
+                        <div class="sort-container" id="sort-dongs" ondragover="handleSortDragOver(event)"></div>
+
+                        <div style="font-size:13px; font-weight:bold; margin-top:15px; margin-bottom:5px; color:var(--primary);">▶ 위치 우선순위</div>
+                        <div class="sort-container" id="sort-poses" ondragover="handleSortDragOver(event)"></div>
                     </div>
                 </div>
                 
@@ -272,23 +297,20 @@ window.openRatioModal = function(e) {
         document.body.appendChild(modal);
     }
     
-    // 1. 비율 데이터 바인딩
+    // 비율 바인딩
     document.getElementById('mod-ratio-zikjin').value = window.recommendRatios.zikjin;
     document.getElementById('mod-ratio-weekly').value = window.recommendRatios.weekly;
     document.getElementById('mod-ratio-trend').value = window.recommendRatios.trend;
     
-    // 2. 퍼즐 데이터 바인딩
+    // 구역 퍼즐 바인딩
     const allAlphabets = ['★', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
     const priZones = window.recommendPriorities.zones || [[], [], [], []];
-    
     for(let i=0; i<=3; i++) document.getElementById(`pz-${i}`).innerHTML = '';
     document.getElementById('pz-none').innerHTML = '';
 
     allAlphabets.forEach(alpha => {
         let placedRank = -1;
-        for(let i=0; i<=3; i++) {
-            if(priZones[i] && priZones[i].includes(alpha)) { placedRank = i; break; }
-        }
+        for(let i=0; i<=3; i++) { if(priZones[i] && priZones[i].includes(alpha)) { placedRank = i; break; } }
         
         const block = document.createElement('div');
         block.className = 'puzzle-block';
@@ -297,38 +319,47 @@ window.openRatioModal = function(e) {
         block.ondragstart = window.handleDragStart;
         block.ondragend = window.handleDragEnd;
 
-        if(placedRank !== -1) {
-            document.getElementById(`pz-${placedRank}`).appendChild(block);
-        } else {
-            document.getElementById('pz-none').appendChild(block);
-        }
+        if(placedRank !== -1) document.getElementById(`pz-${placedRank}`).appendChild(block);
+        else document.getElementById('pz-none').appendChild(block);
     });
 
-    // 3. 동/위치 데이터 바인딩
-    document.getElementById('mod-pri-dongs').value = (window.recommendPriorities.dongs || []).join(', ');
-    document.getElementById('mod-pri-poses').value = (window.recommendPriorities.poses || []).join(', ');
+    // 동/위치 정렬 퍼즐 바인딩
+    const renderSortBlocks = (containerId, items, defaultItems) => {
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+        let finalItems = [...new Set([...items, ...defaultItems])]; // 병합 후 중복제거
+        finalItems.forEach(item => {
+            const block = document.createElement('div');
+            block.className = 'puzzle-sort-block';
+            block.innerText = item;
+            block.draggable = true;
+            block.ondragstart = window.handleDragStart;
+            block.ondragend = window.handleDragEnd;
+            container.appendChild(block);
+        });
+    };
+
+    renderSortBlocks('sort-dongs', window.recommendPriorities.dongs || [], ['1','2','3','4','5','6']);
+    renderSortBlocks('sort-poses', window.recommendPriorities.poses || [], ['1','2','3','4','5']);
     
     modal.style.display = 'flex';
 };
 
-// ✨ 통합 설정(비율+우선순위) 검증 및 파이어베이스 저장
+// ✨ 설정 저장 및 반영
 window.saveMasterSettingsModal = async function() {
-    // 1. 비율 검증
     const z = Number(document.getElementById('mod-ratio-zikjin').value) || 0;
     const w = Number(document.getElementById('mod-ratio-weekly').value) || 0;
     const t = Number(document.getElementById('mod-ratio-trend').value) || 0;
     if (z + w + t !== 100) return alert(`🚨 점수 반영 비율의 합계가 100%가 되어야 합니다.\n(현재 합계: ${z + w + t}%)`);
     
-    // 2. 퍼즐 데이터 읽기
     let newZones = [];
     for(let i=0; i<=3; i++){
         const blocks = document.getElementById(`pz-${i}`).querySelectorAll('.puzzle-block');
         newZones.push(Array.from(blocks).map(b => b.innerText.trim()));
     }
 
-    // 3. 동/위치 데이터 읽기
-    const newDongs = document.getElementById('mod-pri-dongs').value.split(',').map(s => s.trim()).filter(s => s !== '');
-    const newPoses = document.getElementById('mod-pri-poses').value.split(',').map(s => s.trim()).filter(s => s !== '');
+    const newDongs = Array.from(document.getElementById('sort-dongs').querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
+    const newPoses = Array.from(document.getElementById('sort-poses').querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
 
     const newPriorities = { zones: newZones, dongs: newDongs, poses: newPoses };
 
@@ -344,25 +375,19 @@ window.saveMasterSettingsModal = async function() {
         document.getElementById('ratio-settings-modal').style.display = 'none';
         showToast("✅ 마스터 설정이 저장되었습니다.");
         
-        // 추천 리스트가 열려있으면 즉시 알고리즘 재계산
         const recModal = document.getElementById('recommend-modal');
-        if (recModal && recModal.style.display === 'flex') {
-            window.showRecommendation();
-        }
+        if (recModal && recModal.style.display === 'flex') window.showRecommendation();
     } catch(e) { console.error(e); alert("설정 저장 중 오류가 발생했습니다."); }
 };
 
-// ✨ 로케이션 추천 다중 정렬 코어 로직
 window.showRecommendation = function() {
     window.showLoading("💡 우선순위 알고리즘을 분석하여 최적의 로케이션을 매칭 중입니다...");
 
     setTimeout(() => {
         const allCodes = new Set([...Object.keys(zikjinData), ...Object.keys(weeklyData)]);
-        
         let maxZQty = 0; let maxWQty = 0; let maxTrend = 0;
         let itemDataList = [];
 
-        // 데이터 100점 만점 정규화를 위한 최대값 추출
         allCodes.forEach(code => {
             let zItem = zikjinData[code] || {}; let wItem = weeklyData[code] || {};
             let name = zItem['상품명'] || wItem['상품명'] || '알 수 없음';
@@ -381,7 +406,6 @@ window.showRecommendation = function() {
             itemDataList.push({ code, name, zQty, wQty, trendVal });
         });
 
-        // 1. 추천 상품 점수 계산 (비율 적용)
         let scoredItems = [];
         itemDataList.forEach(item => {
             let zScore = maxZQty > 0 ? (item.zQty / maxZQty) * 100 : 0;
@@ -398,19 +422,17 @@ window.showRecommendation = function() {
 
         scoredItems.sort((a, b) => b.score - a.score);
 
-        // 2. 빈 로케이션 완벽 필터링
         let emptyLocs = originalData.filter(d => {
             const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
             return !hasContent && !d.preAssigned; 
         });
 
-        // 3. 👑 사용자가 설정한 다중 우선순위 정렬 로직
         const getZoneRank = (locId) => {
             const prefix = (locId || '').charAt(0).toUpperCase();
             for(let i=0; i < window.recommendPriorities.zones.length; i++) {
                 if(window.recommendPriorities.zones[i].includes(prefix)) return i;
             }
-            return 99; // 설정 안 된 구역은 가장 뒤로
+            return 99; 
         };
         const getDongRank = (dong) => {
             const str = (dong || '').toString().trim();
@@ -424,22 +446,12 @@ window.showRecommendation = function() {
         };
 
         emptyLocs.sort((a, b) => {
-            // 1차: 구역 순위 비교
-            let zRankA = getZoneRank(a.id);
-            let zRankB = getZoneRank(b.id);
+            let zRankA = getZoneRank(a.id); let zRankB = getZoneRank(b.id);
             if (zRankA !== zRankB) return zRankA - zRankB;
-
-            // 2차: 동 순위 비교
-            let dRankA = getDongRank(a.dong);
-            let dRankB = getDongRank(b.dong);
+            let dRankA = getDongRank(a.dong); let dRankB = getDongRank(b.dong);
             if (dRankA !== dRankB) return dRankA - dRankB;
-
-            // 3차: 위치 순위 비교
-            let pRankA = getPosRank(a.pos);
-            let pRankB = getPosRank(b.pos);
+            let pRankA = getPosRank(a.pos); let pRankB = getPosRank(b.pos);
             if (pRankA !== pRankB) return pRankA - pRankB;
-
-            // 4차: 모두 같으면 이름순 정렬
             return a.id.localeCompare(b.id); 
         });
 
@@ -1078,7 +1090,6 @@ async function updateDatabaseA(rows) {
         
         let batch = writeBatch(db); 
         let updateCount = 0; 
-        
         let zoneUpdates = {};
         
         for (let i = 0; i < totalRows; i++) {
