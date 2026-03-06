@@ -28,6 +28,9 @@ window.excelHeaders = [];
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
+// ✨ 추천 로직 계산에 사용될 비율(가중치) 기본값 설정
+window.recommendRatios = { zikjin: 10, weekly: 2, trend: 1.2 };
+
 loadAppConfig(db).then(config => {
     appConfig = config;
     if (auth.currentUser) updateCurrentUserName(auth.currentUser);
@@ -95,12 +98,15 @@ function setupRealtimeListenerA() {
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
             if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
             
+            // ✨ 데이터베이스에 저장된 추천 가중치 비율 불러오기
+            if (conf.recommendRatios) window.recommendRatios = conf.recommendRatios;
+            
             renderTableHeader(); 
             applyFiltersAndSort();
         }
     });
 
-    // 2. 구역별로 묶인(ZONE_) 로케이션 문서만 골라서 수신 (기존 7000번 읽기 -> 30번 읽기로 99% 절약)
+    // 2. 구역별로 묶인(ZONE_) 로케이션 문서만 골라서 수신
     const qZones = query(collection(db, LOC_COLLECTION), where(documentId(), ">=", "ZONE_"), where(documentId(), "<=", "ZONE_\uf8ff"));
     onSnapshot(qZones, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
@@ -127,6 +133,20 @@ function setupRealtimeListenerA() {
 window.onload = () => {
     setupRealtimeListenerA();
     setupRealtimeListenerB();
+
+    // ✨ HTML을 일일이 수정할 필요 없이 화면 로딩 시 옛날 텍스트들을 자동으로 찾아 새 이름으로 교체!
+    const replaceText = (node) => {
+        if (node.nodeType === 3) { 
+            if (node.nodeValue.includes('스마트 로케이션 추천이동 지시서')) {
+                node.nodeValue = node.nodeValue.replace(/스마트 로케이션 추천이동 지시서/g, '로케이션 변경 리스트');
+            } else if (node.nodeValue.includes('스마트 로케이션 추천')) {
+                node.nodeValue = node.nodeValue.replace(/스마트 로케이션 추천/g, '로케이션 변경 추천');
+            }
+        } else {
+            node.childNodes.forEach(replaceText);
+        }
+    };
+    replaceText(document.body);
 };
 
 function renderTableHeader() {
@@ -169,7 +189,9 @@ window.openSettingsModal = (e) => {
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
     
     const container = document.getElementById('setting-headers-container');
-    let html = '';
+    
+    // ✨ 기존 컬럼 설정 부분과 새로운 가중치 설정 부분을 하나의 창에 통합
+    let html = '<div style="margin-bottom:15px; font-weight:bold; color:var(--primary);">■ 화면 헤더(컬럼) 설정</div><div style="display:flex; flex-wrap:wrap; gap:5px;">';
     
     const stdCols = [
         { id: 'std_dong', label: '동' }, { id: 'std_pos', label: '위치' }, { id: 'std_id', label: '로케이션(ID)' },
@@ -186,6 +208,17 @@ window.openSettingsModal = (e) => {
         const isChecked = window.visibleColumns.includes(colId) ? 'checked' : '';
         html += `<label style="display:flex; align-items:center; gap:5px; width: 45%; color:#e65100;"><input type="checkbox" class="chk-header" value="${colId}" ${isChecked}> ${header}</label>`;
     });
+    
+    html += `</div>`;
+    html += `<hr style="margin:15px 0; border:0; border-top:1px solid #ddd;">`;
+    
+    // ✨ 추천 가중치 설정 UI 추가
+    html += `<div style="margin-bottom:10px; font-weight:bold; color:var(--primary);">■ 로케이션 변경 추천 가중치(비율) 설정</div>`;
+    html += `<div style="display:flex; flex-direction:column; gap:8px;">`;
+    html += `<label style="display:flex; justify-content:space-between; align-items:center; font-size:13px;">직진배송 수량 곱하기 (기본 10) : <input type="number" id="set-ratio-zikjin" value="${window.recommendRatios.zikjin}" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;"></label>`;
+    html += `<label style="display:flex; justify-content:space-between; align-items:center; font-size:13px;">주차별 발주/배송 곱하기 (기본 2) : <input type="number" id="set-ratio-weekly" value="${window.recommendRatios.weekly}" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;"></label>`;
+    html += `<label style="display:flex; justify-content:space-between; align-items:center; font-size:13px;">최근 3일 상승세 곱하기 (기본 1.2) : <input type="number" step="0.1" id="set-ratio-trend" value="${window.recommendRatios.trend}" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;"></label>`;
+    html += `</div>`;
 
     container.innerHTML = html;
     document.getElementById('settings-modal').style.display = 'flex';
@@ -195,18 +228,29 @@ window.saveHeaderSettings = async () => {
     const checkboxes = document.querySelectorAll('.chk-header:checked');
     const newVisible = Array.from(checkboxes).map(cb => cb.value);
     
+    // ✨ 설정한 비율값 가져오기
+    const rZikjin = Number(document.getElementById('set-ratio-zikjin').value) || 10;
+    const rWeekly = Number(document.getElementById('set-ratio-weekly').value) || 2;
+    const rTrend = Number(document.getElementById('set-ratio-trend').value) || 1.2;
+    
     try {
-        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { visibleColumns: newVisible }, { merge: true });
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
+            visibleColumns: newVisible,
+            recommendRatios: { zikjin: rZikjin, weekly: rWeekly, trend: rTrend } // DB에 비율 저장
+        }, { merge: true });
+        
         window.visibleColumns = newVisible;
+        window.recommendRatios = { zikjin: rZikjin, weekly: rWeekly, trend: rTrend }; // 메모리에 즉시 적용
+        
         document.getElementById('settings-modal').style.display = 'none';
         renderTableHeader(); 
         applyFiltersAndSort(); 
-        showToast("✅ 화면 헤더 설정이 저장되었습니다.");
+        showToast("✅ 설정이 저장되었습니다.");
     } catch(e) { console.error(e); alert("저장 실패"); }
 };
 
 window.showRecommendation = function() {
-    window.showLoading("💡 상품 점수를 계산하고 최적의 로케이션을 매칭 중입니다...");
+    window.showLoading("💡 로케이션 변경 추천 데이터를 계산하고 매칭 중입니다...");
 
     setTimeout(() => {
         const allCodes = new Set([...Object.keys(zikjinData), ...Object.keys(weeklyData)]);
@@ -221,14 +265,15 @@ window.showRecommendation = function() {
             let zQty = Number(zItem['수량'] || 0); 
             let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0); 
             
-            score += (zQty * 10);
-            score += (wQty * 2);
+            // ✨ 관리자가 설정한 비율을 곱셈 계산식에 실시간 적용
+            score += (zQty * window.recommendRatios.zikjin);
+            score += (wQty * window.recommendRatios.weekly);
 
             let dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
             if (dates.length >= 6) {
                 let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
                 let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
-                if (recent3 > prev3) score *= 1.2;
+                if (recent3 > prev3) score *= window.recommendRatios.trend;
             }
 
             if (score > 0) {
@@ -812,7 +857,6 @@ async function updateDatabaseA(rows) {
         let batch = writeBatch(db); 
         let updateCount = 0; 
         
-        // 💡 핵심: 구역(ZONE)별로 데이터를 미리 묶어서 전송 횟수와 속도 문제를 완벽 해결
         let zoneUpdates = {};
         
         for (let i = 0; i < totalRows; i++) {
@@ -827,7 +871,7 @@ async function updateDatabaseA(rows) {
                     if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
                 } else { cleanLocId = rawLoc; }
                 
-                if (cleanLocId) { // 새 로케이션도 무조건 허용
+                if (cleanLocId) { 
                     const prefix = cleanLocId.charAt(0).toUpperCase();
                     const zoneDocId = 'ZONE_' + prefix;
                     
@@ -850,7 +894,6 @@ async function updateDatabaseA(rows) {
                     updateData.option = row['옵션']?.toString().trim() || '';
                     updateData.stock = row['정상재고']?.toString().trim() || '0';
                     
-                    // 동, 위치 정보 보존: 엑셀 파일에 있으면 그걸 쓰고, 없으면 기존 메모리(DB)에서 가져옴
                     if ('동' in row || 'dong' in row) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
                     else updateData.dong = existingData.dong || '';
                     
@@ -859,14 +902,12 @@ async function updateDatabaseA(rows) {
 
                     updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
                     
-                    // 구역별 묶음 박스에 담기
                     zoneUpdates[zoneDocId][cleanLocId] = updateData;
                     updateCount++;
                 }
             }
         }
         
-        // 포장된 구역 묶음을 서버로 일괄 전송 (7000번 -> 약 30번으로 단축)
         let batchCount = 0;
         for (let zoneId in zoneUpdates) {
             batch.set(doc(db, LOC_COLLECTION, zoneId), zoneUpdates[zoneId], { merge: true });
