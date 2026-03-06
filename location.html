@@ -31,12 +31,8 @@
         .upload-dropdown { position: relative; display: inline-block; }
         .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
         .btn-main-upload:hover { filter: brightness(1.2); }
-        .btn-smart { background: #4caf50; }
         .btn-settings { background: #607d8b; padding: 8px 12px; border-radius: 6px; font-weight: bold; border: none; color: white; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
         .btn-settings:hover { background: #455a64; }
-        
-        .btn-incoming-panel { background: #e65100; padding: 8px 12px; border-radius: 6px; font-weight: bold; border: none; color: white; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
-        .btn-incoming-panel:hover { background: #bf360c; }
 
         .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
         .upload-menu label, .upload-menu div.menu-item { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
@@ -203,31 +199,33 @@
         
         <div class="header-actions">
             <div class="upload-dropdown">
-                <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'upload-menu-1')">📥 데이터 연동/업로드 ▼</button>
-                <div class="upload-menu" id="upload-menu-1" onclick="event.stopPropagation()">
+                <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
+                <div class="upload-menu" id="main-tools-menu" onclick="event.stopPropagation()" style="width: 270px;">
+                    
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold;">📊 기본 데이터 관리</div>
                     <label>
-                        <span style="color:var(--primary);">로케이션최신화</span>
+                        <span style="color:var(--primary);">📥 로케이션 최신화 업로드</span>
                         <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv,.html,.htm">
                     </label>
-                </div>
-            </div>
-
-            <div class="upload-dropdown">
-                <button class="btn-main-upload btn-smart" onclick="toggleUploadMenu(event, 'upload-menu-2')">💡 로케이션 변경 추천 ▼</button>
-                <div class="upload-menu" id="upload-menu-2" onclick="event.stopPropagation()">
+                    
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">💡 로케이션 변경 추천</div>
                     <label>
                         <span style="color:#d32f2f;">📂 1. 배송/주차별 데이터 업로드</span><br>
-                        <span style="font-size:11px; color:#666; font-weight:normal;">(파일을 여러 개 한 번에 선택 가능)</span>
+                        <span style="font-size:11px; color:#888; font-weight:normal;">(여러 파일 동시 선택 가능)</span>
                         <input type="file" id="excel-upload-combined" accept=".xls,.xlsx,.csv,.html,.htm" multiple>
                     </label>
-                    <div class="menu-divider"></div>
-                    <div class="menu-item" style="text-align:center; color:var(--primary);" onclick="showRecommendation()">
-                        🚀 <strong>2. 추천 이동 지시서 보기</strong>
+                    <div class="menu-item" style="text-align:center; color:var(--primary);" onclick="showRecommendation(); closeAllPopups();">
+                        🚀 <strong>2. 로케이션 변경 리스트 보기</strong>
                     </div>
+
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">📦 입고 관리</div>
+                    <div class="menu-item" style="text-align:center; color:#e65100; font-size: 14px;" onclick="toggleIncomingSidebar(event)">
+                        📋 <strong>입고대기 선지정 패널 열기</strong>
+                    </div>
+
                 </div>
             </div>
 
-            <button class="btn-incoming-panel" onclick="toggleIncomingSidebar(event)">📦 입고대기 선지정</button>
             <button class="btn-settings" onclick="openSettingsModal(event)">⚙️ 환경설정</button>
         </div>
     </div>
