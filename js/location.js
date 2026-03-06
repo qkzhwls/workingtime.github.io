@@ -28,8 +28,8 @@ window.excelHeaders = [];
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
-// ✨ 추천 로직 계산에 사용될 비율(가중치) 기본값 설정
-window.recommendRatios = { zikjin: 10, weekly: 2, trend: 1.2 };
+// ✨ 새로운 100% 만점 기준 기본 비율 세팅
+window.recommendRatios = { zikjin: 50, weekly: 30, trend: 20 };
 
 loadAppConfig(db).then(config => {
     appConfig = config;
@@ -87,7 +87,6 @@ function setupRealtimeListenerB() {
 }
 
 function setupRealtimeListenerA() {
-    // 1. 헤더 및 환경설정 리스너
     onSnapshot(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), (docSnap) => {
         if(docSnap.exists()) {
             const conf = docSnap.data();
@@ -98,15 +97,19 @@ function setupRealtimeListenerA() {
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
             if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
             
-            // ✨ 데이터베이스에 저장된 추천 비율 불러오기
-            if (conf.recommendRatios) window.recommendRatios = conf.recommendRatios;
+            // ✨ 이전 버전의 소수점 비율이 있을 경우를 대비하여 합계가 100일 때만 불러옴
+            if (conf.recommendRatios) {
+                let r = conf.recommendRatios;
+                if ((r.zikjin + r.weekly + r.trend) === 100) {
+                    window.recommendRatios = r;
+                }
+            }
             
             renderTableHeader(); 
             applyFiltersAndSort();
         }
     });
 
-    // 2. 구역별로 묶인(ZONE_) 로케이션 문서만 골라서 수신
     const qZones = query(collection(db, LOC_COLLECTION), where(documentId(), ">=", "ZONE_"), where(documentId(), "<=", "ZONE_\uf8ff"));
     onSnapshot(qZones, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
@@ -134,7 +137,6 @@ window.onload = () => {
     setupRealtimeListenerA();
     setupRealtimeListenerB();
 
-    // ✨ HTML 수정 없이 텍스트 자동 변경 처리
     const replaceText = (node) => {
         if (node.nodeType === 3) { 
             if (node.nodeValue.includes('스마트 로케이션 추천이동 지시서')) {
@@ -230,11 +232,17 @@ window.saveHeaderSettings = async () => {
     } catch(e) { console.error(e); alert("저장 실패"); }
 };
 
-// ✨ 로케이션 변경 리스트에서 비율 값을 읽어와 파이어베이스에 저장하고 즉시 재계산하는 함수
+// ✨ 비율 설정 적용 및 합계 100% 검증 함수
 window.applyRecRatios = async function() {
-    const rZikjin = Number(document.getElementById('rec-ratio-zikjin').value) / 100;
-    const rWeekly = Number(document.getElementById('rec-ratio-weekly').value) / 100;
-    const rTrend = Number(document.getElementById('rec-ratio-trend').value) / 100;
+    const rZikjin = Number(document.getElementById('rec-ratio-zikjin').value) || 0;
+    const rWeekly = Number(document.getElementById('rec-ratio-weekly').value) || 0;
+    const rTrend = Number(document.getElementById('rec-ratio-trend').value) || 0;
+    
+    const total = rZikjin + rWeekly + rTrend;
+    if (total !== 100) {
+        alert(`🚨 세 가지 항목의 합계가 100%가 되어야 합니다.\n(현재 합계: ${total}%)`);
+        return;
+    }
     
     try {
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
@@ -242,42 +250,61 @@ window.applyRecRatios = async function() {
         }, { merge: true });
         
         window.recommendRatios = { zikjin: rZikjin, weekly: rWeekly, trend: rTrend };
-        showToast("✅ 가중치 비율이 업데이트 되었습니다! 재계산합니다.");
+        showToast("✅ 가중치 비율이 적용되었습니다! 재계산합니다.");
         window.showRecommendation(); 
     } catch(e) { console.error(e); alert("비율 설정 저장 실패"); }
 };
 
 window.showRecommendation = function() {
-    window.showLoading("💡 로케이션 변경 추천 데이터를 계산하고 매칭 중입니다...");
+    window.showLoading("💡 데이터를 분석하여 100점 만점 기준으로 재계산 중입니다...");
 
     setTimeout(() => {
         const allCodes = new Set([...Object.keys(zikjinData), ...Object.keys(weeklyData)]);
-        let scoredItems = [];
+        
+        let maxZQty = 0;
+        let maxWQty = 0;
+        let maxTrend = 0;
+        let itemDataList = [];
 
+        // 1차 순회: 각 항목의 데이터 최대값(만점 기준) 추출
         allCodes.forEach(code => {
             let zItem = zikjinData[code] || {};
             let wItem = weeklyData[code] || {};
             let name = zItem['상품명'] || wItem['상품명'] || '알 수 없음';
             
-            let score = 0;
             let zQty = Number(zItem['수량'] || 0); 
             let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0); 
             
-            // ✨ 설정된 가중치를 곱하여 점수 계산
-            score += (zQty * window.recommendRatios.zikjin);
-            score += (wQty * window.recommendRatios.weekly);
-
+            let trendVal = 0;
             let dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
             if (dates.length >= 6) {
                 let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
                 let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
-                if (recent3 > prev3) score *= window.recommendRatios.trend;
+                trendVal = Math.max(0, recent3 - prev3); // 오름세만 점수에 반영
             }
 
-            if (score > 0) {
-                let currentLocs = originalData.filter(d => d.code === code).map(d => d.id).join(', ');
+            if (zQty > maxZQty) maxZQty = zQty;
+            if (wQty > maxWQty) maxWQty = wQty;
+            if (trendVal > maxTrend) maxTrend = trendVal;
+
+            itemDataList.push({ code, name, zQty, wQty, trendVal });
+        });
+
+        // 2차 순회: 최대값을 기준으로 100점 만점 환산 후 가중치 적용
+        let scoredItems = [];
+        itemDataList.forEach(item => {
+            let zScore = maxZQty > 0 ? (item.zQty / maxZQty) * 100 : 0;
+            let wScore = maxWQty > 0 ? (item.wQty / maxWQty) * 100 : 0;
+            let tScore = maxTrend > 0 ? (item.trendVal / maxTrend) * 100 : 0;
+
+            let finalScore = (zScore * (window.recommendRatios.zikjin / 100)) +
+                             (wScore * (window.recommendRatios.weekly / 100)) +
+                             (tScore * (window.recommendRatios.trend / 100));
+
+            if (finalScore > 0) {
+                let currentLocs = originalData.filter(d => d.code === item.code).map(d => d.id).join(', ');
                 if (!currentLocs) currentLocs = '신규배치 (없음)';
-                scoredItems.push({ code, name, score, currentLocs });
+                scoredItems.push({ code: item.code, name: item.name, score: finalScore, currentLocs });
             }
         });
 
@@ -303,16 +330,17 @@ window.showRecommendation = function() {
 
         const tbody = document.getElementById('recommend-tbody');
         
-        // ✨ 변경 리스트 모달창 테이블 상단에 % 설정 UI 컨트롤러 주입
         let html = `
             <tr style="background-color: #eef1ff;">
                 <td colspan="5" style="padding: 12px; text-align: center; border-bottom: 2px solid #c5cae9; font-size:13px;">
                     <div style="display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:10px;">
-                        <span style="font-weight:bold; color:var(--primary);">⚙️ 계산 비율(%) 설정:</span>
-                        <label>직진배송 <input type="number" id="rec-ratio-zikjin" value="${Math.round(window.recommendRatios.zikjin * 100)}" style="width:55px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;">%</label>
-                        <label>주차별 <input type="number" id="rec-ratio-weekly" value="${Math.round(window.recommendRatios.weekly * 100)}" style="width:55px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;">%</label>
-                        <label>상승세 <input type="number" id="rec-ratio-trend" value="${Math.round(window.recommendRatios.trend * 100)}" style="width:55px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px;">%</label>
-                        <button onclick="applyRecRatios()" style="padding:4px 12px; background:var(--primary); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">적용 및 재계산</button>
+                        <span style="font-weight:bold; color:var(--primary);">⚙️ 점수 반영 비율(총합 100%):</span>
+                        <label>직진배송 <input type="number" id="rec-ratio-zikjin" value="${window.recommendRatios.zikjin}" style="width:45px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px; font-weight:bold;">%</label>
+                        <span style="color:#aaa;">+</span>
+                        <label>주차별 <input type="number" id="rec-ratio-weekly" value="${window.recommendRatios.weekly}" style="width:45px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px; font-weight:bold;">%</label>
+                        <span style="color:#aaa;">+</span>
+                        <label>상승세 <input type="number" id="rec-ratio-trend" value="${window.recommendRatios.trend}" style="width:45px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px; font-weight:bold;">%</label>
+                        <button onclick="applyRecRatios()" style="padding:4px 12px; margin-left:10px; background:var(--primary); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">비율 적용</button>
                     </div>
                 </td>
             </tr>
@@ -328,7 +356,7 @@ window.showRecommendation = function() {
                 let eLoc = emptyLocs[i];
                 html += `
                     <tr>
-                        <td style="color:var(--primary); font-weight:bold; border-left:none;">${i+1}위 <br><span style="font-size:11px; color:#888;">(${item.score.toFixed(1)}점)</span></td>
+                        <td style="color:var(--primary); font-weight:bold; border-left:none;">${i+1}위 <br><span style="font-size:11px; color:#e65100;">(${item.score.toFixed(1)}점)</span></td>
                         <td style="font-weight:bold; color:#333;">${item.code}</td>
                         <td style="text-align:left; font-size:13px;">${item.name}</td>
                         <td style="color:#888;">${item.currentLocs}</td>
