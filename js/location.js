@@ -247,12 +247,30 @@ window.openRatioModal = function(e) {
 
                 <div style="background:#fcfcfc; border:1px solid #ddd; border-radius:8px; padding:15px; margin-bottom:15px;">
                     <h4 style="margin:0 0 10px 0; color:#333;">📊 점수 반영 비율 (총합 100%)</h4>
-                    <div style="display:flex; justify-content:space-between; gap:10px;">
-                        <label style="flex:1; display:flex; flex-direction:column; font-size:12px; font-weight:bold;">직진배송 데이터<input type="number" id="mod-ratio-zikjin" style="margin-top:5px; text-align:center; padding:6px; border:1px solid #ccc; border-radius:4px; font-weight:bold;"></label>
-                        <span style="align-self:center; font-size:20px; color:#aaa; margin-top:15px;">+</span>
-                        <label style="flex:1; display:flex; flex-direction:column; font-size:12px; font-weight:bold;">주차별 배송/발주<input type="number" id="mod-ratio-weekly" style="margin-top:5px; text-align:center; padding:6px; border:1px solid #ccc; border-radius:4px; font-weight:bold;"></label>
-                        <span style="align-self:center; font-size:20px; color:#aaa; margin-top:15px;">+</span>
-                        <label style="flex:1; display:flex; flex-direction:column; font-size:12px; font-weight:bold;">최근 상승세<input type="number" id="mod-ratio-trend" style="margin-top:5px; text-align:center; padding:6px; border:1px solid #ccc; border-radius:4px; font-weight:bold;"></label>
+                    <div style="display:flex; justify-content:space-around; align-items:center; gap:5px;">
+                        <label style="display:flex; flex-direction:column; align-items:center; font-size:12px; font-weight:bold;">
+                            직진배송
+                            <div style="margin-top:5px; display:flex; align-items:center;">
+                                <input type="number" id="mod-ratio-zikjin" style="width:50px; text-align:right; padding:6px; border:1px solid #ccc; border-radius:4px; font-weight:bold;">
+                                <span style="margin-left:4px; color:#555;">%</span>
+                            </div>
+                        </label>
+                        <span style="font-size:20px; color:#aaa; margin-top:15px;">+</span>
+                        <label style="display:flex; flex-direction:column; align-items:center; font-size:12px; font-weight:bold;">
+                            주차별
+                            <div style="margin-top:5px; display:flex; align-items:center;">
+                                <input type="number" id="mod-ratio-weekly" style="width:50px; text-align:right; padding:6px; border:1px solid #ccc; border-radius:4px; font-weight:bold;">
+                                <span style="margin-left:4px; color:#555;">%</span>
+                            </div>
+                        </label>
+                        <span style="font-size:20px; color:#aaa; margin-top:15px;">+</span>
+                        <label style="display:flex; flex-direction:column; align-items:center; font-size:12px; font-weight:bold;">
+                            상승세
+                            <div style="margin-top:5px; display:flex; align-items:center;">
+                                <input type="number" id="mod-ratio-trend" style="width:50px; text-align:right; padding:6px; border:1px solid #ccc; border-radius:4px; font-weight:bold;">
+                                <span style="margin-left:4px; color:#555;">%</span>
+                            </div>
+                        </label>
                     </div>
                 </div>
 
