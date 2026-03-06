@@ -97,7 +97,6 @@ function setupRealtimeListenerA() {
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
             if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
             
-            // ✨ 합계가 100일 때만 DB에서 비율을 불러옴
             if (conf.recommendRatios) {
                 let r = conf.recommendRatios;
                 if ((r.zikjin + r.weekly + r.trend) === 100) {
@@ -133,42 +132,10 @@ function setupRealtimeListenerA() {
     }, (error) => { console.error("A창고 오류:", error); });
 }
 
+// ✨ 지저분한 HTML 강제 조작 코드 삭제 (깔끔한 정석대로)
 window.onload = () => {
     setupRealtimeListenerA();
     setupRealtimeListenerB();
-
-    // ✨ HTML 수정 없이 옛날 텍스트를 찾아 바꾸고 그 옆에 설정 버튼을 동적으로 생성하여 붙여넣음!
-    const injectRatioButton = (targetNode) => {
-        const parent = targetNode.parentNode;
-        if (parent && !parent.hasAttribute('data-ratio-btn-injected')) {
-            parent.setAttribute('data-ratio-btn-injected', 'true');
-            const btn = document.createElement('button');
-            btn.innerHTML = '⚙️ 점수반영비율 설정';
-            btn.style.cssText = "margin-left:10px; padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);";
-            btn.onclick = window.openRatioModal;
-            
-            if (parent.tagName === 'BUTTON') {
-                parent.parentNode.insertBefore(btn, parent.nextSibling);
-            } else {
-                parent.appendChild(btn);
-            }
-        }
-    };
-
-    const replaceText = (node) => {
-        if (node.nodeType === 3) { 
-            if (node.nodeValue.includes('스마트 로케이션 추천이동 지시서')) {
-                node.nodeValue = node.nodeValue.replace(/스마트 로케이션 추천이동 지시서/g, '로케이션 변경 리스트');
-                injectRatioButton(node); // 버튼 생성 함수 호출
-            } else if (node.nodeValue.includes('스마트 로케이션 추천')) {
-                node.nodeValue = node.nodeValue.replace(/스마트 로케이션 추천/g, '로케이션 변경 추천');
-                injectRatioButton(node); // 버튼 생성 함수 호출
-            }
-        } else {
-            node.childNodes.forEach(replaceText);
-        }
-    };
-    replaceText(document.body);
 };
 
 // ✨ 전용 비율 설정창 (팝업) 띄우기
@@ -208,7 +175,6 @@ window.openRatioModal = function(e) {
         document.body.appendChild(modal);
     }
     
-    // 현재 저장된 값을 팝업창에 세팅
     document.getElementById('mod-ratio-zikjin').value = window.recommendRatios.zikjin;
     document.getElementById('mod-ratio-weekly').value = window.recommendRatios.weekly;
     document.getElementById('mod-ratio-trend').value = window.recommendRatios.trend;
@@ -216,7 +182,7 @@ window.openRatioModal = function(e) {
     modal.style.display = 'flex';
 };
 
-// ✨ 설정한 100% 비율을 검증하고 파이어베이스에 저장하는 함수
+// ✨ 설정한 100% 비율 검증 및 파이어베이스 저장
 window.saveRatioModal = async function() {
     const z = Number(document.getElementById('mod-ratio-zikjin').value) || 0;
     const w = Number(document.getElementById('mod-ratio-weekly').value) || 0;
@@ -237,7 +203,6 @@ window.saveRatioModal = async function() {
         document.getElementById('ratio-settings-modal').style.display = 'none';
         showToast("✅ 비율이 저장되었습니다.");
         
-        // 추천 리스트가 열려있는 상태였다면 즉시 재계산해서 화면 갱신
         const recModal = document.getElementById('recommend-modal');
         if (recModal && recModal.style.display === 'flex') {
             window.showRecommendation();
@@ -351,7 +316,7 @@ window.showRecommendation = function() {
             if (dates.length >= 6) {
                 let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
                 let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
-                trendVal = Math.max(0, recent3 - prev3); // 오름세만 점수에 반영
+                trendVal = Math.max(0, recent3 - prev3); 
             }
 
             if (zQty > maxZQty) maxZQty = zQty;
@@ -361,7 +326,7 @@ window.showRecommendation = function() {
             itemDataList.push({ code, name, zQty, wQty, trendVal });
         });
 
-        // 2차 순회: 최대값을 기준으로 100점 만점 환산 후 가중치 적용
+        // 2차 순회: 100점 만점 환산 후 가중치(%) 적용
         let scoredItems = [];
         itemDataList.forEach(item => {
             let zScore = maxZQty > 0 ? (item.zQty / maxZQty) * 100 : 0;
@@ -401,7 +366,7 @@ window.showRecommendation = function() {
 
         const tbody = document.getElementById('recommend-tbody');
         
-        let html = '';
+        let html = ''; // 표 안의 더러운 UI 삭제
         let matchCount = Math.min(scoredItems.length, emptyLocs.length);
         
         if (matchCount === 0) {
