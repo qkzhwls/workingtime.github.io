@@ -97,7 +97,7 @@ function setupRealtimeListenerA() {
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
             if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
             
-            // ✨ 이전 버전의 소수점 비율이 있을 경우를 대비하여 합계가 100일 때만 불러옴
+            // ✨ 합계가 100일 때만 DB에서 비율을 불러옴
             if (conf.recommendRatios) {
                 let r = conf.recommendRatios;
                 if ((r.zikjin + r.weekly + r.trend) === 100) {
@@ -137,18 +137,112 @@ window.onload = () => {
     setupRealtimeListenerA();
     setupRealtimeListenerB();
 
+    // ✨ HTML 수정 없이 옛날 텍스트를 찾아 바꾸고 그 옆에 설정 버튼을 동적으로 생성하여 붙여넣음!
+    const injectRatioButton = (targetNode) => {
+        const parent = targetNode.parentNode;
+        if (parent && !parent.hasAttribute('data-ratio-btn-injected')) {
+            parent.setAttribute('data-ratio-btn-injected', 'true');
+            const btn = document.createElement('button');
+            btn.innerHTML = '⚙️ 점수반영비율 설정';
+            btn.style.cssText = "margin-left:10px; padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);";
+            btn.onclick = window.openRatioModal;
+            
+            if (parent.tagName === 'BUTTON') {
+                parent.parentNode.insertBefore(btn, parent.nextSibling);
+            } else {
+                parent.appendChild(btn);
+            }
+        }
+    };
+
     const replaceText = (node) => {
         if (node.nodeType === 3) { 
             if (node.nodeValue.includes('스마트 로케이션 추천이동 지시서')) {
                 node.nodeValue = node.nodeValue.replace(/스마트 로케이션 추천이동 지시서/g, '로케이션 변경 리스트');
+                injectRatioButton(node); // 버튼 생성 함수 호출
             } else if (node.nodeValue.includes('스마트 로케이션 추천')) {
                 node.nodeValue = node.nodeValue.replace(/스마트 로케이션 추천/g, '로케이션 변경 추천');
+                injectRatioButton(node); // 버튼 생성 함수 호출
             }
         } else {
             node.childNodes.forEach(replaceText);
         }
     };
     replaceText(document.body);
+};
+
+// ✨ 전용 비율 설정창 (팝업) 띄우기
+window.openRatioModal = function(e) {
+    if(e) e.stopPropagation();
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+    
+    let modal = document.getElementById('ratio-settings-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'ratio-settings-modal';
+        modal.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; z-index:10000;";
+        modal.innerHTML = `
+            <div style="background:white; padding:25px; border-radius:10px; width:320px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+                <h3 style="margin-top:0; color:var(--primary); margin-bottom:10px;">⚙️ 점수반영비율 설정</h3>
+                <p style="font-size:12px; color:#ff5252; font-weight:bold; margin-bottom:20px;">※ 세 항목의 합이 정확히 100%가 되어야 합니다.</p>
+                
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:14px; font-weight:bold;">
+                    <span>직진배송 데이터</span>
+                    <div><input type="number" id="mod-ratio-zikjin" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:4px; padding:5px;"> %</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:14px; font-weight:bold;">
+                    <span>주차별 발주/배송</span>
+                    <div><input type="number" id="mod-ratio-weekly" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:4px; padding:5px;"> %</div>
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; font-size:14px; font-weight:bold;">
+                    <span>최근 3일 상승세</span>
+                    <div><input type="number" id="mod-ratio-trend" style="width:60px; text-align:right; border:1px solid #ccc; border-radius:4px; padding:5px;"> %</div>
+                </div>
+                
+                <div style="display:flex; justify-content:flex-end; gap:10px;">
+                    <button onclick="document.getElementById('ratio-settings-modal').style.display='none'" style="padding:8px 15px; border:none; background:#eee; color:#333; border-radius:5px; cursor:pointer; font-weight:bold;">취소</button>
+                    <button onclick="saveRatioModal()" style="padding:8px 15px; border:none; background:var(--primary); color:white; border-radius:5px; cursor:pointer; font-weight:bold;">저장 및 적용</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+    
+    // 현재 저장된 값을 팝업창에 세팅
+    document.getElementById('mod-ratio-zikjin').value = window.recommendRatios.zikjin;
+    document.getElementById('mod-ratio-weekly').value = window.recommendRatios.weekly;
+    document.getElementById('mod-ratio-trend').value = window.recommendRatios.trend;
+    
+    modal.style.display = 'flex';
+};
+
+// ✨ 설정한 100% 비율을 검증하고 파이어베이스에 저장하는 함수
+window.saveRatioModal = async function() {
+    const z = Number(document.getElementById('mod-ratio-zikjin').value) || 0;
+    const w = Number(document.getElementById('mod-ratio-weekly').value) || 0;
+    const t = Number(document.getElementById('mod-ratio-trend').value) || 0;
+    
+    const total = z + w + t;
+    if (total !== 100) {
+        alert(`🚨 세 가지 항목의 합계가 100%가 되어야 합니다.\n(현재 합계: ${total}%)`);
+        return;
+    }
+    
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
+            recommendRatios: { zikjin: z, weekly: w, trend: t }
+        }, { merge: true });
+        
+        window.recommendRatios = { zikjin: z, weekly: w, trend: t };
+        document.getElementById('ratio-settings-modal').style.display = 'none';
+        showToast("✅ 비율이 저장되었습니다.");
+        
+        // 추천 리스트가 열려있는 상태였다면 즉시 재계산해서 화면 갱신
+        const recModal = document.getElementById('recommend-modal');
+        if (recModal && recModal.style.display === 'flex') {
+            window.showRecommendation();
+        }
+    } catch(e) { console.error(e); alert("비율 설정 저장 실패"); }
 };
 
 function renderTableHeader() {
@@ -232,29 +326,6 @@ window.saveHeaderSettings = async () => {
     } catch(e) { console.error(e); alert("저장 실패"); }
 };
 
-// ✨ 비율 설정 적용 및 합계 100% 검증 함수
-window.applyRecRatios = async function() {
-    const rZikjin = Number(document.getElementById('rec-ratio-zikjin').value) || 0;
-    const rWeekly = Number(document.getElementById('rec-ratio-weekly').value) || 0;
-    const rTrend = Number(document.getElementById('rec-ratio-trend').value) || 0;
-    
-    const total = rZikjin + rWeekly + rTrend;
-    if (total !== 100) {
-        alert(`🚨 세 가지 항목의 합계가 100%가 되어야 합니다.\n(현재 합계: ${total}%)`);
-        return;
-    }
-    
-    try {
-        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
-            recommendRatios: { zikjin: rZikjin, weekly: rWeekly, trend: rTrend }
-        }, { merge: true });
-        
-        window.recommendRatios = { zikjin: rZikjin, weekly: rWeekly, trend: rTrend };
-        showToast("✅ 가중치 비율이 적용되었습니다! 재계산합니다.");
-        window.showRecommendation(); 
-    } catch(e) { console.error(e); alert("비율 설정 저장 실패"); }
-};
-
 window.showRecommendation = function() {
     window.showLoading("💡 데이터를 분석하여 100점 만점 기준으로 재계산 중입니다...");
 
@@ -330,22 +401,7 @@ window.showRecommendation = function() {
 
         const tbody = document.getElementById('recommend-tbody');
         
-        let html = `
-            <tr style="background-color: #eef1ff;">
-                <td colspan="5" style="padding: 12px; text-align: center; border-bottom: 2px solid #c5cae9; font-size:13px;">
-                    <div style="display:flex; justify-content:center; align-items:center; flex-wrap:wrap; gap:10px;">
-                        <span style="font-weight:bold; color:var(--primary);">⚙️ 점수 반영 비율(총합 100%):</span>
-                        <label>직진배송 <input type="number" id="rec-ratio-zikjin" value="${window.recommendRatios.zikjin}" style="width:45px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px; font-weight:bold;">%</label>
-                        <span style="color:#aaa;">+</span>
-                        <label>주차별 <input type="number" id="rec-ratio-weekly" value="${window.recommendRatios.weekly}" style="width:45px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px; font-weight:bold;">%</label>
-                        <span style="color:#aaa;">+</span>
-                        <label>상승세 <input type="number" id="rec-ratio-trend" value="${window.recommendRatios.trend}" style="width:45px; text-align:right; border:1px solid #ccc; border-radius:3px; padding:2px; font-weight:bold;">%</label>
-                        <button onclick="applyRecRatios()" style="padding:4px 12px; margin-left:10px; background:var(--primary); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">비율 적용</button>
-                    </div>
-                </td>
-            </tr>
-        `;
-        
+        let html = '';
         let matchCount = Math.min(scoredItems.length, emptyLocs.length);
         
         if (matchCount === 0) {
