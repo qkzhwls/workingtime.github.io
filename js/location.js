@@ -36,7 +36,6 @@ window.recommendPriorities = {
     poses: ['2', '3', '4', '1', '5']
 };
 
-// 💡 40,000 색인 초과 및 1MB 제한 완벽 방어: 6글자 단위로 아주 잘게 쪼개기
 const getZoneDocId = (locId) => {
     if (!locId) return 'ZONE_ETC';
     const clean = locId.toString().trim().toUpperCase();
@@ -44,7 +43,6 @@ const getZoneDocId = (locId) => {
     return 'ZONE_' + prefix;
 };
 
-// 🎨 퍼즐(드래그앤드롭)을 위한 CSS 동적 주입
 const injectPuzzleStyle = () => {
     if(document.getElementById('puzzle-style')) return;
     const style = document.createElement('style');
@@ -151,7 +149,6 @@ function setupRealtimeListenerA() {
     onSnapshot(qZones, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
         
-        // 💡 중복 데이터 제거용 Map
         let tempLocMap = {}; 
         
         snapshot.forEach(docSnap => {
@@ -160,7 +157,6 @@ function setupRealtimeListenerA() {
                 if (typeof zoneData[locId] === 'object' && zoneData[locId] !== null) {
                     let locObj = { id: locId, ...zoneData[locId] };
                     
-                    // 💡 진공 압축된 문자열 데이터를 다시 예쁜 JSON으로 복원
                     if (locObj.rawDataStr) {
                         try { locObj.rawData = JSON.parse(locObj.rawDataStr); } catch(e) { locObj.rawData = {}; }
                     } else if (!locObj.rawData) {
@@ -189,7 +185,6 @@ window.onload = () => {
     setupRealtimeListenerB();
 };
 
-// 🧩 구역 퍼즐 드래그앤드롭
 window.handleDragStart = (e) => {
     e.target.classList.add('dragging');
     e.dataTransfer.setData('text/plain', e.target.innerText);
@@ -210,7 +205,6 @@ window.handleDrop = (e, targetArea) => {
     if(draggedEl) targetArea.appendChild(draggedEl);
 };
 
-// 🧩 동/위치 1줄 정렬 퍼즐 드래그앤드롭
 window.handleSortDragOver = (e) => {
     e.preventDefault();
     const container = e.currentTarget;
@@ -236,7 +230,6 @@ window.getDragAfterElement = (container, x) => {
     }, { offset: Number.NEGATIVE_INFINITY }).element;
 };
 
-// ✨ 섹션 접기/펴기 토글 함수
 window.toggleSection = function(id, iconId) {
     const el = document.getElementById(id);
     const icon = document.getElementById(iconId);
@@ -249,7 +242,6 @@ window.toggleSection = function(id, iconId) {
     }
 };
 
-// ✨ 사용률 팝업 자세히보기 토글
 window.toggleUsageDetails = function() {
     const content = document.getElementById('usage-details-content');
     const btn = document.getElementById('usage-details-btn');
@@ -262,7 +254,6 @@ window.toggleUsageDetails = function() {
     }
 };
 
-// ✨ [통합] 비율 및 우선순위 마스터 설정창
 window.openRatioModal = function(e) {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -505,24 +496,48 @@ window.showRecommendation = function() {
 
         const tbody = document.getElementById('recommend-tbody');
         let html = ''; 
-        let matchCount = Math.min(scoredItems.length, emptyLocs.length);
-        
-        if (matchCount === 0) {
-            html += '<tr><td colspan="5" style="padding:40px;">데이터가 부족하거나 추천할 빈 로케이션이 없습니다.</td></tr>';
-        } else {
-            for (let i = 0; i < matchCount; i++) {
-                let item = scoredItems[i];
-                let eLoc = emptyLocs[i];
+        let matchCount = 0;
+        let usedEmptyIndices = new Set();
+        let displayRank = 1;
+
+        // 💡 2. 동(Dong) 일치 여부 검사 로직 추가
+        for (let i = 0; i < scoredItems.length; i++) {
+            let item = scoredItems[i];
+            
+            // 현재 상품이 위치한 '동' 리스트 추출
+            let currentLocsObjs = originalData.filter(d => d.code === item.code);
+            let currentDongsList = currentLocsObjs.map(d => (d.dong || '').toString().trim());
+
+            for (let j = 0; j < emptyLocs.length; j++) {
+                if (usedEmptyIndices.has(j)) continue;
+                
+                let eLoc = emptyLocs[j];
+                let targetDong = (eLoc.dong || '').toString().trim();
+
+                // 💡 [핵심] 추천하려는 빈칸의 '동'과 현재 상품이 이미 위치한 '동'이 같으면 패스!
+                if (currentDongsList.includes(targetDong)) {
+                    // 이미 같은 동에 있으므로 추천해 주지 않고 다음 상품으로 넘어감.
+                    break; 
+                }
+
+                usedEmptyIndices.add(j);
                 html += `
                     <tr>
-                        <td style="color:var(--primary); font-weight:bold; border-left:none;">${i+1}위 <br><span style="font-size:11px; color:#e65100;">(${item.score.toFixed(1)}점)</span></td>
+                        <td style="color:var(--primary); font-weight:bold; border-left:none;">${displayRank}위 <br><span style="font-size:11px; color:#e65100;">(${item.score.toFixed(1)}점)</span></td>
                         <td style="font-weight:bold; color:#333;">${item.code}</td>
                         <td style="text-align:left; font-size:13px;">${item.name}</td>
                         <td style="color:#888;">${item.currentLocs}</td>
                         <td style="color:#2e7d32; font-weight:bold; background:#f1f8e9; border-right:none;">${eLoc.id} <br><span style="font-size:11px; color:#555;">(${eLoc.dong}동 ${eLoc.pos}위치)</span></td>
                     </tr>
                 `;
+                displayRank++;
+                matchCount++;
+                break; 
             }
+        }
+
+        if (matchCount === 0) {
+            html += '<tr><td colspan="5" style="padding:40px;">데이터가 부족하거나 추천할 빈 로케이션이 없습니다.<br>(또는 이미 모든 상품이 최적의 동에 배치되어 있습니다)</td></tr>';
         }
 
         tbody.innerHTML = html;
@@ -1095,37 +1110,47 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-const fileInputCombined = document.getElementById('excel-upload-combined');
-if (fileInputCombined) {
-    fileInputCombined.addEventListener('change', async function(e) {
-        const files = e.target.files; if (files.length === 0) return;
-        window.showLoading('데이터(직진/주차별)를 분석 및 동기화 중입니다...');
-        try {
-            let zikjinCount = 0; let weeklyCount = 0;
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                const data = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onload = e => resolve(new Uint8Array(e.target.result));
-                    reader.onerror = e => reject(e);
-                    reader.readAsArrayBuffer(file);
-                });
-                const workbook = XLSX.read(data, {type: 'array'});
-                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                if (json.length === 0) continue;
-                const headers = Object.keys(json[0]);
-                const isWeekly = headers.includes('기간발주수량') || headers.includes('기간배송수량');
-                const collectionName = isWeekly ? 'WeeklyData' : 'ZikjinData';
-                if (isWeekly) weeklyCount++; else zikjinCount++;
-                await updateDatabaseB(json, collectionName, null, true);
-            }
+// ✨ 직진배송, 주차별 데이터 개별 업로드 로직으로 변경
+const processExcelData = async (file, collectionName) => {
+    window.showLoading(`${collectionName === 'ZikjinData' ? '직진배송' : '주차별'} 데이터를 분석 및 동기화 중입니다...`);
+    try {
+        const data = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(new Uint8Array(e.target.result));
+            reader.onerror = e => reject(e);
+            reader.readAsArrayBuffer(file);
+        });
+        const workbook = XLSX.read(data, {type: 'array'});
+        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+        if (json.length > 0) {
+            await updateDatabaseB(json, collectionName, null, false);
+        } else {
             window.hideLoading();
-            alert(`✅ 완료!\n(인식: 직진배송 ${zikjinCount}개 / 주차별 ${weeklyCount}개)`);
-        } catch(error) { window.hideLoading(); alert('동기화 중 오류가 발생했습니다.'); console.error(error); } finally { fileInputCombined.value = ''; }
+            alert("데이터가 없습니다.");
+        }
+    } catch(error) { 
+        window.hideLoading(); 
+        alert('동기화 중 오류가 발생했습니다.'); 
+        console.error(error); 
+    }
+};
+
+const fileInputZikjin = document.getElementById('excel-upload-zikjin');
+if (fileInputZikjin) {
+    fileInputZikjin.addEventListener('change', function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        processExcelData(file, 'ZikjinData').finally(() => { e.target.value = ''; });
     });
 }
 
-// 💡 1. 일일 최신화 (동/위치 변경 불가, 없는 로케이션 생성 불가) - 기존 파일업로드 버튼
+const fileInputWeekly = document.getElementById('excel-upload-weekly');
+if (fileInputWeekly) {
+    fileInputWeekly.addEventListener('change', function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        processExcelData(file, 'WeeklyData').finally(() => { e.target.value = ''; });
+    });
+}
+
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', function(e) {
@@ -1137,7 +1162,6 @@ if (fileInputA) {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
                 const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                // 'daily' 모드로 전송
                 if (json.length > 0) updateDatabaseA(json, 'daily');
                 else { window.hideLoading(); alert("데이터가 없습니다."); }
             };
@@ -1146,7 +1170,6 @@ if (fileInputA) {
     });
 }
 
-// 💡 2. 초기 도면(영구 세팅) 업데이트 - 환경설정 3번 버튼
 const fileInputPerm = document.getElementById('excel-upload-permanent');
 if (fileInputPerm) {
     fileInputPerm.addEventListener('change', function(e) {
@@ -1158,7 +1181,6 @@ if (fileInputPerm) {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
                 const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                // 'permanent' 모드로 전송
                 if (json.length > 0) updateDatabaseA(json, 'permanent');
                 else { window.hideLoading(); alert("데이터가 없습니다."); }
             };
@@ -1195,7 +1217,6 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     } catch (error) { console.error(`${label} 실패:`, error); if (!silent) alert(`${label} 중 오류가 발생했습니다.`); throw error; } finally { if(inputElement && !silent) inputElement.value = ''; if (!silent) window.hideLoading(); }
 }
 
-// 💡 업로드 핵심 로직 (모드 분리 및 신규 로케이션 방어 적용)
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
@@ -1217,7 +1238,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
         let skipCount = 0;
         let zoneUpdates = {};
         
-        // 성능 최적화 및 낯선 로케이션 판별을 위한 기존 맵 생성
         let existingLocMap = {};
         originalData.forEach(d => { existingLocMap[d.id] = d; });
         
@@ -1234,7 +1254,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
                 } else { cleanLocId = rawLoc; }
                 
                 if (cleanLocId) { 
-                    // 💡 [핵심 방어 로직] 일일 최신화(daily) 모드인데, 시스템에 없는 낯선 로케이션이면 무시(Skip)!
                     if (mode === 'daily' && !existingLocMap[cleanLocId]) {
                         skipCount++;
                         continue; 
