@@ -1160,10 +1160,17 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
 async function updateDatabaseA(rows) {
     const totalRows = rows.length;
     try {
-        const allHeaders = Object.keys(rows[0]);
+        const allHeaders = Object.keys(rows[0] || {});
         // 💡 1MB 에러 방지용: 필요 없는 열들을 정리 (원하는 헤더만 살리기)
         const exclude = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
-        const customHeaders = allHeaders.filter(h => !exclude.includes(h));
+        
+        // 💡 엑셀의 보이지 않는 유령 빈칸(__EMPTY) 완전 차단 필터
+        const customHeaders = allHeaders.filter(h => 
+            !exclude.includes(h) && 
+            h.trim() !== '' && 
+            !h.toUpperCase().includes('EMPTY') 
+        );
+        
         const newHeaders = [...new Set([...window.excelHeaders, ...customHeaders])];
         if (newHeaders.length > window.excelHeaders.length) {
             await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { excelHeaders: newHeaders }, { merge: true });
@@ -1194,15 +1201,14 @@ async function updateDatabaseA(rows) {
                     if (!zoneUpdates[zoneDocId]) zoneUpdates[zoneDocId] = {};
                     
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
-                    const existingData = originalData.find(d => d.id === cleanLocId) || {};
                     
-                    // 💡 용량 폭발 방지: 엑셀의 잡다한 빈칸 찌꺼기 덜어내기
+                    // 💡 용량 폭발 방지: 엑셀의 잡다한 빈칸 찌꺼기 덜어내고 100% 순수 데이터만 추출
                     let cleanRawData = {};
-                    for(let k in row) {
-                        if(!exclude.includes(k) && row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
-                            cleanRawData[k] = row[k];
+                    customHeaders.forEach(k => {
+                        if(row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
+                            cleanRawData[k] = row[k].toString().trim();
                         }
-                    }
+                    });
 
                     let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: cleanRawData };
                     
@@ -1219,10 +1225,10 @@ async function updateDatabaseA(rows) {
                     updateData.stock = row['정상재고']?.toString().trim() || '0';
                     
                     if ('동' in row || 'dong' in row) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
-                    else updateData.dong = existingData.dong || '';
+                    else updateData.dong = (originalData.find(d => d.id === cleanLocId) || {}).dong || '';
                     
                     if ('위치' in row || 'pos' in row) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
-                    else updateData.pos = existingData.pos || '';
+                    else updateData.pos = (originalData.find(d => d.id === cleanLocId) || {}).pos || '';
 
                     updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
                     
@@ -1236,8 +1242,9 @@ async function updateDatabaseA(rows) {
         for (let zoneId in zoneUpdates) {
             batch.set(doc(db, LOC_COLLECTION, zoneId), zoneUpdates[zoneId], { merge: true });
             batchCount++;
-            // 💡 1MB 방어 + 트랜잭션 한도 방어를 위해 50개 덩어리 단위로 잘라서 보냄
-            if (batchCount >= 50) { 
+            
+            // 💡 네트워크 트럭 1대당 상자 10개만 싣기 (11.5MB 초과 에러 100% 방지)
+            if (batchCount >= 10) { 
                 await batch.commit(); 
                 batch = writeBatch(db); 
                 batchCount = 0; 
@@ -1245,10 +1252,10 @@ async function updateDatabaseA(rows) {
         }
         if (batchCount > 0) await batch.commit();
         
-        alert(`✅ 완료! 압축 분산 방식으로 ${updateCount}개의 로케이션이 1MB 에러 없이 갱신되었습니다.`);
+        alert(`✅ 완료! 압축 분산 방식으로 ${updateCount}개의 로케이션이 에러 없이 완벽 갱신되었습니다.`);
     } catch (error) { 
         console.error("실패:", error); 
-        alert("업데이트 중 오류가 발생했습니다."); 
+        alert("업데이트 중 오류가 발생했습니다. (콘솔 확인)"); 
     } finally { 
         document.getElementById('excel-upload-a').value = ''; 
         window.hideLoading(); 
