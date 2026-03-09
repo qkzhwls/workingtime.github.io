@@ -36,15 +36,13 @@ window.recommendPriorities = {
     poses: ['2', '3', '4', '1', '5']
 };
 
-// 💡 초강력 문서 분산 저장 도우미 (4글자 단위로 잘게 쪼개기)
 const getZoneDocId = (locId) => {
     if (!locId) return 'ZONE_ETC';
     const clean = locId.toString().trim().toUpperCase();
-    const prefix = clean.length >= 4 ? clean.substring(0, 4) : clean;
+    const prefix = clean.length >= 6 ? clean.substring(0, 6) : clean;
     return 'ZONE_' + prefix;
 };
 
-// 🎨 퍼즐(드래그앤드롭)을 위한 CSS 동적 주입
 const injectPuzzleStyle = () => {
     if(document.getElementById('puzzle-style')) return;
     const style = document.createElement('style');
@@ -150,16 +148,27 @@ function setupRealtimeListenerA() {
     const qZones = query(collection(db, LOC_COLLECTION), where(documentId(), ">=", "ZONE_"), where(documentId(), "<=", "ZONE_\uf8ff"));
     onSnapshot(qZones, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
-        originalData = [];
+        
+        let tempLocMap = {}; 
         
         snapshot.forEach(docSnap => {
             const zoneData = docSnap.data();
             for (let locId in zoneData) {
                 if (typeof zoneData[locId] === 'object' && zoneData[locId] !== null) {
-                    originalData.push({ id: locId, ...zoneData[locId] });
+                    let locObj = { id: locId, ...zoneData[locId] };
+                    
+                    if (locObj.rawDataStr) {
+                        try { locObj.rawData = JSON.parse(locObj.rawDataStr); } catch(e) { locObj.rawData = {}; }
+                    } else if (!locObj.rawData) {
+                        locObj.rawData = {};
+                    }
+                    
+                    tempLocMap[locId] = locObj; 
                 }
             }
         });
+        
+        originalData = Object.values(tempLocMap);
         
         renderTableHeader(); 
         applyFiltersAndSort(); 
@@ -176,7 +185,6 @@ window.onload = () => {
     setupRealtimeListenerB();
 };
 
-// 🧩 구역 퍼즐 드래그앤드롭
 window.handleDragStart = (e) => {
     e.target.classList.add('dragging');
     e.dataTransfer.setData('text/plain', e.target.innerText);
@@ -197,7 +205,6 @@ window.handleDrop = (e, targetArea) => {
     if(draggedEl) targetArea.appendChild(draggedEl);
 };
 
-// 🧩 동/위치 1줄 정렬 퍼즐 드래그앤드롭
 window.handleSortDragOver = (e) => {
     e.preventDefault();
     const container = e.currentTarget;
@@ -223,7 +230,6 @@ window.getDragAfterElement = (container, x) => {
     }, { offset: Number.NEGATIVE_INFINITY }).element;
 };
 
-// ✨ 섹션 접기/펴기 토글 함수
 window.toggleSection = function(id, iconId) {
     const el = document.getElementById(id);
     const icon = document.getElementById(iconId);
@@ -236,7 +242,6 @@ window.toggleSection = function(id, iconId) {
     }
 };
 
-// ✨ 사용률 팝업 자세히보기 토글
 window.toggleUsageDetails = function() {
     const content = document.getElementById('usage-details-content');
     const btn = document.getElementById('usage-details-btn');
@@ -249,7 +254,6 @@ window.toggleUsageDetails = function() {
     }
 };
 
-// ✨ [통합] 비율 및 우선순위 마스터 설정창
 window.openRatioModal = function(e) {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -336,12 +340,10 @@ window.openRatioModal = function(e) {
         document.body.appendChild(modal);
     }
     
-    // 비율 바인딩
     document.getElementById('mod-ratio-zikjin').value = window.recommendRatios.zikjin;
     document.getElementById('mod-ratio-weekly').value = window.recommendRatios.weekly;
     document.getElementById('mod-ratio-trend').value = window.recommendRatios.trend;
     
-    // 구역 퍼즐 바인딩
     const allAlphabets = ['★', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
     const priZones = window.recommendPriorities.zones || [[], [], [], []];
     for(let i=0; i<=3; i++) document.getElementById(`pz-${i}`).innerHTML = '';
@@ -362,7 +364,6 @@ window.openRatioModal = function(e) {
         else document.getElementById('pz-none').appendChild(block);
     });
 
-    // 동/위치 정렬 퍼즐 바인딩
     const renderSortBlocks = (containerId, items, defaultItems) => {
         const container = document.getElementById(containerId);
         container.innerHTML = '';
@@ -384,7 +385,6 @@ window.openRatioModal = function(e) {
     modal.style.display = 'flex';
 };
 
-// ✨ 설정 저장 및 반영
 window.saveMasterSettingsModal = async function() {
     const z = Number(document.getElementById('mod-ratio-zikjin').value) || 0;
     const w = Number(document.getElementById('mod-ratio-weekly').value) || 0;
@@ -1116,18 +1116,41 @@ if (fileInputCombined) {
     });
 }
 
+// 💡 1. 일일 최신화 (동/위치 변경 불가) - 기존 파일업로드 버튼
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', function(e) {
         const file = e.target.files[0]; if (!file) return;
-        window.showLoading('엑셀 용량을 압축하여 초고속 동기화 중입니다...');
+        window.showLoading('일일 재고/상품 데이터를 최신화 중입니다...');
         setTimeout(() => {
             const reader = new FileReader();
             reader.onload = function(e) {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
                 const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-                if (json.length > 0) updateDatabaseA(json);
+                // 'daily' 모드로 전송
+                if (json.length > 0) updateDatabaseA(json, 'daily');
+                else { window.hideLoading(); alert("데이터가 없습니다."); }
+            };
+            reader.readAsArrayBuffer(file);
+        }, 50);
+    });
+}
+
+// 💡 2. 초기 도면(영구 세팅) 업데이트 - 환경설정 3번 버튼
+const fileInputPerm = document.getElementById('excel-upload-permanent');
+if (fileInputPerm) {
+    fileInputPerm.addEventListener('change', function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        window.showLoading('도면(동/위치) 영구 데이터를 덮어쓰기 세팅 중입니다...');
+        setTimeout(() => {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+                // 'permanent' 모드로 전송
+                if (json.length > 0) updateDatabaseA(json, 'permanent');
                 else { window.hideLoading(); alert("데이터가 없습니다."); }
             };
             reader.readAsArrayBuffer(file);
@@ -1163,18 +1186,15 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     } catch (error) { console.error(`${label} 실패:`, error); if (!silent) alert(`${label} 중 오류가 발생했습니다.`); throw error; } finally { if(inputElement && !silent) inputElement.value = ''; if (!silent) window.hideLoading(); }
 }
 
-async function updateDatabaseA(rows) {
+// 💡 업로드 핵심 로직 (모드 분리 적용)
+async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
         const allHeaders = Object.keys(rows[0] || {});
-        // 💡 필요 없는 찌꺼기 열 삭제
         const exclude = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
         
-        // 💡 엑셀의 보이지 않는 유령 빈칸(__EMPTY) 완전 차단
         const customHeaders = allHeaders.filter(h => 
-            !exclude.includes(h) && 
-            h.trim() !== '' && 
-            !h.toUpperCase().includes('EMPTY') 
+            !exclude.includes(h) && h.trim() !== '' && !h.toUpperCase().includes('EMPTY') 
         );
         
         const newHeaders = [...new Set([...window.excelHeaders, ...customHeaders])];
@@ -1205,8 +1225,8 @@ async function updateDatabaseA(rows) {
                     if (!zoneUpdates[zoneDocId]) zoneUpdates[zoneDocId] = {};
                     
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
+                    const existingData = originalData.find(d => d.id === cleanLocId) || {};
                     
-                    // 💡 순수 데이터만 추출 (용량 다이어트)
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
                         if(row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
@@ -1214,26 +1234,45 @@ async function updateDatabaseA(rows) {
                         }
                     });
 
-                    let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: cleanRawData };
+                    let updateData = { 
+                        reserved: false, 
+                        reservedAt: 0, 
+                        reservedBy: '', 
+                        updatedAt: new Date(), 
+                        rawDataStr: JSON.stringify(cleanRawData),
+                        rawData: deleteField() 
+                    };
+                    
+                    // 💡 모드에 따른 '동', '위치' 방어 로직 분기
+                    if (mode === 'permanent') {
+                        // 영구 세팅 모드: 엑셀 파일 우선 (없으면 빈칸)
+                        updateData.dong = ('동' in row || 'dong' in row) ? (row['동'] || row['dong'] || '').toString().trim() : (existingData.dong || '');
+                        updateData.pos = ('위치' in row || 'pos' in row) ? (row['위치'] || row['pos'] || '').toString().trim() : (existingData.pos || '');
+                    } else {
+                        // 일일 최신화 모드: 철통 방어! 무조건 기존 DB 데이터 우선
+                        updateData.dong = existingData.dong || '';
+                        updateData.pos = existingData.pos || '';
+                    }
                     
                     if (finalCode && finalCode.trim() !== '') {
                         updateData.preAssigned = false;
                         updateData.preAssignedCode = '';
                         updateData.preAssignedName = '';
                         updateData.preAssignedQty = '';
+                    } else {
+                        // 코드가 없어도 기존 선지정 정보는 날아가지 않도록 보호
+                        if(existingData.preAssigned) {
+                            updateData.preAssigned = true;
+                            updateData.preAssignedCode = existingData.preAssignedCode || '';
+                            updateData.preAssignedName = existingData.preAssignedName || '';
+                            updateData.preAssignedQty = existingData.preAssignedQty || '';
+                        }
                     }
                     
                     updateData.code = finalCode || '';
                     updateData.name = row['상품명']?.toString().trim() || '';
                     updateData.option = row['옵션']?.toString().trim() || '';
                     updateData.stock = row['정상재고']?.toString().trim() || '0';
-                    
-                    if ('동' in row || 'dong' in row) updateData.dong = row['동']?.toString().trim() || row['dong']?.toString().trim() || '';
-                    else updateData.dong = (originalData.find(d => d.id === cleanLocId) || {}).dong || '';
-                    
-                    if ('위치' in row || 'pos' in row) updateData.pos = row['위치']?.toString().trim() || row['pos']?.toString().trim() || '';
-                    else updateData.pos = (originalData.find(d => d.id === cleanLocId) || {}).pos || '';
-
                     updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
                     
                     zoneUpdates[zoneDocId][cleanLocId] = updateData;
@@ -1250,24 +1289,28 @@ async function updateDatabaseA(rows) {
             batch.set(doc(db, LOC_COLLECTION, zoneId), zoneData, { merge: true });
             currentBatchLocCount += locsInZone;
             
-            // 💡 로케이션 개수가 200개를 넘으면 트럭 즉시 출발! (10MB 페이로드 에러 완벽 차단)
             if (currentBatchLocCount >= 200) { 
                 await batch.commit(); 
                 batch = writeBatch(db); 
                 currentBatchLocCount = 0; 
             }
         }
-        // 남은 잔여 물량 최종 배송
         if (currentBatchLocCount > 0) {
             await batch.commit();
         }
         
-        alert(`✅ 완료! 압축 분산 방식으로 ${updateCount}개의 로케이션이 에러 없이 완벽 갱신되었습니다.`);
+        if (mode === 'permanent') {
+            alert(`✅ 완료! ${updateCount}개 로케이션의 랙 구조(동/위치) 영구 세팅이 완료되었습니다.`);
+        } else {
+            alert(`✅ 완료! ${updateCount}개 상품/재고 최신화가 에러 없이 완벽 갱신되었습니다.`);
+        }
+        
     } catch (error) { 
         console.error("실패:", error); 
         alert("업데이트 중 오류가 발생했습니다. (콘솔 확인)"); 
     } finally { 
-        document.getElementById('excel-upload-a').value = ''; 
+        if(document.getElementById('excel-upload-a')) document.getElementById('excel-upload-a').value = ''; 
+        if(document.getElementById('excel-upload-permanent')) document.getElementById('excel-upload-permanent').value = ''; 
         window.hideLoading(); 
     }
 }
