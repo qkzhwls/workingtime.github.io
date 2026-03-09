@@ -358,7 +358,7 @@ window.openRatioModal = function(e) {
     const renderSortBlocks = (containerId, items, defaultItems) => {
         const container = document.getElementById(containerId);
         container.innerHTML = '';
-        let finalItems = [...new Set([...items, ...defaultItems])]; // 병합 후 중복제거
+        let finalItems = [...new Set([...items, ...defaultItems])]; 
         finalItems.forEach(item => {
             const block = document.createElement('div');
             block.className = 'puzzle-sort-block';
@@ -799,13 +799,11 @@ window.calculateAndRenderUsage = function() {
             }
             if (loc.preAssigned) preAssignedCount++;
             
-            // 구역 통계
             const zone = loc.id.charAt(0).toUpperCase();
             if (!zoneStats[zone]) { zoneStats[zone] = { total: 0, used: 0 }; }
             zoneStats[zone].total++;
             if (isUsed) zoneStats[zone].used++;
             
-            // ✨ 동 통계 추가
             const dong = (loc.dong || '').toString().trim();
             if (dong) {
                 if (!dongStats[dong]) dongStats[dong] = { total: 0, used: 0 };
@@ -813,7 +811,6 @@ window.calculateAndRenderUsage = function() {
                 if (isUsed) dongStats[dong].used++;
             }
             
-            // ✨ 위치 통계 추가
             const pos = (loc.pos || '').toString().trim();
             if (pos) {
                 if (!posStats[pos]) posStats[pos] = { total: 0, used: 0 };
@@ -824,7 +821,6 @@ window.calculateAndRenderUsage = function() {
 
         const usageRate = ((used / total) * 100).toFixed(1);
         
-        // 1. 공통 상단 (항상 노출)
         html += `
             <div style="display:flex; justify-content: space-around; background: #eef1ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #c5cae9;">
                 <div style="text-align:center;">
@@ -844,11 +840,9 @@ window.calculateAndRenderUsage = function() {
             </div>
         `;
         
-        // 2. 상세 내역 (기본적으로 숨김 처리)
         let detailHtml = `<div id="usage-details-content" style="display:none; margin-top:15px; border-top:1px solid #eee; padding-top:15px;">`;
-        detailHtml += `<div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 구역(알파벳)의 숫자를 클릭하면 해당 구역만 보여줍니다.</div>`;
+        detailHtml += `<div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 숫자를 클릭하면 리스트에 해당 내용만 보입니다.</div>`;
         
-        // 구역별 표
         detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 구역별 사용률</div>`;
         detailHtml += `<table class="usage-table" style="width:100%; margin-bottom:15px;"><thead><tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
         const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
@@ -858,23 +852,21 @@ window.calculateAndRenderUsage = function() {
         });
         detailHtml += `</tbody></table>`;
 
-        // 동별 표
         detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 동별 사용률</div>`;
         detailHtml += `<table class="usage-table" style="width:100%; margin-bottom:15px;"><thead><tr><th>동</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
         const dongs = Object.keys(dongStats).sort((a,b) => a.localeCompare(b, undefined, {numeric: true}));
         dongs.forEach(d => {
             const dTotal = dongStats[d].total; const dUsed = dongStats[d].used; const dEmpty = dTotal - dUsed; const dRate = ((dUsed / dTotal) * 100).toFixed(1);
-            detailHtml += `<tr><td><strong>${d}</strong> 동</td><td>${dTotal}</td><td style="color:var(--primary);">${dUsed}</td><td style="color:#ff5252;">${dEmpty}</td><td>${dRate}%</td></tr>`;
+            detailHtml += `<tr><td><strong>${d}</strong> 동</td><td>${dTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="setFilter('dong', '${d}'); applyUsageFilter('all', 'used')">${dUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="setFilter('dong', '${d}'); applyUsageFilter('all', 'empty')">${dEmpty}</td><td>${dRate}%</td></tr>`;
         });
         detailHtml += `</tbody></table>`;
 
-        // 위치별 표
         detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 위치별 사용률</div>`;
         detailHtml += `<table class="usage-table" style="width:100%;"><thead><tr><th>위치</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
         const poses = Object.keys(posStats).sort((a,b) => a.localeCompare(b, undefined, {numeric: true}));
         poses.forEach(p => {
             const pTotal = posStats[p].total; const pUsed = posStats[p].used; const pEmpty = pTotal - pUsed; const pRate = ((pUsed / pTotal) * 100).toFixed(1);
-            detailHtml += `<tr><td><strong>${p}</strong> 위치</td><td>${pTotal}</td><td style="color:var(--primary);">${pUsed}</td><td style="color:#ff5252;">${pEmpty}</td><td>${pRate}%</td></tr>`;
+            detailHtml += `<tr><td><strong>${p}</strong> 위치</td><td>${pTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="setFilter('pos', '${p}'); applyUsageFilter('all', 'used')">${pUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="setFilter('pos', '${p}'); applyUsageFilter('all', 'empty')">${pEmpty}</td><td>${pRate}%</td></tr>`;
         });
         detailHtml += `</tbody></table>`;
         detailHtml += `</div>`; 
@@ -1001,7 +993,9 @@ window.handleRowClick = async function(event, locId) {
         if (!loc) return;
         const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== "") || (loc.name && loc.name.trim() !== "");
         
-        const zoneDocId = 'ZONE_' + locId.charAt(0).toUpperCase();
+        // 💡 1MB 에러를 막기 위한 2글자 쪼개기
+        const prefixKey = locId.length >= 2 ? locId.substring(0, 2).toUpperCase() : locId.toUpperCase();
+        const zoneDocId = 'ZONE_' + prefixKey;
 
         if (loc.preAssigned) { 
             if (loc.preAssignedCode === window.selectedPreAssignItem.code) {
@@ -1120,7 +1114,7 @@ const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', function(e) {
         const file = e.target.files[0]; if (!file) return;
-        window.showLoading('엑셀을 구역별로 압축 포장하여 동기화 중입니다... (속도 대폭 향상)');
+        window.showLoading('엑셀 용량을 압축하여 초고속 동기화 중입니다...');
         setTimeout(() => {
             const reader = new FileReader();
             reader.onload = function(e) {
@@ -1167,6 +1161,7 @@ async function updateDatabaseA(rows) {
     const totalRows = rows.length;
     try {
         const allHeaders = Object.keys(rows[0]);
+        // 💡 1MB 에러 방지용: 필요 없는 열들을 정리 (원하는 헤더만 살리기)
         const exclude = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
         const customHeaders = allHeaders.filter(h => !exclude.includes(h));
         const newHeaders = [...new Set([...window.excelHeaders, ...customHeaders])];
@@ -1192,15 +1187,24 @@ async function updateDatabaseA(rows) {
                 } else { cleanLocId = rawLoc; }
                 
                 if (cleanLocId) { 
-                    const prefix = cleanLocId.charAt(0).toUpperCase();
-                    const zoneDocId = 'ZONE_' + prefix;
+                    // 💡 1MB 에러를 막기 위한 2글자 쪼개기 (A-1-01 -> A-)
+                    const prefixKey = cleanLocId.length >= 2 ? cleanLocId.substring(0, 2).toUpperCase() : cleanLocId.toUpperCase();
+                    const zoneDocId = 'ZONE_' + prefixKey;
                     
                     if (!zoneUpdates[zoneDocId]) zoneUpdates[zoneDocId] = {};
                     
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                     const existingData = originalData.find(d => d.id === cleanLocId) || {};
                     
-                    let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: row };
+                    // 💡 용량 폭발 방지: 엑셀의 잡다한 빈칸 찌꺼기 덜어내기
+                    let cleanRawData = {};
+                    for(let k in row) {
+                        if(!exclude.includes(k) && row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
+                            cleanRawData[k] = row[k];
+                        }
+                    }
+
+                    let updateData = { reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date(), rawData: cleanRawData };
                     
                     if (finalCode && finalCode.trim() !== '') {
                         updateData.preAssigned = false;
@@ -1232,7 +1236,8 @@ async function updateDatabaseA(rows) {
         for (let zoneId in zoneUpdates) {
             batch.set(doc(db, LOC_COLLECTION, zoneId), zoneUpdates[zoneId], { merge: true });
             batchCount++;
-            if (batchCount >= 400) { 
+            // 💡 1MB 방어 + 트랜잭션 한도 방어를 위해 50개 덩어리 단위로 잘라서 보냄
+            if (batchCount >= 50) { 
                 await batch.commit(); 
                 batch = writeBatch(db); 
                 batchCount = 0; 
@@ -1240,7 +1245,7 @@ async function updateDatabaseA(rows) {
         }
         if (batchCount > 0) await batch.commit();
         
-        alert(`✅ 완료! 구역별 묶음 방식으로 ${updateCount}개의 로케이션이 초고속 갱신되었습니다.`);
+        alert(`✅ 완료! 압축 분산 방식으로 ${updateCount}개의 로케이션이 1MB 에러 없이 갱신되었습니다.`);
     } catch (error) { 
         console.error("실패:", error); 
         alert("업데이트 중 오류가 발생했습니다."); 
@@ -1259,7 +1264,8 @@ window.copyLocationToClipboard = async (event, locId) => {
     }
     
     try {
-        const zoneDocId = 'ZONE_' + locId.charAt(0).toUpperCase();
+        const prefixKey = locId.length >= 2 ? locId.substring(0, 2).toUpperCase() : locId.toUpperCase();
+        const zoneDocId = 'ZONE_' + prefixKey;
         const docRef = doc(db, LOC_COLLECTION, zoneDocId);
         const snap = await getDoc(docRef);
         
@@ -1314,7 +1320,8 @@ window.addSingleLocationFromSetting = async () => {
     const inputObj = document.getElementById('setting-new-loc'); const newId = inputObj.value.trim().toUpperCase();
     if (!newId) return alert("로케이션 번호를 입력하세요.");
     try {
-        const zoneDocId = 'ZONE_' + newId.charAt(0).toUpperCase();
+        const prefixKey = newId.length >= 2 ? newId.substring(0, 2).toUpperCase() : newId.toUpperCase();
+        const zoneDocId = 'ZONE_' + prefixKey;
         const docRef = doc(db, LOC_COLLECTION, zoneDocId); 
         const docSnap = await getDoc(docRef);
         if (docSnap.exists() && docSnap.data()[newId]) return alert(`이미 존재합니다.`);
@@ -1331,7 +1338,8 @@ window.deleteSelectedLocations = async () => {
         let batch = writeBatch(db); let batchCount = 0;
         for (let i = 0; i < checkedBoxes.length; i++) {
             const locId = checkedBoxes[i].value;
-            const zoneDocId = 'ZONE_' + locId.charAt(0).toUpperCase();
+            const prefixKey = locId.length >= 2 ? locId.substring(0, 2).toUpperCase() : locId.toUpperCase();
+            const zoneDocId = 'ZONE_' + prefixKey;
             batch.set(doc(db, LOC_COLLECTION, zoneDocId), { [locId]: deleteField() }, { merge: true });
             batchCount++;
             if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
@@ -1364,7 +1372,8 @@ window.saveManualEdit = async () => {
         reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date()
     };
     try { 
-        const zoneDocId = 'ZONE_' + id.charAt(0).toUpperCase();
+        const prefixKey = id.length >= 2 ? id.substring(0, 2).toUpperCase() : id.toUpperCase();
+        const zoneDocId = 'ZONE_' + prefixKey;
         await setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [id]: updateData }, { merge: true }); 
         document.getElementById('edit-modal').style.display = 'none'; 
     } catch (error) { console.error(error); }
@@ -1374,7 +1383,8 @@ window.cancelPreAssignment = async () => {
     const id = document.getElementById('modal-id').value;
     if(!confirm(`[${id}] 선지정을 취소하시겠습니까?`)) return;
     try {
-        const zoneDocId = 'ZONE_' + id.charAt(0).toUpperCase();
+        const prefixKey = id.length >= 2 ? id.substring(0, 2).toUpperCase() : id.toUpperCase();
+        const zoneDocId = 'ZONE_' + prefixKey;
         await setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [id]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0', updatedAt: new Date() } }, { merge: true });
         document.getElementById('edit-modal').style.display = 'none';
         showToast("취소되었습니다.");
