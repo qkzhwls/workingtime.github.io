@@ -36,6 +36,14 @@ window.recommendPriorities = {
     poses: ['2', '3', '4', '1', '5']
 };
 
+// 💡 초강력 문서 분산 저장 도우미 (4글자 단위로 잘게 쪼개기)
+const getZoneDocId = (locId) => {
+    if (!locId) return 'ZONE_ETC';
+    const clean = locId.toString().trim().toUpperCase();
+    const prefix = clean.length >= 4 ? clean.substring(0, 4) : clean;
+    return 'ZONE_' + prefix;
+};
+
 // 🎨 퍼즐(드래그앤드롭)을 위한 CSS 동적 주입
 const injectPuzzleStyle = () => {
     if(document.getElementById('puzzle-style')) return;
@@ -635,7 +643,7 @@ function formatExcelDate(excelDate) {
 }
 
 window.syncIncomingData = async () => {
-    if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 구글시트 링크 설정] 에서 링크를 저장해주세요.");
+    if (!window.sheetUrlOrder && !window.sheetUrlBuy) return alert("구글시트 링크가 설정되지 않았습니다.\n[⚙️ 링크 설정] 에서 시트 링크를 저장해주세요.");
     window.showLoading("🔄 원본 시트에서 데이터를 분석하여 가져오는 중입니다...");
     
     try {
@@ -993,9 +1001,7 @@ window.handleRowClick = async function(event, locId) {
         if (!loc) return;
         const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== "") || (loc.name && loc.name.trim() !== "");
         
-        // 💡 1MB 에러를 막기 위한 2글자 쪼개기
-        const prefixKey = locId.length >= 2 ? locId.substring(0, 2).toUpperCase() : locId.toUpperCase();
-        const zoneDocId = 'ZONE_' + prefixKey;
+        const zoneDocId = getZoneDocId(locId);
 
         if (loc.preAssigned) { 
             if (loc.preAssignedCode === window.selectedPreAssignItem.code) {
@@ -1161,10 +1167,10 @@ async function updateDatabaseA(rows) {
     const totalRows = rows.length;
     try {
         const allHeaders = Object.keys(rows[0] || {});
-        // 💡 1MB 에러 방지용: 필요 없는 열들을 정리 (원하는 헤더만 살리기)
+        // 💡 필요 없는 찌꺼기 열 삭제
         const exclude = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
         
-        // 💡 엑셀의 보이지 않는 유령 빈칸(__EMPTY) 완전 차단 필터
+        // 💡 엑셀의 보이지 않는 유령 빈칸(__EMPTY) 완전 차단
         const customHeaders = allHeaders.filter(h => 
             !exclude.includes(h) && 
             h.trim() !== '' && 
@@ -1194,15 +1200,13 @@ async function updateDatabaseA(rows) {
                 } else { cleanLocId = rawLoc; }
                 
                 if (cleanLocId) { 
-                    // 💡 1MB 에러를 막기 위한 2글자 쪼개기 (A-1-01 -> A-)
-                    const prefixKey = cleanLocId.length >= 2 ? cleanLocId.substring(0, 2).toUpperCase() : cleanLocId.toUpperCase();
-                    const zoneDocId = 'ZONE_' + prefixKey;
+                    const zoneDocId = getZoneDocId(cleanLocId);
                     
                     if (!zoneUpdates[zoneDocId]) zoneUpdates[zoneDocId] = {};
                     
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                     
-                    // 💡 용량 폭발 방지: 엑셀의 잡다한 빈칸 찌꺼기 덜어내고 100% 순수 데이터만 추출
+                    // 💡 순수 데이터만 추출 (용량 다이어트)
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
                         if(row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
@@ -1238,19 +1242,25 @@ async function updateDatabaseA(rows) {
             }
         }
         
-        let batchCount = 0;
+        let currentBatchLocCount = 0;
         for (let zoneId in zoneUpdates) {
-            batch.set(doc(db, LOC_COLLECTION, zoneId), zoneUpdates[zoneId], { merge: true });
-            batchCount++;
+            const zoneData = zoneUpdates[zoneId];
+            const locsInZone = Object.keys(zoneData).length;
+
+            batch.set(doc(db, LOC_COLLECTION, zoneId), zoneData, { merge: true });
+            currentBatchLocCount += locsInZone;
             
-            // 💡 네트워크 트럭 1대당 상자 10개만 싣기 (11.5MB 초과 에러 100% 방지)
-            if (batchCount >= 10) { 
+            // 💡 로케이션 개수가 200개를 넘으면 트럭 즉시 출발! (10MB 페이로드 에러 완벽 차단)
+            if (currentBatchLocCount >= 200) { 
                 await batch.commit(); 
                 batch = writeBatch(db); 
-                batchCount = 0; 
+                currentBatchLocCount = 0; 
             }
         }
-        if (batchCount > 0) await batch.commit();
+        // 남은 잔여 물량 최종 배송
+        if (currentBatchLocCount > 0) {
+            await batch.commit();
+        }
         
         alert(`✅ 완료! 압축 분산 방식으로 ${updateCount}개의 로케이션이 에러 없이 완벽 갱신되었습니다.`);
     } catch (error) { 
@@ -1271,8 +1281,7 @@ window.copyLocationToClipboard = async (event, locId) => {
     }
     
     try {
-        const prefixKey = locId.length >= 2 ? locId.substring(0, 2).toUpperCase() : locId.toUpperCase();
-        const zoneDocId = 'ZONE_' + prefixKey;
+        const zoneDocId = getZoneDocId(locId);
         const docRef = doc(db, LOC_COLLECTION, zoneDocId);
         const snap = await getDoc(docRef);
         
@@ -1327,8 +1336,7 @@ window.addSingleLocationFromSetting = async () => {
     const inputObj = document.getElementById('setting-new-loc'); const newId = inputObj.value.trim().toUpperCase();
     if (!newId) return alert("로케이션 번호를 입력하세요.");
     try {
-        const prefixKey = newId.length >= 2 ? newId.substring(0, 2).toUpperCase() : newId.toUpperCase();
-        const zoneDocId = 'ZONE_' + prefixKey;
+        const zoneDocId = getZoneDocId(newId);
         const docRef = doc(db, LOC_COLLECTION, zoneDocId); 
         const docSnap = await getDoc(docRef);
         if (docSnap.exists() && docSnap.data()[newId]) return alert(`이미 존재합니다.`);
@@ -1345,8 +1353,7 @@ window.deleteSelectedLocations = async () => {
         let batch = writeBatch(db); let batchCount = 0;
         for (let i = 0; i < checkedBoxes.length; i++) {
             const locId = checkedBoxes[i].value;
-            const prefixKey = locId.length >= 2 ? locId.substring(0, 2).toUpperCase() : locId.toUpperCase();
-            const zoneDocId = 'ZONE_' + prefixKey;
+            const zoneDocId = getZoneDocId(locId);
             batch.set(doc(db, LOC_COLLECTION, zoneDocId), { [locId]: deleteField() }, { merge: true });
             batchCount++;
             if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
@@ -1379,8 +1386,7 @@ window.saveManualEdit = async () => {
         reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date()
     };
     try { 
-        const prefixKey = id.length >= 2 ? id.substring(0, 2).toUpperCase() : id.toUpperCase();
-        const zoneDocId = 'ZONE_' + prefixKey;
+        const zoneDocId = getZoneDocId(id);
         await setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [id]: updateData }, { merge: true }); 
         document.getElementById('edit-modal').style.display = 'none'; 
     } catch (error) { console.error(error); }
@@ -1390,8 +1396,7 @@ window.cancelPreAssignment = async () => {
     const id = document.getElementById('modal-id').value;
     if(!confirm(`[${id}] 선지정을 취소하시겠습니까?`)) return;
     try {
-        const prefixKey = id.length >= 2 ? id.substring(0, 2).toUpperCase() : id.toUpperCase();
-        const zoneDocId = 'ZONE_' + prefixKey;
+        const zoneDocId = getZoneDocId(id);
         await setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [id]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0', updatedAt: new Date() } }, { merge: true });
         document.getElementById('edit-modal').style.display = 'none';
         showToast("취소되었습니다.");
