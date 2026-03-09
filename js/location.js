@@ -500,11 +500,9 @@ window.showRecommendation = function() {
         let usedEmptyIndices = new Set();
         let displayRank = 1;
 
-        // 💡 2. 동(Dong) 일치 여부 검사 로직 추가
         for (let i = 0; i < scoredItems.length; i++) {
             let item = scoredItems[i];
             
-            // 현재 상품이 위치한 '동' 리스트 추출
             let currentLocsObjs = originalData.filter(d => d.code === item.code);
             let currentDongsList = currentLocsObjs.map(d => (d.dong || '').toString().trim());
 
@@ -514,9 +512,7 @@ window.showRecommendation = function() {
                 let eLoc = emptyLocs[j];
                 let targetDong = (eLoc.dong || '').toString().trim();
 
-                // 💡 [핵심] 추천하려는 빈칸의 '동'과 현재 상품이 이미 위치한 '동'이 같으면 패스!
                 if (currentDongsList.includes(targetDong)) {
-                    // 이미 같은 동에 있으므로 추천해 주지 않고 다음 상품으로 넘어감.
                     break; 
                 }
 
@@ -1110,7 +1106,7 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// ✨ 직진배송, 주차별 데이터 개별 업로드 로직으로 변경
+// ✨ 새로운 스마트 헤더 스캐너 (직진/주차별 개별 업로드 적용)
 const processExcelData = async (file, collectionName) => {
     window.showLoading(`${collectionName === 'ZikjinData' ? '직진배송' : '주차별'} 데이터를 분석 및 동기화 중입니다...`);
     try {
@@ -1121,9 +1117,45 @@ const processExcelData = async (file, collectionName) => {
             reader.readAsArrayBuffer(file);
         });
         const workbook = XLSX.read(data, {type: 'array'});
-        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-        if (json.length > 0) {
-            await updateDatabaseB(json, collectionName, null, false);
+        const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
+
+        let headerRowIndex = -1;
+        let pureHeaders = [];
+
+        for (let i = 0; i < Math.min(20, rawData.length); i++) {
+            const row = rawData[i];
+            const cleanRow = row.map(h => (h||'').toString().replace(/[^a-zA-Z0-9가-힣]/g, ''));
+            if (cleanRow.includes('어드민상품코드') || cleanRow.includes('상품코드') || cleanRow.includes('품목코드') || cleanRow.includes('바코드')) {
+                headerRowIndex = i;
+                pureHeaders = cleanRow; 
+                break;
+            }
+        }
+
+        if (headerRowIndex === -1) {
+            window.hideLoading();
+            alert("🚨 에러: 엑셀 파일에서 '상품코드' 또는 '어드민상품코드' 열을 찾을 수 없습니다.\n파일 형식을 확인해주세요.");
+            return;
+        }
+
+        const parsedList = [];
+        for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+            let rowObj = {};
+            let isEmpty = true;
+            for (let j = 0; j < pureHeaders.length; j++) {
+                const key = pureHeaders[j];
+                if (key) {
+                    rowObj[key] = rawData[i][j];
+                    if (rawData[i][j] !== "" && rawData[i][j] !== undefined) isEmpty = false;
+                }
+            }
+            if (!isEmpty) {
+                parsedList.push(rowObj);
+            }
+        }
+
+        if (parsedList.length > 0) {
+            await updateDatabaseB(parsedList, collectionName, null, false);
         } else {
             window.hideLoading();
             alert("데이터가 없습니다.");
@@ -1190,10 +1222,7 @@ if (fileInputPerm) {
 }
 
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
-    let label = '데이터';
-    if (collectionName === 'ZikjinData') label = '직진배송';
-    if (collectionName === 'WeeklyData') label = '주차별';
-    if (collectionName === 'IncomingData') label = '입고예정';
+    let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
         const querySnapshot = await getDocs(collection(db2, collectionName));
         const docsArray = querySnapshot.docs;
@@ -1205,7 +1234,8 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
         let batch = writeBatch(db2); let updateCount = 0; let batchCount = 0;
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            let code = (row['어드민상품코드'] || row['상품코드'])?.toString().trim();
+            // 다양한 이름표 수용
+            let code = (row['어드민상품코드'] || row['상품코드'] || row['품목코드'] || row['바코드'])?.toString().trim();
             if (!code) continue;
             const docRef = doc(db2, collectionName, code);
             batch.set(docRef, { ...row, updatedAt: new Date() }, { merge: true });
@@ -1213,7 +1243,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
             if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db2); batchCount = 0; }
         }
         if (batchCount > 0) await batch.commit();
-        if (!silent) alert(`✅ [${label}] 업데이트 완료!\n총 ${updateCount}건이 반영되었습니다.`);
+        if (!silent) alert(`✅ [${label}] 업데이트 완료!\n총 ${updateCount}건이 완벽하게 반영되었습니다.`);
     } catch (error) { console.error(`${label} 실패:`, error); if (!silent) alert(`${label} 중 오류가 발생했습니다.`); throw error; } finally { if(inputElement && !silent) inputElement.value = ''; if (!silent) window.hideLoading(); }
 }
 
