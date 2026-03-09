@@ -36,6 +36,7 @@ window.recommendPriorities = {
     poses: ['2', '3', '4', '1', '5']
 };
 
+// 💡 40,000 색인 초과 및 1MB 제한 완벽 방어: 6글자 단위로 아주 잘게 쪼개기
 const getZoneDocId = (locId) => {
     if (!locId) return 'ZONE_ETC';
     const clean = locId.toString().trim().toUpperCase();
@@ -43,6 +44,7 @@ const getZoneDocId = (locId) => {
     return 'ZONE_' + prefix;
 };
 
+// 🎨 퍼즐(드래그앤드롭)을 위한 CSS 동적 주입
 const injectPuzzleStyle = () => {
     if(document.getElementById('puzzle-style')) return;
     const style = document.createElement('style');
@@ -149,6 +151,7 @@ function setupRealtimeListenerA() {
     onSnapshot(qZones, (snapshot) => {
         document.getElementById('firebase-guide').style.display = 'none';
         
+        // 💡 중복 데이터 제거용 Map
         let tempLocMap = {}; 
         
         snapshot.forEach(docSnap => {
@@ -157,6 +160,7 @@ function setupRealtimeListenerA() {
                 if (typeof zoneData[locId] === 'object' && zoneData[locId] !== null) {
                     let locObj = { id: locId, ...zoneData[locId] };
                     
+                    // 💡 진공 압축된 문자열 데이터를 다시 예쁜 JSON으로 복원
                     if (locObj.rawDataStr) {
                         try { locObj.rawData = JSON.parse(locObj.rawDataStr); } catch(e) { locObj.rawData = {}; }
                     } else if (!locObj.rawData) {
@@ -185,6 +189,7 @@ window.onload = () => {
     setupRealtimeListenerB();
 };
 
+// 🧩 구역 퍼즐 드래그앤드롭
 window.handleDragStart = (e) => {
     e.target.classList.add('dragging');
     e.dataTransfer.setData('text/plain', e.target.innerText);
@@ -205,6 +210,7 @@ window.handleDrop = (e, targetArea) => {
     if(draggedEl) targetArea.appendChild(draggedEl);
 };
 
+// 🧩 동/위치 1줄 정렬 퍼즐 드래그앤드롭
 window.handleSortDragOver = (e) => {
     e.preventDefault();
     const container = e.currentTarget;
@@ -230,6 +236,7 @@ window.getDragAfterElement = (container, x) => {
     }, { offset: Number.NEGATIVE_INFINITY }).element;
 };
 
+// ✨ 섹션 접기/펴기 토글 함수
 window.toggleSection = function(id, iconId) {
     const el = document.getElementById(id);
     const icon = document.getElementById(iconId);
@@ -242,6 +249,7 @@ window.toggleSection = function(id, iconId) {
     }
 };
 
+// ✨ 사용률 팝업 자세히보기 토글
 window.toggleUsageDetails = function() {
     const content = document.getElementById('usage-details-content');
     const btn = document.getElementById('usage-details-btn');
@@ -254,6 +262,7 @@ window.toggleUsageDetails = function() {
     }
 };
 
+// ✨ [통합] 비율 및 우선순위 마스터 설정창
 window.openRatioModal = function(e) {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -1116,7 +1125,7 @@ if (fileInputCombined) {
     });
 }
 
-// 💡 1. 일일 최신화 (동/위치 변경 불가) - 기존 파일업로드 버튼
+// 💡 1. 일일 최신화 (동/위치 변경 불가, 없는 로케이션 생성 불가) - 기존 파일업로드 버튼
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', function(e) {
@@ -1186,7 +1195,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     } catch (error) { console.error(`${label} 실패:`, error); if (!silent) alert(`${label} 중 오류가 발생했습니다.`); throw error; } finally { if(inputElement && !silent) inputElement.value = ''; if (!silent) window.hideLoading(); }
 }
 
-// 💡 업로드 핵심 로직 (모드 분리 적용)
+// 💡 업로드 핵심 로직 (모드 분리 및 신규 로케이션 방어 적용)
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
@@ -1205,7 +1214,12 @@ async function updateDatabaseA(rows, mode = 'daily') {
         
         let batch = writeBatch(db); 
         let updateCount = 0; 
+        let skipCount = 0;
         let zoneUpdates = {};
+        
+        // 성능 최적화 및 낯선 로케이션 판별을 위한 기존 맵 생성
+        let existingLocMap = {};
+        originalData.forEach(d => { existingLocMap[d.id] = d; });
         
         for (let i = 0; i < totalRows; i++) {
             const row = rows[i]; 
@@ -1220,12 +1234,18 @@ async function updateDatabaseA(rows, mode = 'daily') {
                 } else { cleanLocId = rawLoc; }
                 
                 if (cleanLocId) { 
+                    // 💡 [핵심 방어 로직] 일일 최신화(daily) 모드인데, 시스템에 없는 낯선 로케이션이면 무시(Skip)!
+                    if (mode === 'daily' && !existingLocMap[cleanLocId]) {
+                        skipCount++;
+                        continue; 
+                    }
+
                     const zoneDocId = getZoneDocId(cleanLocId);
                     
                     if (!zoneUpdates[zoneDocId]) zoneUpdates[zoneDocId] = {};
                     
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
-                    const existingData = originalData.find(d => d.id === cleanLocId) || {};
+                    const existingData = existingLocMap[cleanLocId] || {};
                     
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
@@ -1243,13 +1263,10 @@ async function updateDatabaseA(rows, mode = 'daily') {
                         rawData: deleteField() 
                     };
                     
-                    // 💡 모드에 따른 '동', '위치' 방어 로직 분기
                     if (mode === 'permanent') {
-                        // 영구 세팅 모드: 엑셀 파일 우선 (없으면 빈칸)
                         updateData.dong = ('동' in row || 'dong' in row) ? (row['동'] || row['dong'] || '').toString().trim() : (existingData.dong || '');
                         updateData.pos = ('위치' in row || 'pos' in row) ? (row['위치'] || row['pos'] || '').toString().trim() : (existingData.pos || '');
                     } else {
-                        // 일일 최신화 모드: 철통 방어! 무조건 기존 DB 데이터 우선
                         updateData.dong = existingData.dong || '';
                         updateData.pos = existingData.pos || '';
                     }
@@ -1260,7 +1277,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
                         updateData.preAssignedName = '';
                         updateData.preAssignedQty = '';
                     } else {
-                        // 코드가 없어도 기존 선지정 정보는 날아가지 않도록 보호
                         if(existingData.preAssigned) {
                             updateData.preAssigned = true;
                             updateData.preAssignedCode = existingData.preAssignedCode || '';
@@ -1302,7 +1318,9 @@ async function updateDatabaseA(rows, mode = 'daily') {
         if (mode === 'permanent') {
             alert(`✅ 완료! ${updateCount}개 로케이션의 랙 구조(동/위치) 영구 세팅이 완료되었습니다.`);
         } else {
-            alert(`✅ 완료! ${updateCount}개 상품/재고 최신화가 에러 없이 완벽 갱신되었습니다.`);
+            let msg = `✅ 완료! ${updateCount}개 상품/재고 최신화가 에러 없이 완벽 갱신되었습니다.`;
+            if(skipCount > 0) msg += `\n(※ 기존 도면에 없는 낯선 로케이션 ${skipCount}개는 안전하게 무시되었습니다.)`;
+            alert(msg);
         }
         
     } catch (error) { 
