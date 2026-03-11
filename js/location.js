@@ -1106,7 +1106,7 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// ✨ 새로운 스마트 헤더 스캐너 (직진/주차별 개별 업로드 적용)
+// ✨ 직진배송, 주차별 데이터 개별 업로드 로직으로 변경 (최신화와 동일한 방식으로 롤백)
 const processExcelData = async (file, collectionName) => {
     window.showLoading(`${collectionName === 'ZikjinData' ? '직진배송' : '주차별'} 데이터를 분석 및 동기화 중입니다...`);
     try {
@@ -1117,45 +1117,10 @@ const processExcelData = async (file, collectionName) => {
             reader.readAsArrayBuffer(file);
         });
         const workbook = XLSX.read(data, {type: 'array'});
-        const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: "" });
+        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
 
-        let headerRowIndex = -1;
-        let pureHeaders = [];
-
-        for (let i = 0; i < Math.min(20, rawData.length); i++) {
-            const row = rawData[i];
-            const cleanRow = row.map(h => (h||'').toString().replace(/[^a-zA-Z0-9가-힣]/g, ''));
-            if (cleanRow.includes('어드민상품코드') || cleanRow.includes('상품코드') || cleanRow.includes('품목코드') || cleanRow.includes('바코드')) {
-                headerRowIndex = i;
-                pureHeaders = cleanRow; 
-                break;
-            }
-        }
-
-        if (headerRowIndex === -1) {
-            window.hideLoading();
-            alert("🚨 에러: 엑셀 파일에서 '상품코드' 또는 '어드민상품코드' 열을 찾을 수 없습니다.\n파일 형식을 확인해주세요.");
-            return;
-        }
-
-        const parsedList = [];
-        for (let i = headerRowIndex + 1; i < rawData.length; i++) {
-            let rowObj = {};
-            let isEmpty = true;
-            for (let j = 0; j < pureHeaders.length; j++) {
-                const key = pureHeaders[j];
-                if (key) {
-                    rowObj[key] = rawData[i][j];
-                    if (rawData[i][j] !== "" && rawData[i][j] !== undefined) isEmpty = false;
-                }
-            }
-            if (!isEmpty) {
-                parsedList.push(rowObj);
-            }
-        }
-
-        if (parsedList.length > 0) {
-            await updateDatabaseB(parsedList, collectionName, null, false);
+        if (json.length > 0) {
+            await updateDatabaseB(json, collectionName, null, false);
         } else {
             window.hideLoading();
             alert("데이터가 없습니다.");
@@ -1234,7 +1199,6 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
         let batch = writeBatch(db2); let updateCount = 0; let batchCount = 0;
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            // 다양한 이름표 수용
             let code = (row['어드민상품코드'] || row['상품코드'] || row['품목코드'] || row['바코드'])?.toString().trim();
             if (!code) continue;
             const docRef = doc(db2, collectionName, code);
