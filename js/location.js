@@ -624,7 +624,6 @@ window.saveHeaderSettings = async () => {
     } catch(e) { console.error(e); alert("저장 실패"); }
 };
 
-
 window.openSheetModal = (e) => {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -651,10 +650,8 @@ const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g,
 function formatExcelDate(excelDate) {
     if (!excelDate || excelDate.toString().trim() === "") return '';
     if (typeof excelDate === 'string' && (excelDate.includes('-') || excelDate.includes('.'))) return excelDate;
-    
     const num = parseFloat(excelDate);
     if (isNaN(num)) return excelDate;
-    
     const date = new Date(Math.round((num - 25569) * 86400 * 1000));
     const y = date.getUTCFullYear();
     const m = String(date.getUTCMonth() + 1).padStart(2, '0');
@@ -671,7 +668,6 @@ window.syncIncomingData = async () => {
 
         const fetchAndParse = async (url, sourceName) => {
             if (!url) return [];
-            
             let textData = "";
             try {
                 const res1 = await fetch(url);
@@ -1106,37 +1102,34 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// ✨ 직진배송, 주차별 데이터 개별 업로드 로직으로 변경 (최신화와 동일한 방식으로 롤백)
-const processExcelData = async (file, collectionName) => {
-    window.showLoading(`${collectionName === 'ZikjinData' ? '직진배송' : '주차별'} 데이터를 분석 및 동기화 중입니다...`);
-    try {
-        const data = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = e => resolve(new Uint8Array(e.target.result));
-            reader.onerror = e => reject(e);
-            reader.readAsArrayBuffer(file);
-        });
-        const workbook = XLSX.read(data, {type: 'array'});
-        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
 
-        if (json.length > 0) {
-            await updateDatabaseB(json, collectionName, null, false);
-        } else {
-            window.hideLoading();
-            alert("데이터가 없습니다.");
-        }
-    } catch(error) { 
-        window.hideLoading(); 
-        alert('동기화 중 오류가 발생했습니다.'); 
-        console.error(error); 
-    }
+// ✨ 1. 직진/주차별 개별 업로드 (최신화와 100% 동일한 방식으로 읽기)
+const processExcelData = function(file, collectionName, inputElement) {
+    window.showLoading(`${collectionName === 'ZikjinData' ? '직진배송' : '주차별'} 데이터를 분석 및 동기화 중입니다...`);
+    setTimeout(() => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                // 최신화와 똑같이 읽기 방식 적용
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, {type: 'array'});
+                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+                
+                if (json.length > 0) updateDatabaseB(json, collectionName, inputElement, false);
+                else { window.hideLoading(); alert("데이터가 없습니다."); }
+            } catch(error) { 
+                window.hideLoading(); alert('동기화 중 오류가 발생했습니다.'); console.error(error); 
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }, 50);
 };
 
 const fileInputZikjin = document.getElementById('excel-upload-zikjin');
 if (fileInputZikjin) {
     fileInputZikjin.addEventListener('change', function(e) {
         const file = e.target.files[0]; if (!file) return;
-        processExcelData(file, 'ZikjinData').finally(() => { e.target.value = ''; });
+        processExcelData(file, 'ZikjinData', e.target);
     });
 }
 
@@ -1144,10 +1137,12 @@ const fileInputWeekly = document.getElementById('excel-upload-weekly');
 if (fileInputWeekly) {
     fileInputWeekly.addEventListener('change', function(e) {
         const file = e.target.files[0]; if (!file) return;
-        processExcelData(file, 'WeeklyData').finally(() => { e.target.value = ''; });
+        processExcelData(file, 'WeeklyData', e.target);
     });
 }
 
+
+// ✨ 2. 일일 최신화 업로드
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', function(e) {
@@ -1167,6 +1162,7 @@ if (fileInputA) {
     });
 }
 
+// ✨ 3. 도면 영구 세팅 업로드
 const fileInputPerm = document.getElementById('excel-upload-permanent');
 if (fileInputPerm) {
     fileInputPerm.addEventListener('change', function(e) {
@@ -1186,6 +1182,7 @@ if (fileInputPerm) {
     });
 }
 
+// 💡 직진/주차별 데이터 업데이트 함수 (띄어쓰기 완벽 제거 필터 탑재!)
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
@@ -1196,21 +1193,43 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
             docsArray.slice(i, i + 400).forEach(d => delBatch.delete(d.ref));
             await delBatch.commit();
         }
+        
         let batch = writeBatch(db2); let updateCount = 0; let batchCount = 0;
+        
         for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            let code = (row['어드민상품코드'] || row['상품코드'] || row['품목코드'] || row['바코드'])?.toString().trim();
-            if (!code) continue;
+            const rawRow = rows[i];
+            
+            // 💡 [핵심] 엑셀 헤더(제목)에 보이지 않는 띄어쓰기가 있어도 싹 지워서 코드가 완벽히 인식하게 만듭니다.
+            let row = {};
+            for (let key in rawRow) {
+                let cleanKey = key.replace(/\s+/g, ''); 
+                row[cleanKey] = rawRow[key];
+            }
+
+            let code = (row['어드민상품코드'] || row['상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호'])?.toString().trim();
+            if (!code) continue; 
+            
             const docRef = doc(db2, collectionName, code);
             batch.set(docRef, { ...row, updatedAt: new Date() }, { merge: true });
+            
             updateCount++; batchCount++;
             if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db2); batchCount = 0; }
         }
+        
         if (batchCount > 0) await batch.commit();
         if (!silent) alert(`✅ [${label}] 업데이트 완료!\n총 ${updateCount}건이 완벽하게 반영되었습니다.`);
-    } catch (error) { console.error(`${label} 실패:`, error); if (!silent) alert(`${label} 중 오류가 발생했습니다.`); throw error; } finally { if(inputElement && !silent) inputElement.value = ''; if (!silent) window.hideLoading(); }
+        
+    } catch (error) { 
+        console.error(`${label} 실패:`, error); 
+        if (!silent) alert(`${label} 중 오류가 발생했습니다.`); 
+        throw error; 
+    } finally { 
+        if(inputElement && !silent) inputElement.value = ''; 
+        if (!silent) window.hideLoading(); 
+    }
 }
 
+// 💡 일일 최신화 & 영구 세팅 업데이트 함수
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
@@ -1236,7 +1255,15 @@ async function updateDatabaseA(rows, mode = 'daily') {
         originalData.forEach(d => { existingLocMap[d.id] = d; });
         
         for (let i = 0; i < totalRows; i++) {
-            const row = rows[i]; 
+            const rawRow = rows[i]; 
+            
+            // 💡 최신화에서도 띄어쓰기 방어막 적용
+            let row = {};
+            for (let key in rawRow) {
+                let cleanKey = key.replace(/\s+/g, '');
+                row[cleanKey] = rawRow[key];
+            }
+
             const rawLoc = row['로케이션']?.toString().trim();
             if (rawLoc) {
                 let cleanLocId = ''; let extractedCode = '';
@@ -1254,7 +1281,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     }
 
                     const zoneDocId = getZoneDocId(cleanLocId);
-                    
                     if (!zoneUpdates[zoneDocId]) zoneUpdates[zoneDocId] = {};
                     
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
@@ -1262,8 +1288,9 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
-                        if(row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
-                            cleanRawData[k] = row[k].toString().trim();
+                        let cleanK = k.replace(/\s+/g, '');
+                        if(row[cleanK] !== undefined && row[cleanK] !== null && row[cleanK].toString().trim() !== "") {
+                            cleanRawData[k] = row[cleanK].toString().trim();
                         }
                     });
 
