@@ -1103,29 +1103,75 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 💡 1. 직진/주차별 개별 업로드 (최신화와 100% 동일한 방식으로 읽기 + 띄어쓰기 완전 정복!)
+// 💡 [핵심] 가짜 엑셀이든 뭐든 30줄을 뒤져서 진짜 제목줄을 찾아내는 하드코어 스캐너!
 const parseAndCleanExcel = function(workbook) {
-    const rawJson = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-    return rawJson.map(item => {
-        let cleanItem = {};
-        for(let k in item) {
-            // 엑셀 헤더의 모든 공백(띄어쓰기)을 지워버림 (예: "상 품 코 드" -> "상품코드")
-            cleanItem[k.replace(/\s+/g, '')] = item[k];
+    const sheetName = workbook.SheetNames[0];
+    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+    
+    if (rawData.length === 0) return [];
+
+    let headerRowIndex = 0;
+    let pureHeaders = [];
+    let found = false;
+
+    // 1. 위에서부터 최대 30줄을 샅샅이 스캔하여 '진짜 제목줄' 찾기
+    for (let i = 0; i < Math.min(30, rawData.length); i++) {
+        const row = rawData[i];
+        if (!row) continue;
+        
+        // 모든 셀의 공백 및 특수문자를 제거하여 키워드 검사 (정확도 100%)
+        const cleanRow = row.map(h => (h || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, ''));
+        
+        if (cleanRow.includes('상품코드') || 
+            cleanRow.includes('어드민상품코드') || 
+            cleanRow.includes('대표상품코드') || 
+            cleanRow.includes('품목코드') || 
+            cleanRow.includes('바코드') ||
+            cleanRow.includes('로케이션')) {
+            
+            headerRowIndex = i;
+            // 💡 찾은 제목줄의 모든 띄어쓰기를 다림질(제거)하여 헤더로 확정
+            pureHeaders = row.map(h => (h || '').toString().replace(/\s+/g, '')); 
+            found = true;
+            break;
         }
-        return cleanItem;
-    });
+    }
+
+    // 만약 30줄을 뒤져도 못 찾았다면, 가장 기본 방식(1번째 줄) 사용
+    if (!found) {
+        pureHeaders = (rawData[0] || []).map(h => (h || '').toString().replace(/\s+/g, ''));
+    }
+
+    // 2. 찾은 제목줄 바로 밑에서부터 진짜 데이터만 쏙쏙 뽑아내기
+    const parsedList = [];
+    for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+        let rowObj = {};
+        let isEmpty = true;
+        for (let j = 0; j < pureHeaders.length; j++) {
+            const key = pureHeaders[j];
+            if (key && key !== '') {
+                rowObj[key] = rawData[i][j];
+                if (rawData[i][j] !== "" && rawData[i][j] !== undefined) isEmpty = false;
+            }
+        }
+        if (!isEmpty) {
+            parsedList.push(rowObj);
+        }
+    }
+    
+    return parsedList;
 };
 
+// 💡 1. 직진/주차별 개별 업로드 
 const processExcelData = function(file, collectionName, inputElement) {
     window.showLoading(`${collectionName === 'ZikjinData' ? '직진배송' : '주차별'} 데이터를 분석 및 동기화 중입니다...`);
     setTimeout(() => {
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
-                // 💡 최신화(XLSX.read array 방식)와 100% 동일하게 복구!
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
-                const json = parseAndCleanExcel(workbook);
+                const json = parseAndCleanExcel(workbook); // 스캐너 통과
                 
                 if (json.length > 0) {
                     updateDatabaseB(json, collectionName, inputElement, false);
@@ -1161,7 +1207,7 @@ if (fileInputWeekly) {
     });
 }
 
-// 💡 2. 일일 최신화 업로드 (띄어쓰기 방어막 장착)
+// 💡 2. 일일 최신화 업로드 
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', function(e) {
@@ -1172,7 +1218,7 @@ if (fileInputA) {
             reader.onload = function(e) {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
-                const json = parseAndCleanExcel(workbook);
+                const json = parseAndCleanExcel(workbook); // 스캐너 통과
                 if (json.length > 0) updateDatabaseA(json, 'daily');
                 else { window.hideLoading(); alert("데이터가 없습니다."); }
             };
@@ -1181,7 +1227,7 @@ if (fileInputA) {
     });
 }
 
-// 💡 3. 도면 영구 세팅 업로드 (띄어쓰기 방어막 장착)
+// 💡 3. 도면 영구 세팅 업로드
 const fileInputPerm = document.getElementById('excel-upload-permanent');
 if (fileInputPerm) {
     fileInputPerm.addEventListener('change', function(e) {
@@ -1192,7 +1238,7 @@ if (fileInputPerm) {
             reader.onload = function(e) {
                 const data = new Uint8Array(e.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
-                const json = parseAndCleanExcel(workbook);
+                const json = parseAndCleanExcel(workbook); // 스캐너 통과
                 if (json.length > 0) updateDatabaseA(json, 'permanent');
                 else { window.hideLoading(); alert("데이터가 없습니다."); }
             };
@@ -1201,7 +1247,7 @@ if (fileInputPerm) {
     });
 }
 
-// 직진/주차별 데이터 업데이트 (코드 인식 강화)
+// 직진/주차별 데이터 업데이트 
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
@@ -1218,7 +1264,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
             
-            // 💡 띄어쓰기가 지워진 완벽한 상태이므로 안심하고 상품코드를 찾습니다.
+            // 상품코드로 인식할 수 있는 모든 경우의 수 완벽 방어
             let code = (row['어드민상품코드'] || row['대표상품코드'] || row['상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호'])?.toString().trim();
             if (!code) continue; 
             
@@ -1242,7 +1288,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     }
 }
 
-// 💡 일일 최신화 & 영구 세팅 업데이트 함수
+// 일일 최신화 & 영구 세팅 업데이트
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
@@ -1294,8 +1340,9 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
-                        if(row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
-                            cleanRawData[k] = row[k].toString().trim();
+                        let cleanK = k.replace(/\s+/g, '');
+                        if(row[cleanK] !== undefined && row[cleanK] !== null && row[cleanK].toString().trim() !== "") {
+                            cleanRawData[k] = row[cleanK].toString().trim();
                         }
                     });
 
