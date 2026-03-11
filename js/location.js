@@ -1103,85 +1103,45 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 💡 스캐너 + 띄어쓰기 다림질 모듈
+// 💡 [핵심] 최신화와 동일한 단순 배열 변환 + 띄어쓰기 지우기
 const parseAndCleanExcel = function(workbook) {
-    const sheetName = workbook.SheetNames[0];
-    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
-    if (rawData.length === 0) return [];
-
-    let headerRowIndex = -1;
-    let pureHeaders = [];
-
-    // 위에서 30줄을 뒤지면서 진짜 제목줄 찾기
-    for (let i = 0; i < Math.min(30, rawData.length); i++) {
-        const row = rawData[i];
-        if (!row) continue;
-        const cleanRow = row.map(h => (h || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, ''));
-        
-        if (cleanRow.includes('상품코드') || cleanRow.includes('어드민상품코드') || 
-            cleanRow.includes('대표상품코드') || cleanRow.includes('품목코드') || 
-            cleanRow.includes('바코드') || cleanRow.includes('로케이션')) {
-            headerRowIndex = i;
-            pureHeaders = row.map(h => (h || '').toString().replace(/\s+/g, '')); 
-            break;
+    const rawJson = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+    return rawJson.map(item => {
+        let cleanItem = {};
+        for(let k in item) {
+            let cleanKey = (k || '').toString().replace(/\s+/g, '');
+            cleanItem[cleanKey] = item[k];
         }
-    }
-
-    if (headerRowIndex === -1) return []; 
-
-    const parsedList = [];
-    for (let i = headerRowIndex + 1; i < rawData.length; i++) {
-        let rowObj = {};
-        let isEmpty = true;
-        for (let j = 0; j < pureHeaders.length; j++) {
-            const key = pureHeaders[j];
-            if (key && key !== '') {
-                rowObj[key] = rawData[i][j];
-                if (rawData[i][j] !== "" && rawData[i][j] !== undefined) isEmpty = false;
-            }
-        }
-        if (!isEmpty) parsedList.push(rowObj);
-    }
-    return parsedList;
+        return cleanItem;
+    });
 };
 
-// 💡 궁극의 무적 엑셀 리더기 (가짜 엑셀 100% 번역)
+// 💡 무적 엑셀 리더기: 기본으로 읽고, 한글 깨지면 EUC-KR로 다시 읽음!
 const universalExcelReader = (file) => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
         const reader1 = new FileReader();
         reader1.onload = (e1) => {
+            let json = [];
             try {
-                // 1. 보통 엑셀 읽기 방식으로 먼저 시도
                 const data = new Uint8Array(e1.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
-                const json = parseAndCleanExcel(workbook);
+                json = parseAndCleanExcel(workbook);
+            } catch(e) {}
 
-                if (json.length > 0) {
-                    resolve(json); 
-                } else {
-                    // 2. 한글 깨짐(EUC-KR)으로 0건이 나왔다면? 자동 번역기 가동!
-                    const reader2 = new FileReader();
-                    reader2.onload = (e2) => {
-                        try {
-                            const textData = e2.target.result;
-                            const wb2 = XLSX.read(textData, {type: 'string'});
-                            const json2 = parseAndCleanExcel(wb2);
-                            resolve(json2);
-                        } catch(err2) {
-                            resolve([]); 
-                        }
-                    };
-                    reader2.readAsText(file, 'euc-kr');
-                }
-            } catch(error) {
-                // 에러가 났을 때도 자동 번역기 가동
+            // 💡 한글이 깨졌는지 검사 (제대로 된 상품코드 헤더가 하나라도 살아있는지 확인)
+            const isValid = json.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['상품명'] || row['품목코드']);
+
+            if (json.length > 0 && isValid) {
+                // 정상 파일이면 즉시 통과
+                resolve(json);
+            } else {
+                // 💡 [자동 엑셀 변환] 한글이 깨진 가짜 엑셀이라면 EUC-KR로 2차 스캔
                 const reader2 = new FileReader();
                 reader2.onload = (e2) => {
                     try {
                         const textData = e2.target.result;
                         const wb2 = XLSX.read(textData, {type: 'string'});
-                        const json2 = parseAndCleanExcel(wb2);
-                        resolve(json2);
+                        resolve(parseAndCleanExcel(wb2));
                     } catch(err2) {
                         resolve([]); 
                     }
@@ -1189,12 +1149,13 @@ const universalExcelReader = (file) => {
                 reader2.readAsText(file, 'euc-kr');
             }
         };
+        // 1차 스캔은 무조건 표준 방식(array buffer)으로
         reader1.readAsArrayBuffer(file);
     });
 };
 
 
-// ✨ 1. 직진/주차별 개별 업로드 
+// ✨ 1. 직진/주차별 개별 업로드 (무적 리더기 통과)
 const fileInputZikjin = document.getElementById('excel-upload-zikjin');
 if (fileInputZikjin) {
     fileInputZikjin.addEventListener('change', async function(e) {
@@ -1221,7 +1182,7 @@ if (fileInputWeekly) {
     });
 }
 
-// ✨ 2. 일일 최신화 업로드 
+// ✨ 2. 일일 최신화 업로드 (무적 리더기 통과)
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', async function(e) {
@@ -1236,7 +1197,7 @@ if (fileInputA) {
     });
 }
 
-// ✨ 3. 도면 영구 세팅 업로드 
+// ✨ 3. 도면 영구 세팅 업로드 (무적 리더기 통과)
 const fileInputPerm = document.getElementById('excel-upload-permanent');
 if (fileInputPerm) {
     fileInputPerm.addEventListener('change', async function(e) {
@@ -1252,7 +1213,7 @@ if (fileInputPerm) {
 }
 
 
-// 직진/주차별 데이터 업데이트 
+// 직진/주차별 데이터 업데이트 로직
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
@@ -1269,8 +1230,8 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
             
-            // 번역기를 통과해 깨끗해진 헤더에서 코드 찾기
-            let code = (row['어드민상품코드'] || row['대표상품코드'] || row['상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호'])?.toString().trim();
+            // 번역기를 통과해 띄어쓰기가 완벽히 지워진 헤더에서 코드 찾기 (우선순위 정확히 배치)
+            let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호'])?.toString().trim();
             if (!code) continue; 
             
             const docRef = doc(db2, collectionName, code);
@@ -1293,7 +1254,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     }
 }
 
-// 일일 최신화 & 영구 세팅 업데이트
+// 일일 최신화 & 영구 세팅 업데이트 로직
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
@@ -1345,9 +1306,8 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
-                        let cleanK = k.replace(/\s+/g, '');
-                        if(row[cleanK] !== undefined && row[cleanK] !== null && row[cleanK].toString().trim() !== "") {
-                            cleanRawData[k] = row[cleanK].toString().trim();
+                        if(row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
+                            cleanRawData[k] = row[k].toString().trim();
                         }
                     });
 
