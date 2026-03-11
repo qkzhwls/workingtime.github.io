@@ -1103,46 +1103,32 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 💡 [핵심] 가짜 엑셀이든 뭐든 30줄을 뒤져서 진짜 제목줄을 찾아내는 하드코어 스캐너!
+// 💡 스캐너 + 띄어쓰기 다림질 모듈
 const parseAndCleanExcel = function(workbook) {
     const sheetName = workbook.SheetNames[0];
     const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
-    
     if (rawData.length === 0) return [];
 
-    let headerRowIndex = 0;
+    let headerRowIndex = -1;
     let pureHeaders = [];
-    let found = false;
 
-    // 1. 위에서부터 최대 30줄을 샅샅이 스캔하여 '진짜 제목줄' 찾기
+    // 위에서 30줄을 뒤지면서 진짜 제목줄 찾기
     for (let i = 0; i < Math.min(30, rawData.length); i++) {
         const row = rawData[i];
         if (!row) continue;
-        
-        // 모든 셀의 공백 및 특수문자를 제거하여 키워드 검사 (정확도 100%)
         const cleanRow = row.map(h => (h || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, ''));
         
-        if (cleanRow.includes('상품코드') || 
-            cleanRow.includes('어드민상품코드') || 
-            cleanRow.includes('대표상품코드') || 
-            cleanRow.includes('품목코드') || 
-            cleanRow.includes('바코드') ||
-            cleanRow.includes('로케이션')) {
-            
+        if (cleanRow.includes('상품코드') || cleanRow.includes('어드민상품코드') || 
+            cleanRow.includes('대표상품코드') || cleanRow.includes('품목코드') || 
+            cleanRow.includes('바코드') || cleanRow.includes('로케이션')) {
             headerRowIndex = i;
-            // 💡 찾은 제목줄의 모든 띄어쓰기를 다림질(제거)하여 헤더로 확정
             pureHeaders = row.map(h => (h || '').toString().replace(/\s+/g, '')); 
-            found = true;
             break;
         }
     }
 
-    // 만약 30줄을 뒤져도 못 찾았다면, 가장 기본 방식(1번째 줄) 사용
-    if (!found) {
-        pureHeaders = (rawData[0] || []).map(h => (h || '').toString().replace(/\s+/g, ''));
-    }
+    if (headerRowIndex === -1) return []; 
 
-    // 2. 찾은 제목줄 바로 밑에서부터 진짜 데이터만 쏙쏙 뽑아내기
     const parsedList = [];
     for (let i = headerRowIndex + 1; i < rawData.length; i++) {
         let rowObj = {};
@@ -1154,98 +1140,117 @@ const parseAndCleanExcel = function(workbook) {
                 if (rawData[i][j] !== "" && rawData[i][j] !== undefined) isEmpty = false;
             }
         }
-        if (!isEmpty) {
-            parsedList.push(rowObj);
-        }
+        if (!isEmpty) parsedList.push(rowObj);
     }
-    
     return parsedList;
 };
 
-// 💡 1. 직진/주차별 개별 업로드 
-const processExcelData = function(file, collectionName, inputElement) {
-    window.showLoading(`${collectionName === 'ZikjinData' ? '직진배송' : '주차별'} 데이터를 분석 및 동기화 중입니다...`);
-    setTimeout(() => {
-        const reader = new FileReader();
-        reader.onload = function(e) {
+// 💡 궁극의 무적 엑셀 리더기 (가짜 엑셀 100% 번역)
+const universalExcelReader = (file) => {
+    return new Promise((resolve, reject) => {
+        const reader1 = new FileReader();
+        reader1.onload = (e1) => {
             try {
-                const data = new Uint8Array(e.target.result);
+                // 1. 보통 엑셀 읽기 방식으로 먼저 시도
+                const data = new Uint8Array(e1.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
-                const json = parseAndCleanExcel(workbook); // 스캐너 통과
-                
+                const json = parseAndCleanExcel(workbook);
+
                 if (json.length > 0) {
-                    updateDatabaseB(json, collectionName, inputElement, false);
+                    resolve(json); 
                 } else {
-                    window.hideLoading();
-                    alert("데이터가 없습니다. (파일 내용 또는 헤더를 확인해주세요)");
-                    if(inputElement) inputElement.value='';
+                    // 2. 한글 깨짐(EUC-KR)으로 0건이 나왔다면? 자동 번역기 가동!
+                    const reader2 = new FileReader();
+                    reader2.onload = (e2) => {
+                        try {
+                            const textData = e2.target.result;
+                            const wb2 = XLSX.read(textData, {type: 'string'});
+                            const json2 = parseAndCleanExcel(wb2);
+                            resolve(json2);
+                        } catch(err2) {
+                            resolve([]); 
+                        }
+                    };
+                    reader2.readAsText(file, 'euc-kr');
                 }
-            } catch(error) { 
-                window.hideLoading(); 
-                alert('동기화 중 오류가 발생했습니다.'); 
-                console.error(error); 
-                if(inputElement) inputElement.value='';
+            } catch(error) {
+                // 에러가 났을 때도 자동 번역기 가동
+                const reader2 = new FileReader();
+                reader2.onload = (e2) => {
+                    try {
+                        const textData = e2.target.result;
+                        const wb2 = XLSX.read(textData, {type: 'string'});
+                        const json2 = parseAndCleanExcel(wb2);
+                        resolve(json2);
+                    } catch(err2) {
+                        resolve([]); 
+                    }
+                };
+                reader2.readAsText(file, 'euc-kr');
             }
         };
-        reader.readAsArrayBuffer(file);
-    }, 50);
+        reader1.readAsArrayBuffer(file);
+    });
 };
 
+
+// ✨ 1. 직진/주차별 개별 업로드 
 const fileInputZikjin = document.getElementById('excel-upload-zikjin');
 if (fileInputZikjin) {
-    fileInputZikjin.addEventListener('change', function(e) {
+    fileInputZikjin.addEventListener('change', async function(e) {
         const file = e.target.files[0]; if (!file) return;
-        processExcelData(file, 'ZikjinData', e.target);
+        window.showLoading('직진배송 데이터를 분석 및 동기화 중입니다...');
+        try {
+            const json = await universalExcelReader(file);
+            if(json.length > 0) await updateDatabaseB(json, 'ZikjinData', e.target, false);
+            else { window.hideLoading(); alert("데이터가 없습니다. (파일 형식 또는 헤더 확인)"); e.target.value=''; }
+        } catch(err) { window.hideLoading(); alert("오류 발생"); e.target.value=''; }
     });
 }
 
 const fileInputWeekly = document.getElementById('excel-upload-weekly');
 if (fileInputWeekly) {
-    fileInputWeekly.addEventListener('change', function(e) {
+    fileInputWeekly.addEventListener('change', async function(e) {
         const file = e.target.files[0]; if (!file) return;
-        processExcelData(file, 'WeeklyData', e.target);
+        window.showLoading('주차별 데이터를 분석 및 동기화 중입니다...');
+        try {
+            const json = await universalExcelReader(file);
+            if(json.length > 0) await updateDatabaseB(json, 'WeeklyData', e.target, false);
+            else { window.hideLoading(); alert("데이터가 없습니다. (파일 형식 또는 헤더 확인)"); e.target.value=''; }
+        } catch(err) { window.hideLoading(); alert("오류 발생"); e.target.value=''; }
     });
 }
 
-// 💡 2. 일일 최신화 업로드 
+// ✨ 2. 일일 최신화 업로드 
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
-    fileInputA.addEventListener('change', function(e) {
+    fileInputA.addEventListener('change', async function(e) {
         const file = e.target.files[0]; if (!file) return;
         window.showLoading('일일 재고/상품 데이터를 최신화 중입니다...');
-        setTimeout(() => {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, {type: 'array'});
-                const json = parseAndCleanExcel(workbook); // 스캐너 통과
-                if (json.length > 0) updateDatabaseA(json, 'daily');
-                else { window.hideLoading(); alert("데이터가 없습니다."); }
-            };
-            reader.readAsArrayBuffer(file);
-        }, 50);
+        try {
+            const json = await universalExcelReader(file);
+            if(json.length > 0) await updateDatabaseA(json, 'daily');
+            else { window.hideLoading(); alert("데이터가 없습니다."); }
+        } catch(err) { window.hideLoading(); alert("오류 발생"); }
+        finally { e.target.value=''; }
     });
 }
 
-// 💡 3. 도면 영구 세팅 업로드
+// ✨ 3. 도면 영구 세팅 업로드 
 const fileInputPerm = document.getElementById('excel-upload-permanent');
 if (fileInputPerm) {
-    fileInputPerm.addEventListener('change', function(e) {
+    fileInputPerm.addEventListener('change', async function(e) {
         const file = e.target.files[0]; if (!file) return;
         window.showLoading('도면(동/위치) 영구 데이터를 덮어쓰기 세팅 중입니다...');
-        setTimeout(() => {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, {type: 'array'});
-                const json = parseAndCleanExcel(workbook); // 스캐너 통과
-                if (json.length > 0) updateDatabaseA(json, 'permanent');
-                else { window.hideLoading(); alert("데이터가 없습니다."); }
-            };
-            reader.readAsArrayBuffer(file);
-        }, 50);
+        try {
+            const json = await universalExcelReader(file);
+            if(json.length > 0) await updateDatabaseA(json, 'permanent');
+            else { window.hideLoading(); alert("데이터가 없습니다."); }
+        } catch(err) { window.hideLoading(); alert("오류 발생"); }
+        finally { e.target.value=''; }
     });
 }
+
 
 // 직진/주차별 데이터 업데이트 
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
@@ -1264,7 +1269,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
             
-            // 상품코드로 인식할 수 있는 모든 경우의 수 완벽 방어
+            // 번역기를 통과해 깨끗해진 헤더에서 코드 찾기
             let code = (row['어드민상품코드'] || row['대표상품코드'] || row['상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호'])?.toString().trim();
             if (!code) continue; 
             
@@ -1419,8 +1424,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
         console.error("실패:", error); 
         alert("업데이트 중 오류가 발생했습니다. (콘솔 확인)"); 
     } finally { 
-        if(document.getElementById('excel-upload-a')) document.getElementById('excel-upload-a').value = ''; 
-        if(document.getElementById('excel-upload-permanent')) document.getElementById('excel-upload-permanent').value = ''; 
         window.hideLoading(); 
     }
 }
