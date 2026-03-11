@@ -1103,7 +1103,7 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 💡 [핵심] 상위 30줄 스캐너 + 띄어쓰기 지우개
+// 💡 [핵심] JSON 추출 및 띄어쓰기 지우개 스캐너
 const smartParseToJSON = function(workbook) {
     if (!workbook.SheetNames || workbook.SheetNames.length === 0) return [];
     
@@ -1114,25 +1114,25 @@ const smartParseToJSON = function(workbook) {
     let headerRowIndex = -1;
     let pureHeaders = [];
 
-    // 위에서부터 30줄을 뒤지면서 진짜 제목줄 찾기
+    // 위에서 30줄을 뒤지면서 진짜 제목줄 찾기
     for (let i = 0; i < Math.min(30, rawData.length); i++) {
         const row = rawData[i];
         if (!row) continue;
-        
-        // 띄어쓰기 싹 지우고 검사
-        const cleanRow = row.map(h => (h || '').toString().replace(/\s+/g, ''));
+        const cleanRow = row.map(h => (h || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, ''));
         
         if (cleanRow.includes('상품코드') || cleanRow.includes('어드민상품코드') || 
             cleanRow.includes('대표상품코드') || cleanRow.includes('품목코드') || 
             cleanRow.includes('바코드') || cleanRow.includes('로케이션')) {
-            
             headerRowIndex = i;
-            pureHeaders = cleanRow; // 띄어쓰기 지워진 진짜 헤더 저장
+            pureHeaders = row.map(h => (h || '').toString().replace(/\s+/g, '')); 
             break;
         }
     }
 
-    if (headerRowIndex === -1) return []; // 못 찾았으면 빈 배열 반환 (번역기 발동 조건)
+    if (headerRowIndex === -1) {
+        headerRowIndex = 0;
+        pureHeaders = (rawData[0] || []).map(h => (h || '').toString().replace(/\s+/g, ''));
+    } 
 
     const parsedList = [];
     for (let i = headerRowIndex + 1; i < rawData.length; i++) {
@@ -1155,37 +1155,66 @@ const smartParseToJSON = function(workbook) {
     return parsedList;
 };
 
-// 💡 무적 엑셀 리더기: 기본으로 읽고, 못 찾으면 EUC-KR로 번역해서 다시 읽음!
+// 💡 [Ver 1.9의 꽃] 가짜 HTML 엑셀을 직접 뜯어버리는 궁극의 리더기
 const universalExcelReader = (file) => {
     return new Promise((resolve) => {
-        const reader1 = new FileReader();
-        reader1.onload = (e1) => {
+        // 1. 정상적인 엑셀 파일(.xlsx)인지 먼저 확인
+        const bufferReader = new FileReader();
+        bufferReader.onload = (eBuf) => {
             let json = [];
             try {
-                const data = new Uint8Array(e1.target.result);
+                const data = new Uint8Array(eBuf.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
                 json = smartParseToJSON(workbook);
             } catch(e) {}
 
-            if (json.length > 0) {
-                resolve(json); // 한 번에 성공하면 바로 통과!
-            } else {
-                // 💡 [자동 번역기 가동] 한글이 깨져서 0건이 나왔다면 EUC-KR로 2차 스캔!
-                const reader2 = new FileReader();
-                reader2.onload = (e2) => {
-                    try {
-                        const textData = e2.target.result;
-                        // 웹페이지형 가짜 엑셀을 HTML 문자열로 인식시켜서 변환
-                        const wb2 = XLSX.read(textData, {type: 'string'});
-                        resolve(smartParseToJSON(wb2));
-                    } catch(err2) {
-                        resolve([]); 
-                    }
-                };
-                reader2.readAsText(file, 'euc-kr');
+            const isValid = json.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['품목코드'] || row['바코드']);
+            if (json.length > 0 && isValid) {
+                return resolve(json);
             }
+
+            // 2. 만약 파일이 <meta> 태그로 시작하는 HTML 가짜 엑셀이라면 브라우저가 직접 표를 분해!
+            const textReader = new FileReader();
+            textReader.onload = (eTxt) => {
+                let text = eTxt.target.result;
+                if (text.includes('<table') || text.includes('<TABLE') || text.includes('<html')) {
+                    try {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(text, 'text/html');
+                        const table = doc.querySelector('table');
+                        if (table) {
+                            const workbook = XLSX.utils.table_to_book(table, {raw: true});
+                            json = smartParseToJSON(workbook);
+                            const isValid2 = json.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['품목코드'] || row['바코드']);
+                            if (json.length > 0 && isValid2) {
+                                return resolve(json);
+                            }
+                        }
+                    } catch(err) {}
+                }
+
+                // 3. 만약 한글까지 EUC-KR로 깨져있는 옛날 시스템 파일이라면 번역해서 분해!
+                const eucReader = new FileReader();
+                eucReader.onload = (eEuc) => {
+                    text = eEuc.target.result;
+                    if (text.includes('<table') || text.includes('<TABLE') || text.includes('<html')) {
+                        try {
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(text, 'text/html');
+                            const table = doc.querySelector('table');
+                            if (table) {
+                                const workbook = XLSX.utils.table_to_book(table, {raw: true});
+                                return resolve(smartParseToJSON(workbook));
+                            }
+                        } catch(err) {}
+                    }
+                    resolve([]); // 모든 시도 실패 시 0건 반환
+                };
+                eucReader.readAsText(file, 'euc-kr');
+            };
+            textReader.readAsText(file, 'utf-8');
         };
-        reader1.readAsArrayBuffer(file);
+        bufferReader.readAsArrayBuffer(file);
     });
 };
 
