@@ -1103,20 +1103,59 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 💡 [핵심] 최신화와 동일한 단순 배열 변환 + 띄어쓰기 지우기
-const parseAndCleanExcel = function(workbook) {
-    const rawJson = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
-    return rawJson.map(item => {
-        let cleanItem = {};
-        for(let k in item) {
-            let cleanKey = (k || '').toString().replace(/\s+/g, '');
-            cleanItem[cleanKey] = item[k];
+// 💡 [핵심] 상위 30줄 스캐너 + 띄어쓰기 지우개
+const smartParseToJSON = function(workbook) {
+    if (!workbook.SheetNames || workbook.SheetNames.length === 0) return [];
+    
+    const sheetName = workbook.SheetNames[0];
+    const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+    if (rawData.length === 0) return [];
+
+    let headerRowIndex = -1;
+    let pureHeaders = [];
+
+    // 위에서부터 30줄을 뒤지면서 진짜 제목줄 찾기
+    for (let i = 0; i < Math.min(30, rawData.length); i++) {
+        const row = rawData[i];
+        if (!row) continue;
+        
+        // 띄어쓰기 싹 지우고 검사
+        const cleanRow = row.map(h => (h || '').toString().replace(/\s+/g, ''));
+        
+        if (cleanRow.includes('상품코드') || cleanRow.includes('어드민상품코드') || 
+            cleanRow.includes('대표상품코드') || cleanRow.includes('품목코드') || 
+            cleanRow.includes('바코드') || cleanRow.includes('로케이션')) {
+            
+            headerRowIndex = i;
+            pureHeaders = cleanRow; // 띄어쓰기 지워진 진짜 헤더 저장
+            break;
         }
-        return cleanItem;
-    });
+    }
+
+    if (headerRowIndex === -1) return []; // 못 찾았으면 빈 배열 반환 (번역기 발동 조건)
+
+    const parsedList = [];
+    for (let i = headerRowIndex + 1; i < rawData.length; i++) {
+        let rowObj = {};
+        let isEmpty = true;
+        const row = rawData[i] || [];
+        
+        for (let j = 0; j < pureHeaders.length; j++) {
+            const key = pureHeaders[j];
+            if (key && key !== '') {
+                let val = row[j];
+                if (val !== undefined && val !== "") {
+                    rowObj[key] = val;
+                    isEmpty = false;
+                }
+            }
+        }
+        if (!isEmpty) parsedList.push(rowObj);
+    }
+    return parsedList;
 };
 
-// 💡 무적 엑셀 리더기: 기본으로 읽고, 한글 깨지면 EUC-KR로 다시 읽음!
+// 💡 무적 엑셀 리더기: 기본으로 읽고, 못 찾으면 EUC-KR로 번역해서 다시 읽음!
 const universalExcelReader = (file) => {
     return new Promise((resolve) => {
         const reader1 = new FileReader();
@@ -1125,23 +1164,20 @@ const universalExcelReader = (file) => {
             try {
                 const data = new Uint8Array(e1.target.result);
                 const workbook = XLSX.read(data, {type: 'array'});
-                json = parseAndCleanExcel(workbook);
+                json = smartParseToJSON(workbook);
             } catch(e) {}
 
-            // 💡 한글이 깨졌는지 검사 (제대로 된 상품코드 헤더가 하나라도 살아있는지 확인)
-            const isValid = json.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['상품명'] || row['품목코드']);
-
-            if (json.length > 0 && isValid) {
-                // 정상 파일이면 즉시 통과
-                resolve(json);
+            if (json.length > 0) {
+                resolve(json); // 한 번에 성공하면 바로 통과!
             } else {
-                // 💡 [자동 엑셀 변환] 한글이 깨진 가짜 엑셀이라면 EUC-KR로 2차 스캔
+                // 💡 [자동 번역기 가동] 한글이 깨져서 0건이 나왔다면 EUC-KR로 2차 스캔!
                 const reader2 = new FileReader();
                 reader2.onload = (e2) => {
                     try {
                         const textData = e2.target.result;
+                        // 웹페이지형 가짜 엑셀을 HTML 문자열로 인식시켜서 변환
                         const wb2 = XLSX.read(textData, {type: 'string'});
-                        resolve(parseAndCleanExcel(wb2));
+                        resolve(smartParseToJSON(wb2));
                     } catch(err2) {
                         resolve([]); 
                     }
@@ -1149,7 +1185,6 @@ const universalExcelReader = (file) => {
                 reader2.readAsText(file, 'euc-kr');
             }
         };
-        // 1차 스캔은 무조건 표준 방식(array buffer)으로
         reader1.readAsArrayBuffer(file);
     });
 };
@@ -1306,8 +1341,9 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
-                        if(row[k] !== undefined && row[k] !== null && row[k].toString().trim() !== "") {
-                            cleanRawData[k] = row[k].toString().trim();
+                        let cleanK = k.replace(/\s+/g, '');
+                        if(row[cleanK] !== undefined && row[cleanK] !== null && row[cleanK].toString().trim() !== "") {
+                            cleanRawData[k] = row[cleanK].toString().trim();
                         }
                     });
 
