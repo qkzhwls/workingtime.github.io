@@ -29,8 +29,8 @@
 
         .header-actions { display: flex; gap: 10px; align-items: center; }
         
-        /* ✨ 버전 뱃지 스타일 업데이트 */
-        .version-badge { background: #e3f2fd; color: #1565c0; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #90caf9; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        /* ✨ 버전 뱃지 스타일 (초광속 버전) */
+        .version-badge { background: #fce4ec; color: #c62828; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #f8bbd0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 
         .upload-dropdown { position: relative; display: inline-block; }
         .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
@@ -203,7 +203,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 1.9 (궁극의 DOM 스캐너)</div>
+            <div class="version-badge">🚀 Ver 2.1 (초광속 스캐너)</div>
             
             <div class="upload-dropdown">
                 <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
@@ -212,18 +212,18 @@
                     <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold;">📊 기본 데이터 관리</div>
                     <label>
                         <span style="color:var(--primary);">📥 로케이션 일일 최신화 (재고업뎃)</span>
-                        <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv,.html,.htm">
+                        <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
                     
                     <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">💡 로케이션 변경 추천</div>
                     
                     <label style="border-bottom: 1px solid #eee;">
                         <span style="color:#1976d2;">📂 1-1. 직진배송 데이터 업로드</span>
-                        <input type="file" id="excel-upload-zikjin" accept=".xls,.xlsx,.csv,.html,.htm">
+                        <input type="file" id="excel-upload-zikjin" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
                     <label style="border-bottom: 1px solid #eee;">
                         <span style="color:#d32f2f;">📂 1-2. 주차별 데이터 업로드</span>
-                        <input type="file" id="excel-upload-weekly" accept=".xls,.xlsx,.csv,.html,.htm">
+                        <input type="file" id="excel-upload-weekly" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
                     
                     <div class="menu-item" style="text-align:center; color:var(--primary);" onclick="showRecommendation(); closeAllPopups();">
