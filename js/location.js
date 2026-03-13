@@ -2,7 +2,8 @@ import { initializeFirebase, loadAppConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs, query, where, documentId, deleteField } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-const { db, auth, db2 } = initializeFirebase();
+// ✨ db2는 이제 쓰지 않고 모든 데이터를 메인 db에 통합합니다.
+const { db, auth } = initializeFirebase();
 const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
@@ -99,23 +100,57 @@ window.hideLoading = function() {
     document.getElementById('loading-overlay').style.display = 'none';
 };
 
+
+// ✨ DB통합: db2 대신 db에서 '압축된 청크 데이터'를 가져와서 풀어주는 리스너
 function setupRealtimeListenerB() {
-    if (!db2) return;
-    onSnapshot(collection(db2, 'ZikjinData'), (snapshot) => {
+    onSnapshot(collection(db, 'ZikjinData'), (snapshot) => {
         zikjinData = {};
-        snapshot.forEach(docSnap => { zikjinData[docSnap.id] = docSnap.data(); });
+        snapshot.forEach(docSnap => { 
+            let data = docSnap.data();
+            if(data.dataStr) {
+                try {
+                    let chunk = JSON.parse(data.dataStr);
+                    chunk.forEach(row => {
+                        let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호']);
+                        if(code) zikjinData[code] = row;
+                    });
+                } catch(e){}
+            }
+        });
         applyFiltersAndSort();
     }, (error) => console.error("직진배송 오류:", error));
 
-    onSnapshot(collection(db2, 'WeeklyData'), (snapshot) => {
+    onSnapshot(collection(db, 'WeeklyData'), (snapshot) => {
         weeklyData = {};
-        snapshot.forEach(docSnap => { weeklyData[docSnap.id] = docSnap.data(); });
+        snapshot.forEach(docSnap => { 
+            let data = docSnap.data();
+            if(data.dataStr) {
+                try {
+                    let chunk = JSON.parse(data.dataStr);
+                    chunk.forEach(row => {
+                        let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호']);
+                        if(code) weeklyData[code] = row;
+                    });
+                } catch(e){}
+            }
+        });
         applyFiltersAndSort();
     }, (error) => console.error("주차별데이터 오류:", error));
     
-    onSnapshot(collection(db2, 'IncomingData'), (snapshot) => {
+    onSnapshot(collection(db, 'IncomingData'), (snapshot) => {
         incomingData = {};
-        snapshot.forEach(docSnap => { incomingData[docSnap.id] = docSnap.data(); });
+        snapshot.forEach(docSnap => { 
+            let data = docSnap.data();
+            if(data.dataStr) {
+                try {
+                    let chunk = JSON.parse(data.dataStr);
+                    chunk.forEach(row => {
+                        let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호']);
+                        if(code) incomingData[code] = row;
+                    });
+                } catch(e){}
+            }
+        });
         if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
         applyFiltersAndSort();
     }, (error) => console.error("입고예정데이터 오류:", error));
@@ -624,7 +659,6 @@ window.saveHeaderSettings = async () => {
     } catch(e) { console.error(e); alert("저장 실패"); }
 };
 
-
 window.openSheetModal = (e) => {
     if(e) e.stopPropagation();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -1103,10 +1137,9 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// 💡 [초광속 기술 1] HTML에서 엑셀 서식 무시하고 글자만 1초 만에 뜯어내는 함수
+// [초광속 기술 1] HTML에서 엑셀 서식 무시하고 글자만 1초 만에 뜯어내는 함수
 const extractDataFromHTML = function(htmlString) {
     const parser = new DOMParser();
-    // 셀이 병합되거나 줄바꿈된 경우를 대비해 찌꺼기 태그 정리
     const cleanHtml = htmlString.replace(/<br\s*[\/]?>/gi, " ");
     const doc = parser.parseFromString(cleanHtml, 'text/html');
     const rows = doc.querySelectorAll('tr');
@@ -1123,14 +1156,13 @@ const extractDataFromHTML = function(htmlString) {
     return rawData;
 };
 
-// 💡 [초광속 기술 2] JSON 파싱 (띄어쓰기 지우개)
+// [초광속 기술 2] JSON 파싱
 const smartParseToJSON = function(rawData) {
     if (!rawData || rawData.length === 0) return [];
 
     let headerRowIndex = -1;
     let pureHeaders = [];
 
-    // 위에서 30줄 스캔하여 제목줄 찾기
     for (let i = 0; i < Math.min(30, rawData.length); i++) {
         const row = rawData[i];
         if (!row || !Array.isArray(row)) continue;
@@ -1173,7 +1205,7 @@ const smartParseToJSON = function(rawData) {
     return parsedList;
 };
 
-// 💡 [초광속 기술 3] 멈춤 없는 무적 엑셀 리더기 (1~2초 컷 보장)
+// [초광속 기술 3] 무적 엑셀 리더기
 const universalExcelReader = (file) => {
     return new Promise((resolve) => {
         const bufferReader = new FileReader();
@@ -1191,13 +1223,12 @@ const universalExcelReader = (file) => {
                 return resolve(json);
             }
 
-            // 1시간 멈춤의 원인이었던 무거운 라이브러리를 버리고 직접 텍스트 추출 (UTF-8)
             const textReader = new FileReader();
             textReader.onload = (eTxt) => {
                 let text = eTxt.target.result;
                 if (text.includes('<table') || text.includes('<TABLE') || text.includes('<html') || text.includes('<meta')) {
                     try {
-                        const rawData = extractDataFromHTML(text); // 0.1초 컷
+                        const rawData = extractDataFromHTML(text); 
                         const utfJson = smartParseToJSON(rawData);
                         const isValidUtf = utfJson.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['품목코드'] || row['바코드']);
                         if (utfJson.length > 0 && isValidUtf) {
@@ -1206,12 +1237,11 @@ const universalExcelReader = (file) => {
                     } catch(err) {}
                 }
 
-                // 그래도 안되면 EUC-KR로 텍스트 추출
                 const eucReader = new FileReader();
                 eucReader.onload = (eEuc) => {
                     try {
                         let eucText = eEuc.target.result;
-                        const rawData = extractDataFromHTML(eucText); // 0.1초 컷
+                        const rawData = extractDataFromHTML(eucText); 
                         resolve(smartParseToJSON(rawData));
                     } catch(err) {
                         resolve([]);
@@ -1225,13 +1255,12 @@ const universalExcelReader = (file) => {
     });
 };
 
-
 // ✨ 1. 직진/주차별 개별 업로드 
 const fileInputZikjin = document.getElementById('excel-upload-zikjin');
 if (fileInputZikjin) {
     fileInputZikjin.addEventListener('change', async function(e) {
         const file = e.target.files[0]; if (!file) return;
-        window.showLoading('직진배송 데이터를 1초 만에 분석 중입니다...');
+        window.showLoading('직진배송 데이터를 분석 중입니다...');
         try {
             const json = await universalExcelReader(file);
             if(json.length > 0) await updateDatabaseB(json, 'ZikjinData', e.target, false);
@@ -1244,7 +1273,7 @@ const fileInputWeekly = document.getElementById('excel-upload-weekly');
 if (fileInputWeekly) {
     fileInputWeekly.addEventListener('change', async function(e) {
         const file = e.target.files[0]; if (!file) return;
-        window.showLoading('주차별 데이터를 1초 만에 분석 중입니다...');
+        window.showLoading('주차별 데이터를 분석 중입니다...');
         try {
             const json = await universalExcelReader(file);
             if(json.length > 0) await updateDatabaseB(json, 'WeeklyData', e.target, false);
@@ -1253,67 +1282,40 @@ if (fileInputWeekly) {
     });
 }
 
-// ✨ 2. 일일 최신화 업로드 
-const fileInputA = document.getElementById('excel-upload-a');
-if (fileInputA) {
-    fileInputA.addEventListener('change', async function(e) {
-        const file = e.target.files[0]; if (!file) return;
-        window.showLoading('일일 재고/상품 데이터를 최신화 중입니다...');
-        try {
-            const json = await universalExcelReader(file);
-            if(json.length > 0) await updateDatabaseA(json, 'daily');
-            else { window.hideLoading(); alert("데이터가 없습니다."); }
-        } catch(err) { window.hideLoading(); alert("오류 발생"); }
-        finally { e.target.value=''; }
-    });
-}
 
-// ✨ 3. 도면 영구 세팅 업로드 
-const fileInputPerm = document.getElementById('excel-upload-permanent');
-if (fileInputPerm) {
-    fileInputPerm.addEventListener('change', async function(e) {
-        const file = e.target.files[0]; if (!file) return;
-        window.showLoading('도면(동/위치) 영구 데이터를 덮어쓰기 세팅 중입니다...');
-        try {
-            const json = await universalExcelReader(file);
-            if(json.length > 0) await updateDatabaseA(json, 'permanent');
-            else { window.hideLoading(); alert("데이터가 없습니다."); }
-        } catch(err) { window.hideLoading(); alert("오류 발생"); }
-        finally { e.target.value=''; }
-    });
-}
-
-
-// 직진/주차별 데이터 업데이트 로직
+// ✨ 💡 [가장 중요한 변경점] 할당량 방어: DB 압축 패킹 업로드
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
-        const querySnapshot = await getDocs(collection(db2, collectionName));
-        const docsArray = querySnapshot.docs;
-        for (let i = 0; i < docsArray.length; i += 400) {
-            const delBatch = writeBatch(db2);
-            docsArray.slice(i, i + 400).forEach(d => delBatch.delete(d.ref));
-            await delBatch.commit();
-        }
+        // 기존 청크 데이터 청소
+        const querySnapshot = await getDocs(collection(db, collectionName));
+        let delBatch = writeBatch(db);
+        querySnapshot.docs.forEach(d => delBatch.delete(d.ref));
+        await delBatch.commit();
         
-        let batch = writeBatch(db2); let updateCount = 0; let batchCount = 0;
-        
+        // 상품코드가 있는 진짜 데이터만 걸러내기
+        const validRows = [];
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
-            
-            // 번역기를 통과해 띄어쓰기가 완벽히 지워진 헤더에서 코드 찾기
             let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호'])?.toString().trim();
-            if (!code) continue; 
-            
-            const docRef = doc(db2, collectionName, code);
-            batch.set(docRef, { ...row, updatedAt: new Date() }, { merge: true });
-            
-            updateCount++; batchCount++;
-            if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db2); batchCount = 0; }
+            if (code) validRows.push(row); 
+        }
+
+        // 1500개씩 진공 압축(Stringify)해서 DB에 쑤셔넣기
+        let batch = writeBatch(db); 
+        const CHUNK_SIZE = 1500;
+        let chunkCount = 0;
+
+        for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
+            const chunk = validRows.slice(i, i + CHUNK_SIZE);
+            const docRef = doc(db, collectionName, `CHUNK_${chunkCount}`);
+            batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            chunkCount++;
         }
         
-        if (batchCount > 0) await batch.commit();
-        if (!silent) alert(`✅ [${label}] 초광속 업데이트 완료!\n총 ${updateCount}건이 완벽하게 반영되었습니다.`);
+        if (chunkCount > 0) await batch.commit();
+        
+        if (!silent) alert(`✅ [${label}] 압축 저장 완료!\n총 ${validRows.length}건이 단 ${chunkCount}번의 쓰기로 반영되었습니다.`);
         
     } catch (error) { 
         console.error(`${label} 실패:`, error); 
@@ -1447,7 +1449,7 @@ async function updateDatabaseA(rows, mode = 'daily') {
         if (mode === 'permanent') {
             alert(`✅ 완료! ${updateCount}개 로케이션의 랙 구조(동/위치) 영구 세팅이 완료되었습니다.`);
         } else {
-            let msg = `✅ 초광속 완료! ${updateCount}개 상품/재고가 완벽 갱신되었습니다.`;
+            let msg = `✅ 완료! ${updateCount}개 상품/재고 최신화가 에러 없이 완벽 갱신되었습니다.`;
             if(skipCount > 0) msg += `\n(※ 기존 도면에 없는 낯선 로케이션 ${skipCount}개는 안전하게 무시되었습니다.)`;
             alert(msg);
         }
@@ -1456,8 +1458,40 @@ async function updateDatabaseA(rows, mode = 'daily') {
         console.error("실패:", error); 
         alert("업데이트 중 오류가 발생했습니다. (콘솔 확인)"); 
     } finally { 
+        if(document.getElementById('excel-upload-a')) document.getElementById('excel-upload-a').value = ''; 
+        if(document.getElementById('excel-upload-permanent')) document.getElementById('excel-upload-permanent').value = ''; 
         window.hideLoading(); 
     }
+}
+
+// ✨ 일일 최신화 업로드 
+const fileInputA = document.getElementById('excel-upload-a');
+if (fileInputA) {
+    fileInputA.addEventListener('change', async function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        window.showLoading('일일 재고/상품 데이터를 최신화 중입니다...');
+        try {
+            const json = await universalExcelReader(file);
+            if(json.length > 0) await updateDatabaseA(json, 'daily');
+            else { window.hideLoading(); alert("데이터가 없습니다."); }
+        } catch(err) { window.hideLoading(); alert("오류 발생"); }
+        finally { e.target.value=''; }
+    });
+}
+
+// ✨ 도면 영구 세팅 업로드 
+const fileInputPerm = document.getElementById('excel-upload-permanent');
+if (fileInputPerm) {
+    fileInputPerm.addEventListener('change', async function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        window.showLoading('도면(동/위치) 영구 데이터를 덮어쓰기 세팅 중입니다...');
+        try {
+            const json = await universalExcelReader(file);
+            if(json.length > 0) await updateDatabaseA(json, 'permanent');
+            else { window.hideLoading(); alert("데이터가 없습니다."); }
+        } catch(err) { window.hideLoading(); alert("오류 발생"); }
+        finally { e.target.value=''; }
+    });
 }
 
 window.copyLocationToClipboard = async (event, locId) => {
