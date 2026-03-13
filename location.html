@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3층 로케이션 관리 시스템 (듀얼 DB)</title>
+    <title>3층 로케이션 관리 시스템 (통합 DB)</title>
     <style>
         :root { --primary: #3d5afe; --bg: #f8f9fa; --card: #ffffff; }
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
@@ -29,8 +29,8 @@
 
         .header-actions { display: flex; gap: 10px; align-items: center; }
         
-        /* ✨ 버전 뱃지 스타일 (초광속 버전) */
-        .version-badge { background: #fce4ec; color: #c62828; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #f8bbd0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        /* ✨ 버전 뱃지 스타일 업데이트 */
+        .version-badge { background: #e1bee7; color: #880e4f; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #f48fb1; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 
         .upload-dropdown { position: relative; display: inline-block; }
         .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
@@ -203,7 +203,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 2.1 (초광속 스캐너)</div>
+            <div class="version-badge">🚀 Ver 2.2 (DB통합 & 할당량 방어)</div>
             
             <div class="upload-dropdown">
                 <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
