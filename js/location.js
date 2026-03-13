@@ -2,7 +2,6 @@ import { initializeFirebase, loadAppConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs, query, where, documentId, deleteField } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-// ✨ db2는 이제 쓰지 않고 모든 데이터를 메인 db에 통합합니다.
 const { db, auth } = initializeFirebase();
 const LOC_COLLECTION = 'Locations';
 
@@ -29,10 +28,10 @@ window.excelHeaders = [];
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
-// ✨ 기본 비율 및 우선순위 세팅
+// ✨ 파이어베이스 규칙을 위해 zones를 다중 배열에서 Object({0:[], 1:[]...}) 구조로 변경
 window.recommendRatios = { zikjin: 50, weekly: 30, trend: 20 };
 window.recommendPriorities = {
-    zones: [ ['★'], ['A','B','C','D','E','F','G','H','I'], ['Z'], ['L','M','N','O','P','Q','R','S','T'] ],
+    zones: { 0: ['★'], 1: ['A','B','C','D','E','F','G','H','I'], 2: ['Z'], 3: ['L','M','N','O','P','Q','R','S','T'] },
     dongs: ['1', '2', '3', '4', '5', '6'],
     poses: ['2', '3', '4', '1', '5']
 };
@@ -101,7 +100,6 @@ window.hideLoading = function() {
 };
 
 
-// ✨ DB통합: db2 대신 db에서 '압축된 청크 데이터'를 가져와서 풀어주는 리스너
 function setupRealtimeListenerB() {
     onSnapshot(collection(db, 'ZikjinData'), (snapshot) => {
         zikjinData = {};
@@ -380,7 +378,7 @@ window.openRatioModal = function(e) {
     document.getElementById('mod-ratio-trend').value = window.recommendRatios.trend;
     
     const allAlphabets = ['★', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
-    const priZones = window.recommendPriorities.zones || [[], [], [], []];
+    const priZones = window.recommendPriorities.zones || {0:[], 1:[], 2:[], 3:[]};
     for(let i=0; i<=3; i++) document.getElementById(`pz-${i}`).innerHTML = '';
     document.getElementById('pz-none').innerHTML = '';
 
@@ -426,10 +424,11 @@ window.saveMasterSettingsModal = async function() {
     const t = Number(document.getElementById('mod-ratio-trend').value) || 0;
     if (z + w + t !== 100) return alert(`🚨 점수 반영 비율의 합계가 100%가 되어야 합니다.\n(현재 합계: ${z + w + t}%)`);
     
-    let newZones = [];
+    // ✨ [에러 수정] 다중 배열 저장을 막는 파이어베이스 규칙을 위해 배열 대신 Object (폴더) 형태로 담습니다.
+    let newZones = {};
     for(let i=0; i<=3; i++){
         const blocks = document.getElementById(`pz-${i}`).querySelectorAll('.puzzle-block');
-        newZones.push(Array.from(blocks).map(b => b.innerText.trim()));
+        newZones[i] = Array.from(blocks).map(b => b.innerText.trim());
     }
 
     const newDongs = Array.from(document.getElementById('sort-dongs').querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
@@ -503,8 +502,10 @@ window.showRecommendation = function() {
 
         const getZoneRank = (locId) => {
             const prefix = (locId || '').charAt(0).toUpperCase();
-            for(let i=0; i < window.recommendPriorities.zones.length; i++) {
-                if(window.recommendPriorities.zones[i].includes(prefix)) return i;
+            // ✨ [에러 수정 대응] Object로 변경된 형식을 지원하도록 수정
+            const zones = window.recommendPriorities.zones || {};
+            for(let i=0; i<=3; i++) {
+                if(zones[i] && zones[i].includes(prefix)) return i;
             }
             return 99; 
         };
@@ -1137,7 +1138,6 @@ function renderTable(data) {
     tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
 }
 
-// [초광속 기술 1] HTML에서 엑셀 서식 무시하고 글자만 1초 만에 뜯어내는 함수
 const extractDataFromHTML = function(htmlString) {
     const parser = new DOMParser();
     const cleanHtml = htmlString.replace(/<br\s*[\/]?>/gi, " ");
@@ -1156,7 +1156,6 @@ const extractDataFromHTML = function(htmlString) {
     return rawData;
 };
 
-// [초광속 기술 2] JSON 파싱
 const smartParseToJSON = function(rawData) {
     if (!rawData || rawData.length === 0) return [];
 
@@ -1205,7 +1204,6 @@ const smartParseToJSON = function(rawData) {
     return parsedList;
 };
 
-// [초광속 기술 3] 무적 엑셀 리더기
 const universalExcelReader = (file) => {
     return new Promise((resolve) => {
         const bufferReader = new FileReader();
@@ -1255,7 +1253,6 @@ const universalExcelReader = (file) => {
     });
 };
 
-// ✨ 1. 직진/주차별 개별 업로드 
 const fileInputZikjin = document.getElementById('excel-upload-zikjin');
 if (fileInputZikjin) {
     fileInputZikjin.addEventListener('change', async function(e) {
@@ -1282,18 +1279,42 @@ if (fileInputWeekly) {
     });
 }
 
+const fileInputA = document.getElementById('excel-upload-a');
+if (fileInputA) {
+    fileInputA.addEventListener('change', async function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        window.showLoading('일일 재고/상품 데이터를 최신화 중입니다...');
+        try {
+            const json = await universalExcelReader(file);
+            if(json.length > 0) await updateDatabaseA(json, 'daily');
+            else { window.hideLoading(); alert("데이터가 없습니다."); }
+        } catch(err) { window.hideLoading(); alert("오류 발생"); }
+        finally { e.target.value=''; }
+    });
+}
 
-// ✨ 💡 [가장 중요한 변경점] 할당량 방어: DB 압축 패킹 업로드
+const fileInputPerm = document.getElementById('excel-upload-permanent');
+if (fileInputPerm) {
+    fileInputPerm.addEventListener('change', async function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        window.showLoading('도면(동/위치) 영구 데이터를 덮어쓰기 세팅 중입니다...');
+        try {
+            const json = await universalExcelReader(file);
+            if(json.length > 0) await updateDatabaseA(json, 'permanent');
+            else { window.hideLoading(); alert("데이터가 없습니다."); }
+        } catch(err) { window.hideLoading(); alert("오류 발생"); }
+        finally { e.target.value=''; }
+    });
+}
+
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
-        // 기존 청크 데이터 청소
         const querySnapshot = await getDocs(collection(db, collectionName));
         let delBatch = writeBatch(db);
         querySnapshot.docs.forEach(d => delBatch.delete(d.ref));
         await delBatch.commit();
         
-        // 상품코드가 있는 진짜 데이터만 걸러내기
         const validRows = [];
         for (let i = 0; i < rows.length; i++) {
             const row = rows[i];
@@ -1301,7 +1322,6 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
             if (code) validRows.push(row); 
         }
 
-        // 1500개씩 진공 압축(Stringify)해서 DB에 쑤셔넣기
         let batch = writeBatch(db); 
         const CHUNK_SIZE = 1500;
         let chunkCount = 0;
@@ -1327,7 +1347,6 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     }
 }
 
-// 일일 최신화 & 영구 세팅 업데이트 로직
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
@@ -1462,36 +1481,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
         if(document.getElementById('excel-upload-permanent')) document.getElementById('excel-upload-permanent').value = ''; 
         window.hideLoading(); 
     }
-}
-
-// ✨ 일일 최신화 업로드 
-const fileInputA = document.getElementById('excel-upload-a');
-if (fileInputA) {
-    fileInputA.addEventListener('change', async function(e) {
-        const file = e.target.files[0]; if (!file) return;
-        window.showLoading('일일 재고/상품 데이터를 최신화 중입니다...');
-        try {
-            const json = await universalExcelReader(file);
-            if(json.length > 0) await updateDatabaseA(json, 'daily');
-            else { window.hideLoading(); alert("데이터가 없습니다."); }
-        } catch(err) { window.hideLoading(); alert("오류 발생"); }
-        finally { e.target.value=''; }
-    });
-}
-
-// ✨ 도면 영구 세팅 업로드 
-const fileInputPerm = document.getElementById('excel-upload-permanent');
-if (fileInputPerm) {
-    fileInputPerm.addEventListener('change', async function(e) {
-        const file = e.target.files[0]; if (!file) return;
-        window.showLoading('도면(동/위치) 영구 데이터를 덮어쓰기 세팅 중입니다...');
-        try {
-            const json = await universalExcelReader(file);
-            if(json.length > 0) await updateDatabaseA(json, 'permanent');
-            else { window.hideLoading(); alert("데이터가 없습니다."); }
-        } catch(err) { window.hideLoading(); alert("오류 발생"); }
-        finally { e.target.value=''; }
-    });
 }
 
 window.copyLocationToClipboard = async (event, locId) => {
