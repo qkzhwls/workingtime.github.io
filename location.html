@@ -30,7 +30,7 @@
         .header-actions { display: flex; gap: 10px; align-items: center; }
         
         /* ✨ 버전 뱃지 스타일 업데이트 */
-        .version-badge { background: #e8eaf6; color: #3f51b5; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #c5cae9; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .version-badge { background: #e8f5e9; color: #2e7d32; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #a5d6a7; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 
         .upload-dropdown { position: relative; display: inline-block; }
         .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
@@ -203,7 +203,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 2.3 (설정 저장 안정화)</div>
+            <div class="version-badge">🚀 Ver 2.4 (엑셀 다운로드 추가)</div>
             
             <div class="upload-dropdown">
                 <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
@@ -358,7 +358,7 @@
             <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
                 ※ 선지정으로 찜해둔 자리는 물건이 없더라도 이 추천 목록에서 완벽히 보호(제외)됩니다.
             </div>
-            <div class="modal-body" style="max-height: 60vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+            <div class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
                     <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <tr>
@@ -372,9 +372,12 @@
                     <tbody id="recommend-tbody"></tbody>
                 </table>
             </div>
-            <div class="modal-footer">
+            
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+                <button onclick="downloadRecommendationExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📥 엑셀 다운로드</button>
                 <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="closeRecommendModal()">닫기</button>
             </div>
+            
         </div>
     </div>
 
