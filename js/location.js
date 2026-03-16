@@ -28,7 +28,9 @@ window.excelHeaders = [];
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
-// ✨ 파이어베이스 규칙을 위해 zones를 다중 배열에서 Object({0:[], 1:[]...}) 구조로 변경
+// ✨ 추천 리스트를 엑셀로 내보내기 위해 임시 저장할 글로벌 변수
+window.currentRecommendations = [];
+
 window.recommendRatios = { zikjin: 50, weekly: 30, trend: 20 };
 window.recommendPriorities = {
     zones: { 0: ['★'], 1: ['A','B','C','D','E','F','G','H','I'], 2: ['Z'], 3: ['L','M','N','O','P','Q','R','S','T'] },
@@ -424,7 +426,6 @@ window.saveMasterSettingsModal = async function() {
     const t = Number(document.getElementById('mod-ratio-trend').value) || 0;
     if (z + w + t !== 100) return alert(`🚨 점수 반영 비율의 합계가 100%가 되어야 합니다.\n(현재 합계: ${z + w + t}%)`);
     
-    // ✨ [에러 수정] 다중 배열 저장을 막는 파이어베이스 규칙을 위해 배열 대신 Object (폴더) 형태로 담습니다.
     let newZones = {};
     for(let i=0; i<=3; i++){
         const blocks = document.getElementById(`pz-${i}`).querySelectorAll('.puzzle-block');
@@ -457,6 +458,8 @@ window.showRecommendation = function() {
     window.showLoading("💡 우선순위 알고리즘을 분석하여 최적의 로케이션을 매칭 중입니다...");
 
     setTimeout(() => {
+        window.currentRecommendations = []; // ✨ 엑셀 다운로드용 데이터 초기화
+        
         const allCodes = new Set([...Object.keys(zikjinData), ...Object.keys(weeklyData)]);
         let maxZQty = 0; let maxWQty = 0; let maxTrend = 0;
         let itemDataList = [];
@@ -502,7 +505,6 @@ window.showRecommendation = function() {
 
         const getZoneRank = (locId) => {
             const prefix = (locId || '').charAt(0).toUpperCase();
-            // ✨ [에러 수정 대응] Object로 변경된 형식을 지원하도록 수정
             const zones = window.recommendPriorities.zones || {};
             for(let i=0; i<=3; i++) {
                 if(zones[i] && zones[i].includes(prefix)) return i;
@@ -553,6 +555,28 @@ window.showRecommendation = function() {
                 }
 
                 usedEmptyIndices.add(j);
+                
+                // ✨ 엑셀 다운로드용 데이터 계산 및 적재 (이동수량: 정상재고 - 2층재고)
+                let totalStock = 0;
+                let totalStock2f = 0;
+                let itemOption = '';
+                currentLocsObjs.forEach(d => {
+                    totalStock += Number(d.stock || 0);
+                    totalStock2f += Number(d.stock2f || 0);
+                    if (d.option && !itemOption) itemOption = d.option; 
+                });
+                
+                let moveQty = totalStock - totalStock2f;
+                
+                window.currentRecommendations.push({
+                    moveQty: moveQty,
+                    currentLocs: item.currentLocs,
+                    targetLoc: eLoc.id,
+                    name: item.name,
+                    option: itemOption,
+                    code: item.code
+                });
+
                 html += `
                     <tr>
                         <td style="color:var(--primary); font-weight:bold; border-left:none;">${displayRank}위 <br><span style="font-size:11px; color:#e65100;">(${item.score.toFixed(1)}점)</span></td>
@@ -577,6 +601,45 @@ window.showRecommendation = function() {
         document.getElementById('recommend-modal').style.display = 'flex';
 
     }, 500); 
+};
+
+// ✨ [엑셀 다운로드 함수]
+window.downloadRecommendationExcel = function() {
+    if (!window.currentRecommendations || window.currentRecommendations.length === 0) {
+        alert("다운로드할 추천 데이터가 없습니다.");
+        return;
+    }
+
+    const excelData = window.currentRecommendations.map(item => {
+        return {
+            "이동수량": item.moveQty,
+            "현재로케이션": item.currentLocs,
+            "변경로케이션": item.targetLoc,
+            "상품명": item.name,
+            "옵션": item.option,
+            "상품코드": item.code
+        };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    
+    // 열 너비 조절 (가독성 향상)
+    ws['!cols'] = [
+        { wch: 10 }, // 이동수량
+        { wch: 20 }, // 현재로케이션
+        { wch: 15 }, // 변경로케이션
+        { wch: 40 }, // 상품명
+        { wch: 25 }, // 옵션
+        { wch: 15 }  // 상품코드
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "로케이션변경추천");
+    
+    const today = new Date();
+    const dateString = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+    
+    XLSX.writeFile(wb, `로케이션변경추천리스트_${dateString}.xlsx`);
 };
 
 function renderTableHeader() {
