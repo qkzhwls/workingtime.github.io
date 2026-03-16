@@ -28,7 +28,7 @@ window.excelHeaders = [];
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
-// ✨ 추천 리스트를 엑셀로 내보내기 위해 임시 저장할 글로벌 변수
+// ✨ 추천 리스트 엑셀 다운로드를 위한 변수
 window.currentRecommendations = [];
 
 window.recommendRatios = { zikjin: 50, weekly: 30, trend: 20 };
@@ -100,7 +100,6 @@ window.showLoading = function(text) {
 window.hideLoading = function() {
     document.getElementById('loading-overlay').style.display = 'none';
 };
-
 
 function setupRealtimeListenerB() {
     onSnapshot(collection(db, 'ZikjinData'), (snapshot) => {
@@ -458,7 +457,7 @@ window.showRecommendation = function() {
     window.showLoading("💡 우선순위 알고리즘을 분석하여 최적의 로케이션을 매칭 중입니다...");
 
     setTimeout(() => {
-        window.currentRecommendations = []; // ✨ 엑셀 다운로드용 데이터 초기화
+        window.currentRecommendations = [];
         
         const allCodes = new Set([...Object.keys(zikjinData), ...Object.keys(weeklyData)]);
         let maxZQty = 0; let maxWQty = 0; let maxTrend = 0;
@@ -556,16 +555,26 @@ window.showRecommendation = function() {
 
                 usedEmptyIndices.add(j);
                 
-                // ✨ 엑셀 다운로드용 데이터 계산 및 적재 (이동수량: 정상재고 - 2층재고)
                 let totalStock = 0;
                 let totalStock2f = 0;
                 let itemOption = '';
+                
                 currentLocsObjs.forEach(d => {
                     totalStock += Number(d.stock || 0);
                     totalStock2f += Number(d.stock2f || 0);
                     if (d.option && !itemOption) itemOption = d.option; 
                 });
                 
+                // ✨ [옵션 자동 탐색] 최신화 파일에 옵션이 비어있다면, 다른 업로드 파일들을 싹 뒤져서 채워 넣음
+                if (!itemOption || itemOption.trim() === '') {
+                    let fallbackOption = '';
+                    if (zikjinData[item.code] && zikjinData[item.code]['옵션']) fallbackOption = zikjinData[item.code]['옵션'];
+                    else if (weeklyData[item.code] && weeklyData[item.code]['옵션']) fallbackOption = weeklyData[item.code]['옵션'];
+                    else if (incomingData[item.code] && incomingData[item.code]['옵션']) fallbackOption = incomingData[item.code]['옵션'];
+                    
+                    itemOption = fallbackOption;
+                }
+
                 let moveQty = totalStock - totalStock2f;
                 
                 window.currentRecommendations.push({
@@ -603,7 +612,7 @@ window.showRecommendation = function() {
     }, 500); 
 };
 
-// ✨ [엑셀 다운로드 함수]
+// ✨ [엑셀 다운로드 함수] 상품코드 6열 추가 완료
 window.downloadRecommendationExcel = function() {
     if (!window.currentRecommendations || window.currentRecommendations.length === 0) {
         alert("다운로드할 추천 데이터가 없습니다.");
@@ -623,14 +632,13 @@ window.downloadRecommendationExcel = function() {
 
     const ws = XLSX.utils.json_to_sheet(excelData);
     
-    // 열 너비 조절 (가독성 향상)
     ws['!cols'] = [
-        { wch: 10 }, // 이동수량
-        { wch: 20 }, // 현재로케이션
-        { wch: 15 }, // 변경로케이션
-        { wch: 40 }, // 상품명
-        { wch: 25 }, // 옵션
-        { wch: 15 }  // 상품코드
+        { wch: 10 }, // 1열: 이동수량
+        { wch: 20 }, // 2열: 현재로케이션
+        { wch: 15 }, // 3열: 변경로케이션
+        { wch: 40 }, // 4열: 상품명
+        { wch: 25 }, // 5열: 옵션
+        { wch: 15 }  // 6열: 상품코드
     ];
 
     const wb = XLSX.utils.book_new();
