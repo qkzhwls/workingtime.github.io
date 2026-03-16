@@ -28,7 +28,6 @@ window.excelHeaders = [];
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
-// ✨ 추천 리스트 엑셀 다운로드를 위한 변수
 window.currentRecommendations = [];
 
 window.recommendRatios = { zikjin: 50, weekly: 30, trend: 20 };
@@ -565,7 +564,6 @@ window.showRecommendation = function() {
                     if (d.option && !itemOption) itemOption = d.option; 
                 });
                 
-                // ✨ [옵션 자동 탐색] 최신화 파일에 옵션이 비어있다면, 다른 업로드 파일들을 싹 뒤져서 채워 넣음
                 if (!itemOption || itemOption.trim() === '') {
                     let fallbackOption = '';
                     if (zikjinData[item.code] && zikjinData[item.code]['옵션']) fallbackOption = zikjinData[item.code]['옵션'];
@@ -612,7 +610,6 @@ window.showRecommendation = function() {
     }, 500); 
 };
 
-// ✨ [엑셀 다운로드 함수] 상품코드 6열 추가 완료
 window.downloadRecommendationExcel = function() {
     if (!window.currentRecommendations || window.currentRecommendations.length === 0) {
         alert("다운로드할 추천 데이터가 없습니다.");
@@ -633,12 +630,12 @@ window.downloadRecommendationExcel = function() {
     const ws = XLSX.utils.json_to_sheet(excelData);
     
     ws['!cols'] = [
-        { wch: 10 }, // 1열: 이동수량
-        { wch: 20 }, // 2열: 현재로케이션
-        { wch: 15 }, // 3열: 변경로케이션
-        { wch: 40 }, // 4열: 상품명
-        { wch: 25 }, // 5열: 옵션
-        { wch: 15 }  // 6열: 상품코드
+        { wch: 10 }, 
+        { wch: 20 }, 
+        { wch: 15 }, 
+        { wch: 40 }, 
+        { wch: 25 }, 
+        { wch: 15 }  
     ];
 
     const wb = XLSX.utils.book_new();
@@ -1350,6 +1347,7 @@ if (fileInputWeekly) {
     });
 }
 
+// ✨ [수정] 일일 최신화 업로드
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', async function(e) {
@@ -1364,6 +1362,7 @@ if (fileInputA) {
     });
 }
 
+// ✨ [수정] 도면 영구 세팅 업로드
 const fileInputPerm = document.getElementById('excel-upload-permanent');
 if (fileInputPerm) {
     fileInputPerm.addEventListener('change', async function(e) {
@@ -1418,6 +1417,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     }
 }
 
+// ✨ [핵심 수정 로직] 일일 최신화(daily) 실행 시, 전체 로케이션의 기존 상품정보를 클린(물청소) 처리합니다.
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
@@ -1442,6 +1442,36 @@ async function updateDatabaseA(rows, mode = 'daily') {
         let existingLocMap = {};
         originalData.forEach(d => { existingLocMap[d.id] = d; });
         
+        // ✨ [유령재고 클린 업데이트 로직] 
+        // daily 모드일 경우 기존 데이터의 골격(동, 위치, 예약 등)은 살리고 상품 정보만 빈칸으로 싹 초기화합니다.
+        if (mode === 'daily') {
+            originalData.forEach(loc => {
+                const zoneDocId = getZoneDocId(loc.id);
+                if (!zoneUpdates[zoneDocId]) zoneUpdates[zoneDocId] = {};
+                
+                zoneUpdates[zoneDocId][loc.id] = {
+                    dong: loc.dong || '',
+                    pos: loc.pos || '',
+                    code: '',
+                    name: '',
+                    option: '',
+                    stock: '0',
+                    stock2f: '0',
+                    reserved: loc.reserved || false,
+                    reservedAt: loc.reservedAt || 0,
+                    reservedBy: loc.reservedBy || '',
+                    updatedAt: new Date(),
+                    rawDataStr: '{}',
+                    rawData: deleteField(),
+                    preAssigned: loc.preAssigned || false,
+                    preAssignedCode: loc.preAssignedCode || '',
+                    preAssignedName: loc.preAssignedName || '',
+                    preAssignedQty: loc.preAssignedQty || ''
+                };
+            });
+        }
+        
+        // 엑셀에서 추출한 새 데이터를 초기화된 맵에 덮어씌웁니다.
         for (let i = 0; i < totalRows; i++) {
             const row = rows[i]; 
 
@@ -1456,7 +1486,7 @@ async function updateDatabaseA(rows, mode = 'daily') {
                 } else { cleanLocId = rawLoc; }
                 
                 if (cleanLocId) { 
-                    if (mode === 'daily' && !existingLocMap[cleanLocId]) {
+                    if (!existingLocMap[cleanLocId]) {
                         skipCount++;
                         continue; 
                     }
@@ -1475,42 +1505,47 @@ async function updateDatabaseA(rows, mode = 'daily') {
                         }
                     });
 
-                    let updateData = { 
-                        reserved: false, 
-                        reservedAt: 0, 
-                        reservedBy: '', 
-                        updatedAt: new Date(), 
-                        rawDataStr: JSON.stringify(cleanRawData),
-                        rawData: deleteField() 
+                    // 이미 빈칸 처리된 데이터베이스 객체를 불러옵니다 (permanent일 땐 기존값 유지)
+                    let updateData = zoneUpdates[zoneDocId][cleanLocId] || { 
+                        dong: existingData.dong || '',
+                        pos: existingData.pos || '',
+                        reserved: existingData.reserved || false, 
+                        reservedAt: existingData.reservedAt || 0, 
+                        reservedBy: existingData.reservedBy || '', 
+                        preAssigned: existingData.preAssigned || false,
+                        preAssignedCode: existingData.preAssignedCode || '',
+                        preAssignedName: existingData.preAssignedName || '',
+                        preAssignedQty: existingData.preAssignedQty || ''
                     };
+
+                    updateData.updatedAt = new Date();
+                    updateData.rawDataStr = JSON.stringify(cleanRawData);
+                    updateData.rawData = deleteField();
                     
                     if (mode === 'permanent') {
                         updateData.dong = ('동' in row || 'dong' in row) ? (row['동'] || row['dong'] || '').toString().trim() : (existingData.dong || '');
                         updateData.pos = ('위치' in row || 'pos' in row) ? (row['위치'] || row['pos'] || '').toString().trim() : (existingData.pos || '');
+                        // 영구 세팅일 때는 상품 정보를 덮어쓰지 않고 기존 데이터 유지
+                        updateData.code = existingData.code || '';
+                        updateData.name = existingData.name || '';
+                        updateData.option = existingData.option || '';
+                        updateData.stock = existingData.stock || '0';
+                        updateData.stock2f = existingData.stock2f || '0';
                     } else {
-                        updateData.dong = existingData.dong || '';
-                        updateData.pos = existingData.pos || '';
-                    }
-                    
-                    if (finalCode && finalCode.trim() !== '') {
-                        updateData.preAssigned = false;
-                        updateData.preAssignedCode = '';
-                        updateData.preAssignedName = '';
-                        updateData.preAssignedQty = '';
-                    } else {
-                        if(existingData.preAssigned) {
-                            updateData.preAssigned = true;
-                            updateData.preAssignedCode = existingData.preAssignedCode || '';
-                            updateData.preAssignedName = existingData.preAssignedName || '';
-                            updateData.preAssignedQty = existingData.preAssignedQty || '';
+                        // 일일 최신화일 때는 엑셀의 진짜 데이터 덮어쓰기
+                        updateData.code = finalCode || '';
+                        updateData.name = row['상품명']?.toString().trim() || '';
+                        updateData.option = row['옵션']?.toString().trim() || '';
+                        updateData.stock = row['정상재고']?.toString().trim() || '0';
+                        updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
+                        
+                        if (finalCode && finalCode.trim() !== '') {
+                            updateData.preAssigned = false;
+                            updateData.preAssignedCode = '';
+                            updateData.preAssignedName = '';
+                            updateData.preAssignedQty = '';
                         }
                     }
-                    
-                    updateData.code = finalCode || '';
-                    updateData.name = row['상품명']?.toString().trim() || '';
-                    updateData.option = row['옵션']?.toString().trim() || '';
-                    updateData.stock = row['정상재고']?.toString().trim() || '0';
-                    updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
                     
                     zoneUpdates[zoneDocId][cleanLocId] = updateData;
                     updateCount++;
@@ -1521,11 +1556,12 @@ async function updateDatabaseA(rows, mode = 'daily') {
         let currentBatchLocCount = 0;
         for (let zoneId in zoneUpdates) {
             const zoneData = zoneUpdates[zoneId];
-            const locsInZone = Object.keys(zoneData).length;
-
-            batch.set(doc(db, LOC_COLLECTION, zoneId), zoneData, { merge: true });
-            currentBatchLocCount += locsInZone;
             
+            // zone 전체를 통째로 merge (이게 쓰기 1회로 처리됨, 할당량 방어의 핵심!)
+            batch.set(doc(db, LOC_COLLECTION, zoneId), zoneData, { merge: true });
+            currentBatchLocCount++;
+            
+            // 구역 단위이므로 문서 단위 400개 제한에 거의 안 걸리지만 안전하게 분할
             if (currentBatchLocCount >= 200) { 
                 await batch.commit(); 
                 batch = writeBatch(db); 
@@ -1539,8 +1575,8 @@ async function updateDatabaseA(rows, mode = 'daily') {
         if (mode === 'permanent') {
             alert(`✅ 완료! ${updateCount}개 로케이션의 랙 구조(동/위치) 영구 세팅이 완료되었습니다.`);
         } else {
-            let msg = `✅ 완료! ${updateCount}개 상품/재고 최신화가 에러 없이 완벽 갱신되었습니다.`;
-            if(skipCount > 0) msg += `\n(※ 기존 도면에 없는 낯선 로케이션 ${skipCount}개는 안전하게 무시되었습니다.)`;
+            let msg = `✅ 스마트 클린 업데이트 완료!\n과거 유령 재고는 완벽히 비워졌고, 엑셀의 최신 데이터 ${updateCount}건만 정확하게 반영되었습니다.`;
+            if(skipCount > 0) msg += `\n(※ 기존 도면에 없는 낯선 로케이션 ${skipCount}건 무시됨)`;
             alert(msg);
         }
         
