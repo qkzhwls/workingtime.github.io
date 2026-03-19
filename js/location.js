@@ -575,13 +575,47 @@ window.showRecommendation = function() {
 
                 let moveQty = totalStock - totalStock2f;
                 
+                // ✨ [방향 지시등 로직] 우선순위 점수 비교 계산
+                let bestCurrentScore = 999999;
+                if (currentLocsObjs.length > 0) {
+                    currentLocsObjs.forEach(loc => {
+                        let z = getZoneRank(loc.id);
+                        let d = getDongRank(loc.dong);
+                        let p = getPosRank(loc.pos);
+                        let score = (z * 10000) + (d * 100) + p;
+                        if (score < bestCurrentScore) bestCurrentScore = score;
+                    });
+                }
+
+                let targetZ = getZoneRank(eLoc.id);
+                let targetD = getDongRank(eLoc.dong);
+                let targetP = getPosRank(eLoc.pos);
+                let targetScore = (targetZ * 10000) + (targetD * 100) + targetP;
+
+                let moveBadge = '';
+                let moveText = '';
+                if (currentLocsObjs.length === 0) {
+                    moveBadge = `<span style="background:#e3f2fd; color:#1976d2; padding:2px 5px; border-radius:3px; font-size:11px; font-weight:bold; margin-left:5px;">✨신규</span>`;
+                    moveText = '✨신규';
+                } else if (targetScore < bestCurrentScore) {
+                    moveBadge = `<span style="background:#ffebee; color:#c62828; padding:2px 5px; border-radius:3px; font-size:11px; font-weight:bold; margin-left:5px;">🔺전진</span>`;
+                    moveText = '🔺전진';
+                } else if (targetScore > bestCurrentScore) {
+                    moveBadge = `<span style="background:#eceff1; color:#546e7a; padding:2px 5px; border-radius:3px; font-size:11px; font-weight:bold; margin-left:5px;">🔻후퇴</span>`;
+                    moveText = '🔻후퇴';
+                } else {
+                    moveBadge = `<span style="background:#f5f5f5; color:#757575; padding:2px 5px; border-radius:3px; font-size:11px; font-weight:bold; margin-left:5px;">➖수평</span>`;
+                    moveText = '➖수평';
+                }
+                
                 window.currentRecommendations.push({
                     moveQty: moveQty,
                     currentLocs: item.currentLocs,
                     targetLoc: eLoc.id,
                     name: item.name,
                     option: itemOption,
-                    code: item.code
+                    code: item.code,
+                    moveDirection: moveText // 엑셀용
                 });
 
                 html += `
@@ -590,7 +624,7 @@ window.showRecommendation = function() {
                         <td style="font-weight:bold; color:#333;">${item.code}</td>
                         <td style="text-align:left; font-size:13px;">${item.name}</td>
                         <td style="color:#888;">${item.currentLocs}</td>
-                        <td style="color:#2e7d32; font-weight:bold; background:#f1f8e9; border-right:none;">${eLoc.id} <br><span style="font-size:11px; color:#555;">(${eLoc.dong}동 ${eLoc.pos}위치)</span></td>
+                        <td style="color:#2e7d32; font-weight:bold; background:#f1f8e9; border-right:none;">${eLoc.id} ${moveBadge} <br><span style="font-size:11px; color:#555;">(${eLoc.dong}동 ${eLoc.pos}위치)</span></td>
                     </tr>
                 `;
                 displayRank++;
@@ -610,6 +644,7 @@ window.showRecommendation = function() {
     }, 500); 
 };
 
+// ✨ [엑셀 다운로드 함수]
 window.downloadRecommendationExcel = function() {
     if (!window.currentRecommendations || window.currentRecommendations.length === 0) {
         alert("다운로드할 추천 데이터가 없습니다.");
@@ -618,6 +653,7 @@ window.downloadRecommendationExcel = function() {
 
     const excelData = window.currentRecommendations.map(item => {
         return {
+            "이동방향": item.moveDirection,
             "이동수량": item.moveQty,
             "현재로케이션": item.currentLocs,
             "변경로케이션": item.targetLoc,
@@ -630,12 +666,13 @@ window.downloadRecommendationExcel = function() {
     const ws = XLSX.utils.json_to_sheet(excelData);
     
     ws['!cols'] = [
-        { wch: 10 }, 
-        { wch: 20 }, 
-        { wch: 15 }, 
-        { wch: 40 }, 
-        { wch: 25 }, 
-        { wch: 15 }  
+        { wch: 12 }, // 이동방향
+        { wch: 10 }, // 이동수량
+        { wch: 20 }, // 현재로케이션
+        { wch: 15 }, // 변경로케이션
+        { wch: 40 }, // 상품명
+        { wch: 25 }, // 옵션
+        { wch: 15 }  // 상품코드
     ];
 
     const wb = XLSX.utils.book_new();
@@ -1347,7 +1384,6 @@ if (fileInputWeekly) {
     });
 }
 
-// ✨ [수정] 일일 최신화 업로드
 const fileInputA = document.getElementById('excel-upload-a');
 if (fileInputA) {
     fileInputA.addEventListener('change', async function(e) {
@@ -1362,7 +1398,6 @@ if (fileInputA) {
     });
 }
 
-// ✨ [수정] 도면 영구 세팅 업로드
 const fileInputPerm = document.getElementById('excel-upload-permanent');
 if (fileInputPerm) {
     fileInputPerm.addEventListener('change', async function(e) {
@@ -1417,7 +1452,6 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
     }
 }
 
-// ✨ [핵심 수정 로직] 일일 최신화(daily) 실행 시, 전체 로케이션의 기존 상품정보를 클린(물청소) 처리합니다.
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
@@ -1442,8 +1476,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
         let existingLocMap = {};
         originalData.forEach(d => { existingLocMap[d.id] = d; });
         
-        // ✨ [유령재고 클린 업데이트 로직] 
-        // daily 모드일 경우 기존 데이터의 골격(동, 위치, 예약 등)은 살리고 상품 정보만 빈칸으로 싹 초기화합니다.
         if (mode === 'daily') {
             originalData.forEach(loc => {
                 const zoneDocId = getZoneDocId(loc.id);
@@ -1471,7 +1503,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
             });
         }
         
-        // 엑셀에서 추출한 새 데이터를 초기화된 맵에 덮어씌웁니다.
         for (let i = 0; i < totalRows; i++) {
             const row = rows[i]; 
 
@@ -1505,7 +1536,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
                         }
                     });
 
-                    // 이미 빈칸 처리된 데이터베이스 객체를 불러옵니다 (permanent일 땐 기존값 유지)
                     let updateData = zoneUpdates[zoneDocId][cleanLocId] || { 
                         dong: existingData.dong || '',
                         pos: existingData.pos || '',
@@ -1525,14 +1555,12 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     if (mode === 'permanent') {
                         updateData.dong = ('동' in row || 'dong' in row) ? (row['동'] || row['dong'] || '').toString().trim() : (existingData.dong || '');
                         updateData.pos = ('위치' in row || 'pos' in row) ? (row['위치'] || row['pos'] || '').toString().trim() : (existingData.pos || '');
-                        // 영구 세팅일 때는 상품 정보를 덮어쓰지 않고 기존 데이터 유지
                         updateData.code = existingData.code || '';
                         updateData.name = existingData.name || '';
                         updateData.option = existingData.option || '';
                         updateData.stock = existingData.stock || '0';
                         updateData.stock2f = existingData.stock2f || '0';
                     } else {
-                        // 일일 최신화일 때는 엑셀의 진짜 데이터 덮어쓰기
                         updateData.code = finalCode || '';
                         updateData.name = row['상품명']?.toString().trim() || '';
                         updateData.option = row['옵션']?.toString().trim() || '';
@@ -1557,11 +1585,9 @@ async function updateDatabaseA(rows, mode = 'daily') {
         for (let zoneId in zoneUpdates) {
             const zoneData = zoneUpdates[zoneId];
             
-            // zone 전체를 통째로 merge (이게 쓰기 1회로 처리됨, 할당량 방어의 핵심!)
             batch.set(doc(db, LOC_COLLECTION, zoneId), zoneData, { merge: true });
             currentBatchLocCount++;
             
-            // 구역 단위이므로 문서 단위 400개 제한에 거의 안 걸리지만 안전하게 분할
             if (currentBatchLocCount >= 200) { 
                 await batch.commit(); 
                 batch = writeBatch(db); 
