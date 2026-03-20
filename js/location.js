@@ -1829,5 +1829,277 @@ window.cancelPreAssignMode = function() {
     document.getElementById('pre-assign-banner').style.display = 'none';
 };
 
-window.addEventListener('keydown', function(e) { if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) { e.preventDefault(); alert("🚨 실시간 동기화 중입니다."); } });
+
+// =============================
+// 🗺️ 도면 보기
+// =============================
+let mapCellSize = 54;
+let currentMapZone = null;
+
+window.updateMapCellSize = function(val) {
+    mapCellSize = Number(val);
+    document.getElementById('map-cell-size-label').innerText = val + 'px';
+    window.renderMapZone(currentMapZone);
+};
+
+window.renderMap = function() {
+    if (!originalData || originalData.length === 0) {
+        document.getElementById('map-body').innerHTML = '<div style="text-align:center;padding:60px;color:#aaa;">데이터를 불러오는 중입니다...</div>';
+        return;
+    }
+
+    // 구역(알파벳 첫글자) 목록 추출
+    const zoneSet = new Set();
+    originalData.forEach(d => {
+        const z = d.id.charAt(0).toUpperCase();
+        zoneSet.add(z);
+    });
+
+    // ★ 먼저, 나머지 알파벳 정렬
+    const zones = [...zoneSet].sort((a, b) => {
+        if (a === '★') return -1;
+        if (b === '★') return 1;
+        return a.localeCompare(b);
+    });
+
+    // 탭 렌더링
+    const tabContainer = document.getElementById('map-zone-tabs');
+    tabContainer.innerHTML = '';
+    zones.forEach(z => {
+        const count = originalData.filter(d => d.id.charAt(0).toUpperCase() === z).length;
+        const btn = document.createElement('button');
+        btn.id = `map-tab-${z}`;
+        btn.innerText = `${z}구역 (${count}칸)`;
+        btn.style.cssText = `padding:7px 14px; border-radius:6px; border:1.5px solid #ccc; background:#f5f5f5; font-weight:bold; font-size:13px; cursor:pointer; transition:0.2s;`;
+        btn.onclick = () => {
+            currentMapZone = z;
+            document.querySelectorAll('#map-zone-tabs button').forEach(b => {
+                b.style.background = '#f5f5f5';
+                b.style.color = '#333';
+                b.style.borderColor = '#ccc';
+            });
+            btn.style.background = 'var(--primary)';
+            btn.style.color = 'white';
+            btn.style.borderColor = 'var(--primary)';
+            window.renderMapZone(z);
+        };
+        tabContainer.appendChild(btn);
+    });
+
+    // 첫 번째 탭 자동 선택
+    if (zones.length > 0) {
+        currentMapZone = zones[0];
+        document.getElementById(`map-tab-${zones[0]}`).click();
+    }
+};
+
+window.renderMapZone = function(zone) {
+    const mapBody = document.getElementById('map-body');
+    if (!zone) return;
+
+    const locs = originalData.filter(d => d.id.charAt(0).toUpperCase() === zone);
+    if (locs.length === 0) {
+        mapBody.innerHTML = '<div style="text-align:center;padding:60px;color:#aaa;">해당 구역에 데이터가 없습니다.</div>';
+        return;
+    }
+
+    const isStarZone = zone === '★';
+
+    if (isStarZone) {
+        // ★구역: 번호만 있음 (★★-01 형태) → 1행으로 쭉 나열
+        const sorted = [...locs].sort((a, b) => {
+            const numA = parseInt((a.id.match(/\d+$/) || [0])[0]);
+            const numB = parseInt((b.id.match(/\d+$/) || [0])[0]);
+            return numA - numB;
+        });
+
+        // 5단으로 나누어 배치 (pos 기준, 없으면 순서대로)
+        // ★구역은 pos가 없을 수 있으니 순번으로 나눔
+        const COLS = Math.ceil(sorted.length / 5);
+        let grid = Array.from({length: 5}, () => Array(COLS).fill(null));
+
+        sorted.forEach((loc, idx) => {
+            const col = Math.floor(idx / 5);
+            const row = idx % 5;
+            if (row < 5 && col < COLS) grid[row][col] = loc;
+        });
+
+        mapBody.innerHTML = renderGrid(grid, zone, null);
+
+    } else {
+        // 일반구역: 동별로 섹션 나누기
+        const dongSet = new Set(locs.map(d => (d.dong || '').toString().trim()).filter(Boolean));
+        const dongs = [...dongSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+
+        let html = '';
+        dongs.forEach(dong => {
+            const dongLocs = locs.filter(d => (d.dong || '').toString().trim() === dong);
+
+            // pos(위치=단) × 번호(id의 마지막 숫자) 격자 구성
+            const posSet = new Set(dongLocs.map(d => (d.pos || '').toString().trim()).filter(Boolean));
+            const poses = [...posSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+
+            // 번호 추출 (id 마지막 숫자 부분)
+            const numSet = new Set(dongLocs.map(d => {
+                const m = d.id.match(/(\d+)$/);
+                return m ? parseInt(m[1]) : 0;
+            }));
+            const nums = [...numSet].sort((a, b) => a - b);
+
+            // pos가 없는 경우 대비
+            const rowLabels = poses.length > 0 ? poses : ['1','2','3','4','5'];
+            const colCount = nums.length;
+
+            // grid[row][col] = loc
+            let grid = Array.from({length: rowLabels.length}, () => Array(colCount).fill(null));
+            dongLocs.forEach(loc => {
+                const posStr = (loc.pos || '').toString().trim();
+                const rowIdx = rowLabels.indexOf(posStr);
+                const numMatch = loc.id.match(/(\d+)$/);
+                const num = numMatch ? parseInt(numMatch[1]) : 0;
+                const colIdx = nums.indexOf(num);
+                if (rowIdx >= 0 && colIdx >= 0) grid[rowIdx][colIdx] = loc;
+            });
+
+            html += `<div style="margin-bottom:20px;">
+                <div style="font-size:14px; font-weight:900; color:var(--primary); margin-bottom:8px; padding:6px 12px; background:#eef1ff; border-radius:6px; display:inline-block;">
+                    ${zone}구역 ${dong}동 <span style="font-size:12px; color:#888; font-weight:normal;">(${dongLocs.length}칸)</span>
+                </div>
+                ${renderGrid(grid, zone, rowLabels, nums)}
+            </div>`;
+        });
+
+        mapBody.innerHTML = html || '<div style="padding:40px;color:#aaa;text-align:center;">데이터가 없습니다.</div>';
+    }
+
+    // 툴팁 이벤트 바인딩
+    bindMapTooltip();
+};
+
+function renderGrid(grid, zone, rowLabels, nums) {
+    const cs = mapCellSize;
+    const rows = grid.length;
+    const cols = grid[0] ? grid[0].length : 0;
+
+    let html = `<div style="overflow-x:auto;"><table style="border-collapse:separate; border-spacing:3px; table-layout:fixed;">`;
+
+    // 번호 헤더 (일반구역만)
+    if (nums) {
+        html += `<thead><tr>`;
+        html += `<td style="width:28px;"></td>`; // 위치 라벨 공간
+        nums.forEach(n => {
+            html += `<td style="width:${cs}px; text-align:center; font-size:10px; color:#aaa; padding-bottom:3px; font-weight:bold;">${String(n).padStart(3,'0')}</td>`;
+        });
+        html += `</tr></thead>`;
+    }
+
+    html += `<tbody>`;
+    for (let r = 0; r < rows; r++) {
+        html += `<tr>`;
+
+        // 위치(단) 라벨
+        if (rowLabels) {
+            html += `<td style="font-size:11px; font-weight:bold; color:#888; text-align:center; padding-right:4px; vertical-align:middle;">${rowLabels[r]}단</td>`;
+        }
+
+        for (let c = 0; c < cols; c++) {
+            const loc = grid[r][c];
+            if (!loc) {
+                html += `<td style="width:${cs}px; height:${cs}px; background:#f5f5f5; border-radius:4px; border:1px dashed #ddd;"></td>`;
+                continue;
+            }
+
+            const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== '') || (loc.name && loc.name.trim() !== '');
+            const isReserved = loc.reserved === true;
+            const isPreAssigned = loc.preAssigned === true;
+
+            let bg = '#f0f0f0';           // 빈칸
+            let border = '1px solid #bbb';
+            let textColor = '#999';
+
+            if (isPreAssigned) {
+                bg = '#ffe0b2'; border = '1.5px solid #fb8c00'; textColor = '#bf360c';
+            } else if (isReserved) {
+                bg = '#fff9c4'; border = '1.5px solid #f9a825'; textColor = '#e65100';
+            } else if (hasContent) {
+                bg = '#c8e6c9'; border = '1.5px solid #66bb6a'; textColor = '#1b5e20';
+            }
+
+            // 셀 안에 표시할 텍스트 (코드 앞 6자)
+            const label = hasContent ? (loc.code || loc.name || '').substring(0, 6) : '';
+            const locId = (loc.id || '').replace(/'/g, "\\'");
+            const cs2 = Math.max(cs - 10, 24);
+
+            html += `<td 
+                data-loc-id="${loc.id}"
+                style="width:${cs}px; height:${cs}px; background:${bg}; border:${border}; border-radius:4px; 
+                       cursor:pointer; vertical-align:middle; text-align:center; 
+                       font-size:${Math.max(Math.floor(cs/6), 9)}px; color:${textColor}; font-weight:bold;
+                       overflow:hidden; transition:filter 0.15s;"
+                onmouseenter="showMapTooltip(event,'${locId}')"
+                onmouseleave="hideMapTooltip()"
+            >${label}</td>`;
+        }
+        html += `</tr>`;
+    }
+    html += `</tbody></table></div>`;
+    return html;
+}
+
+function bindMapTooltip() {
+    // 이미 onmouseenter로 처리됨
+}
+
+window.showMapTooltip = function(e, locId) {
+    const loc = originalData.find(d => d.id === locId);
+    if (!loc) return;
+
+    const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== '') || (loc.name && loc.name.trim() !== '');
+    const isReserved = loc.reserved === true;
+    const isPreAssigned = loc.preAssigned === true;
+
+    let statusBadge = '';
+    if (isPreAssigned) statusBadge = `<span style="background:#ffe0b2;color:#bf360c;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:bold;">📦 선지정</span>`;
+    else if (isReserved) statusBadge = `<span style="background:#fff9c4;color:#e65100;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:bold;">🔒 예약중 (${loc.reservedBy || ''})</span>`;
+    else if (hasContent) statusBadge = `<span style="background:#c8e6c9;color:#1b5e20;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:bold;">✅ 사용중</span>`;
+    else statusBadge = `<span style="background:#f0f0f0;color:#888;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:bold;">⬜ 빈칸</span>`;
+
+    const tooltip = document.getElementById('map-tooltip');
+    tooltip.innerHTML = `
+        <div style="font-weight:900; font-size:14px; color:var(--primary); margin-bottom:6px;">${loc.id}</div>
+        <div style="margin-bottom:5px;">${statusBadge}</div>
+        ${hasContent ? `
+            <div style="border-top:1px solid #eee; padding-top:6px; margin-top:4px;">
+                <div style="color:#555;"><b>코드</b>: ${loc.code || '-'}</div>
+                <div style="color:#333; font-weight:bold; margin-top:2px;"><b>상품명</b>: ${loc.name || '-'}</div>
+                ${loc.option ? `<div style="color:#777; font-size:12px;"><b>옵션</b>: ${loc.option}</div>` : ''}
+                <div style="color:#1976d2; font-weight:bold;"><b>재고</b>: ${loc.stock || '0'}개</div>
+            </div>
+        ` : ''}
+        ${isPreAssigned ? `<div style="border-top:1px solid #eee; padding-top:6px; margin-top:4px; color:#bf360c; font-size:12px;"><b>선지정 코드</b>: ${loc.preAssignedCode || '-'}<br><b>대기수량</b>: ${loc.preAssignedQty || '-'}개</div>` : ''}
+    `;
+
+    tooltip.style.display = 'block';
+    positionTooltip(e, tooltip);
+};
+
+window.hideMapTooltip = function() {
+    document.getElementById('map-tooltip').style.display = 'none';
+};
+
+function positionTooltip(e, tooltip) {
+    const margin = 12;
+    let x = e.clientX + margin;
+    let y = e.clientY + margin;
+    const tw = tooltip.offsetWidth || 220;
+    const th = tooltip.offsetHeight || 150;
+    if (x + tw > window.innerWidth - 10) x = e.clientX - tw - margin;
+    if (y + th > window.innerHeight - 10) y = e.clientY - th - margin;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+}
+
+// 도면 탭으로 전환 시 데이터 최신화
+const _origApplyFiltersAndSort = applyFiltersAndSort;
+ if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) { e.preventDefault(); alert("🚨 실시간 동기화 중입니다."); } });
 window.addEventListener('beforeunload', function(e) { e.preventDefault(); e.returnValue = ''; });
