@@ -595,16 +595,16 @@ window.showRecommendation = function() {
                 let moveBadge = '';
                 let moveText = '';
                 if (currentLocsObjs.length === 0) {
-                    moveBadge = `<span style="background:#e3f2fd; color:#1976d2; padding:2px 5px; border-radius:3px; font-size:11px; font-weight:bold; margin-left:5px;">✨신규</span>`;
+                    moveBadge = `<span style="display:inline-block; background:#e3f2fd; color:#1565c0; padding:4px 9px; border-radius:5px; font-size:12px; font-weight:bold; margin-top:5px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">✨ 신규</span>`;
                     moveText = '✨신규';
                 } else if (targetScore < bestCurrentScore) {
-                    moveBadge = `<span style="background:#ffebee; color:#c62828; padding:2px 5px; border-radius:3px; font-size:11px; font-weight:bold; margin-left:5px;">🔺전진</span>`;
+                    moveBadge = `<span style="display:inline-block; background:#ffebee; color:#b71c1c; padding:4px 9px; border-radius:5px; font-size:12px; font-weight:bold; margin-top:5px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">🔺 전진</span>`;
                     moveText = '🔺전진';
                 } else if (targetScore > bestCurrentScore) {
-                    moveBadge = `<span style="background:#eceff1; color:#546e7a; padding:2px 5px; border-radius:3px; font-size:11px; font-weight:bold; margin-left:5px;">🔻후퇴</span>`;
+                    moveBadge = `<span style="display:inline-block; background:#eceff1; color:#37474f; padding:4px 9px; border-radius:5px; font-size:12px; font-weight:bold; margin-top:5px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">🔻 후퇴</span>`;
                     moveText = '🔻후퇴';
                 } else {
-                    moveBadge = `<span style="background:#f5f5f5; color:#757575; padding:2px 5px; border-radius:3px; font-size:11px; font-weight:bold; margin-left:5px;">➖수평</span>`;
+                    moveBadge = `<span style="display:inline-block; background:#f5f5f5; color:#616161; padding:4px 9px; border-radius:5px; font-size:12px; font-weight:bold; margin-top:5px; box-shadow:0 1px 3px rgba(0,0,0,0.1);">➖ 수평</span>`;
                     moveText = '➖수평';
                 }
                 
@@ -618,13 +618,25 @@ window.showRecommendation = function() {
                     moveDirection: moveText // 엑셀용
                 });
 
+                const isEven = displayRank % 2 === 0;
+                const rowBg = isEven ? '#f9fafb' : '#ffffff';
+                const moveQtyDisplay = moveQty > 0 ? `<span style="color:#e65100; font-weight:900; font-size:15px;">${moveQty.toLocaleString()}</span><br><span style="font-size:10px; color:#888;">개</span>` : `<span style="color:#bbb; font-size:12px;">-</span>`;
+
                 html += `
-                    <tr>
-                        <td style="color:var(--primary); font-weight:bold; border-left:none;">${displayRank}위 <br><span style="font-size:11px; color:#e65100;">(${item.score.toFixed(1)}점)</span></td>
-                        <td style="font-weight:bold; color:#333;">${item.code}</td>
-                        <td style="text-align:left; font-size:13px;">${item.name}</td>
-                        <td style="color:#888;">${item.currentLocs}</td>
-                        <td style="color:#2e7d32; font-weight:bold; background:#f1f8e9; border-right:none;">${eLoc.id} ${moveBadge} <br><span style="font-size:11px; color:#555;">(${eLoc.dong}동 ${eLoc.pos}위치)</span></td>
+                    <tr style="background:${rowBg};">
+                        <td style="color:var(--primary); font-weight:900; font-size:15px; border-left:none; padding:14px 10px;">
+                            ${displayRank}위
+                            <br><span style="font-size:11px; color:#e65100; font-weight:bold;">${item.score.toFixed(1)}점</span>
+                        </td>
+                        <td style="font-weight:bold; color:#1a237e; font-size:13px; letter-spacing:0.3px;">${item.code}</td>
+                        <td style="text-align:left; font-size:14px; font-weight:bold; color:#212121; padding:14px 12px; line-height:1.5;">${item.name}</td>
+                        <td style="text-align:center; padding:14px 8px;">${moveQtyDisplay}</td>
+                        <td style="color:#555; font-size:12px; padding:14px 10px;">${item.currentLocs}</td>
+                        <td style="background:#f1f8e9; border-right:none; padding:14px 12px; text-align:center;">
+                            <span style="color:#1b5e20; font-weight:900; font-size:16px;">${eLoc.id}</span><br>
+                            ${moveBadge}<br>
+                            <span style="font-size:11px; color:#555; margin-top:3px; display:inline-block;">${eLoc.dong}동 ${eLoc.pos}위치</span>
+                        </td>
                     </tr>
                 `;
                 displayRank++;
@@ -634,7 +646,7 @@ window.showRecommendation = function() {
         }
 
         if (matchCount === 0) {
-            html += '<tr><td colspan="5" style="padding:40px;">데이터가 부족하거나 추천할 빈 로케이션이 없습니다.<br>(또는 이미 모든 상품이 최적의 동에 배치되어 있습니다)</td></tr>';
+            html += '<tr><td colspan="6" style="padding:40px;">데이터가 부족하거나 추천할 빈 로케이션이 없습니다.<br>(또는 이미 모든 상품이 최적의 동에 배치되어 있습니다)</td></tr>';
         }
 
         tbody.innerHTML = html;
