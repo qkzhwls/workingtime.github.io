@@ -207,6 +207,11 @@ function setupRealtimeListenerA() {
         applyFiltersAndSort(); 
         if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
         
+        // 도면 탭이 열려있으면 자동 재렌더링
+        if (document.getElementById('view-map') && document.getElementById('view-map').style.display !== 'none') {
+            window.renderMap();
+        }
+        
         const pop = document.getElementById('usage-popup');
         if (pop && pop.style.display === 'block') window.calculateAndRenderUsage();
     }, (error) => { console.error("A창고 오류:", error); });
@@ -1844,7 +1849,8 @@ window.updateMapCellSize = function(val) {
 
 window.renderMap = function() {
     if (!originalData || originalData.length === 0) {
-        document.getElementById('map-body').innerHTML = '<div style="text-align:center;padding:60px;color:#aaa;">데이터를 불러오는 중입니다...</div>';
+        document.getElementById('map-body').innerHTML = '<div style="text-align:center;padding:60px;color:#aaa;">⏳ Firebase에서 데이터를 불러오는 중입니다.<br>잠시 후 자동으로 표시됩니다.</div>';
+        document.getElementById('map-zone-tabs').innerHTML = '';
         return;
     }
 
@@ -2099,7 +2105,5 @@ function positionTooltip(e, tooltip) {
     tooltip.style.top = y + 'px';
 }
 
-// 도면 탭으로 전환 시 데이터 최신화
-const _origApplyFiltersAndSort = applyFiltersAndSort;
- if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) { e.preventDefault(); alert("🚨 실시간 동기화 중입니다."); } });
+window.addEventListener('keydown', function(e) { if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) { e.preventDefault(); alert("🚨 실시간 동기화 중입니다."); } });
 window.addEventListener('beforeunload', function(e) { e.preventDefault(); e.returnValue = ''; });
