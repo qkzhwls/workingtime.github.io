@@ -1836,11 +1836,10 @@ window.cancelPreAssignMode = function() {
 
 
 // =============================
-// =============================
 // 🗺️ 도면 보기 (거리뷰)
 // =============================
 let currentCorridorIdx = 0;
-let svCorridorPairs = [];
+let svCorridorList = [];
 
 window.updateMapCellSize = function(val) {
     document.getElementById('map-cell-size-label').innerText = val + 'px';
@@ -1857,53 +1856,41 @@ window.renderMap = function() {
         return;
     }
 
-    // 구역별 동 목록 수집
-    const zoneSet = new Set();
-    const dongSet = new Set();
-    originalData.forEach(d => {
-        const z = d.id.charAt(0).toUpperCase();
-        zoneSet.add(z);
-        if (d.dong) dongSet.add((d.dong || '').toString().trim());
-    });
+    // 구역+동 조합 목록 수집
+    // ★구역은 동 없이 단독, 일반구역은 구역+동 조합으로 탭 구성
+    svCorridorList = [];
 
+    const zoneSet = new Set();
+    originalData.forEach(d => zoneSet.add(d.id.charAt(0).toUpperCase()));
     const zones = [...zoneSet].sort((a, b) => {
         if (a === '★') return -1;
         if (b === '★') return 1;
         return a.localeCompare(b);
     });
-    const dongs = [...dongSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
 
-    // ★구역은 단독, 나머지는 2개씩 짝지어 통로 구성
-    svCorridorPairs = [];
-
-    const starZone = zones.find(z => z === '★');
-    const normalZones = zones.filter(z => z !== '★');
-
-    // ★구역: 동 없이 단독
-    if (starZone) {
-        svCorridorPairs.push({ left: '★', right: null, dong: null, label: '★★ 구역' });
-    }
-
-    // 일반 구역: 2개씩 짝지어 동별로
-    for (let zi = 0; zi < normalZones.length; zi += 2) {
-        const leftZone = normalZones[zi];
-        const rightZone = normalZones[zi + 1] || null;
-        dongs.forEach(dong => {
-            const leftHas = originalData.some(d => d.id.charAt(0).toUpperCase() === leftZone && (d.dong||'').toString().trim() === dong);
-            const rightHas = rightZone ? originalData.some(d => d.id.charAt(0).toUpperCase() === rightZone && (d.dong||'').toString().trim() === dong) : false;
-            if (leftHas || rightHas) {
-                const label = rightZone ? `${leftZone}·${rightZone} ${dong}동` : `${leftZone} ${dong}동`;
-                svCorridorPairs.push({ left: leftZone, right: rightZone, dong, label });
-            }
-        });
-    }
+    zones.forEach(zone => {
+        if (zone === '★') {
+            svCorridorList.push({ zone: '★', dong: null, label: '★★ 구역' });
+        } else {
+            const dongSet = new Set();
+            originalData.forEach(d => {
+                if (d.id.charAt(0).toUpperCase() === zone && d.dong) {
+                    dongSet.add((d.dong || '').toString().trim());
+                }
+            });
+            const dongs = [...dongSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+            dongs.forEach(dong => {
+                svCorridorList.push({ zone, dong, label: `${zone}구역 ${dong}동` });
+            });
+        }
+    });
 
     // 탭 렌더링
     tabContainer.innerHTML = '';
-    svCorridorPairs.forEach((pair, i) => {
+    svCorridorList.forEach((item, i) => {
         const btn = document.createElement('button');
         btn.id = `sv-tab-${i}`;
-        btn.innerText = pair.label;
+        btn.innerText = item.label;
         btn.style.cssText = `padding:6px 14px; border-radius:20px; font-size:13px; font-weight:bold; border:1.5px solid #ccc; background:#f5f5f5; color:#333; cursor:pointer; transition:0.2s;`;
         btn.onclick = () => {
             currentCorridorIdx = i;
@@ -1916,181 +1903,178 @@ window.renderMap = function() {
         tabContainer.appendChild(btn);
     });
 
-    // 첫 번째 탭 클릭
     currentCorridorIdx = 0;
-    if (svCorridorPairs.length > 0) document.getElementById('sv-tab-0').click();
+    if (svCorridorList.length > 0) document.getElementById('sv-tab-0').click();
 };
 
 function renderCorridor(idx) {
     const mapBody = document.getElementById('map-body');
-    const pair = svCorridorPairs[idx];
-    if (!pair) return;
+    const item = svCorridorList[idx];
+    if (!item) return;
 
-    const isStarZone = pair.left === '★';
     const cellSize = document.getElementById('map-cell-size') ? Number(document.getElementById('map-cell-size').value) : 54;
+    const isStarZone = item.zone === '★';
 
-    let leftLocs = [], rightLocs = [], nums = [];
-
+    // 해당 구역+동의 로케이션 전체 수집
+    let allLocs = [];
     if (isStarZone) {
-        // ★구역: 번호순 정렬
-        const starLocs = originalData.filter(d => d.id.charAt(0) === '★').sort((a, b) => {
-            const na = parseInt((a.id.match(/\d+$/) || [0])[0]);
-            const nb = parseInt((b.id.match(/\d+$/) || [0])[0]);
-            return na - nb;
-        });
-        // 절반씩 나눠 왼쪽/오른쪽
-        const half = Math.ceil(starLocs.length / 2);
-        leftLocs = starLocs.slice(0, half);
-        rightLocs = starLocs.slice(half);
+        allLocs = originalData.filter(d => d.id.charAt(0) === '★')
+            .sort((a, b) => {
+                const na = parseInt((a.id.match(/\d+$/) || [0])[0]);
+                const nb = parseInt((b.id.match(/\d+$/) || [0])[0]);
+                return na - nb;
+            });
     } else {
-        leftLocs = originalData.filter(d =>
-            d.id.charAt(0).toUpperCase() === pair.left &&
-            (d.dong || '').toString().trim() === pair.dong
+        allLocs = originalData.filter(d =>
+            d.id.charAt(0).toUpperCase() === item.zone &&
+            (d.dong || '').toString().trim() === item.dong
         );
-        if (pair.right) {
-            rightLocs = originalData.filter(d =>
-                d.id.charAt(0).toUpperCase() === pair.right &&
-                (d.dong || '').toString().trim() === pair.dong
-            );
-        }
-
-        // 번호 목록
-        const numSet = new Set();
-        [...leftLocs, ...rightLocs].forEach(d => {
-            const m = d.id.match(/(\d+)$/);
-            if (m) numSet.add(parseInt(m[1]));
-        });
-        nums = [...numSet].sort((a, b) => a - b);
     }
 
     // pos(단) 목록
     const posSet = new Set();
-    [...leftLocs, ...rightLocs].forEach(d => { if (d.pos) posSet.add((d.pos||'').toString().trim()); });
-    const poses = [...posSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
-    const posLabels = poses.length > 0 ? poses : ['1','2','3','4','5'];
+    allLocs.forEach(d => { if (d.pos) posSet.add((d.pos || '').toString().trim()); });
+    const posLabels = [...posSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+    if (posLabels.length === 0) posLabels.push(...['1','2','3','4','5']);
 
-    function getCell(locs, pos, num) {
-        if (isStarZone) return null;
-        return locs.find(d => {
+    // 번호 추출 및 절반으로 분리
+    let leftLocs = [], rightLocs = [], leftNums = [], rightNums = [];
+
+    if (isStarZone) {
+        // ★구역: 번호 순서로 절반씩
+        const half = Math.ceil(allLocs.length / 2);
+        leftLocs = allLocs.slice(0, half);
+        rightLocs = allLocs.slice(half);
+    } else {
+        // 일반구역: 번호 기준 절반으로 나눔 (구역마다 칸수 다름)
+        const numSet = new Set();
+        allLocs.forEach(d => {
             const m = d.id.match(/(\d+)$/);
-            return (d.pos||'').toString().trim() === pos && m && parseInt(m[1]) === num;
-        }) || null;
+            if (m) numSet.add(parseInt(m[1]));
+        });
+        const allNums = [...numSet].sort((a, b) => a - b);
+        const half = Math.ceil(allNums.length / 2);
+        leftNums = allNums.slice(0, half);   // 앞번호 (001~)
+        rightNums = allNums.slice(half);      // 뒷번호 (중간~)
+
+        leftLocs = allLocs.filter(d => {
+            const m = d.id.match(/(\d+)$/);
+            return m && leftNums.includes(parseInt(m[1]));
+        });
+        rightLocs = allLocs.filter(d => {
+            const m = d.id.match(/(\d+)$/);
+            return m && rightNums.includes(parseInt(m[1]));
+        });
+    }
+
+    // 셀 공통 함수
+    function hasContent(loc) {
+        return loc && ((loc.code && loc.code !== loc.id && loc.code.trim() !== '') || (loc.name && loc.name.trim() !== ''));
     }
 
     function cellStyle(loc) {
-        if (!loc) return 'background:#f5f5f5; border:1px dashed #ddd;';
-        const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== '') || (loc.name && loc.name.trim() !== '');
+        if (!loc) return 'background:#f0f0f0; border:1px dashed #ddd;';
         if (loc.preAssigned) return 'background:#ffe0b2; border:1.5px solid #fb8c00;';
         if (loc.reserved) return 'background:#fff9c4; border:1.5px solid #f9a825;';
-        if (hasContent) return 'background:#c8e6c9; border:1.5px solid #66bb6a;';
-        return 'background:#f0f0f0; border:1px solid #bbb;';
+        if (hasContent(loc)) return 'background:#c8e6c9; border:1.5px solid #66bb6a;';
+        return 'background:#f0f0f0; border:1px solid #ccc;';
     }
 
     function cellInner(loc) {
         if (!loc) return '';
-        const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== '') || (loc.name && loc.name.trim() !== '');
-        const nameText = hasContent ? (loc.name || loc.code || '').substring(0, 6) : '';
-        const nameColor = hasContent ? '#1b5e20' : '#aaa';
-        return `<div style="font-size:9px;color:#999;line-height:1.2;">${loc.id}</div>
-                <div style="font-size:9px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cellSize-6}px;text-align:center;">${nameText||'빈칸'}</div>`;
+        const nameText = hasContent(loc) ? (loc.name || loc.code || '').substring(0, 6) : '';
+        const nameColor = hasContent(loc) ? '#1b5e20' : '#999';
+        return `<div style="font-size:9px;color:#aaa;line-height:1.3;">${loc.id}</div>
+                <div style="font-size:9px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cellSize - 6}px;text-align:center;">${nameText || '빈칸'}</div>`;
     }
 
     function tooltipHtml(loc) {
         if (!loc) return '';
-        const hasContent = (loc.code && loc.code !== loc.id && loc.code.trim() !== '') || (loc.name && loc.name.trim() !== '');
         const isReserved = loc.reserved === true;
         const isPreAssigned = loc.preAssigned === true;
         let status = '빈칸';
         if (isPreAssigned) status = '📦 선지정';
-        else if (isReserved) status = `🔒 예약중 (${loc.reservedBy||''})`;
-        else if (hasContent) status = '✅ 사용중';
+        else if (isReserved) status = `🔒 예약중 (${loc.reservedBy || ''})`;
+        else if (hasContent(loc)) status = '✅ 사용중';
         return `<div style="position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
             background:white;border:1px solid #ccc;border-radius:8px;padding:10px 12px;
             white-space:nowrap;pointer-events:none;font-size:12px;line-height:1.7;
             box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:9999;display:none;" class="sv-tip">
             <div style="font-weight:bold;color:#3d5afe;">${loc.id}</div>
             <div style="color:#555;">${status}</div>
-            ${hasContent ? `<div style="color:#333;"><b>상품명</b>: ${loc.name||'-'}</div>
-            <div style="color:#1976d2;"><b>재고</b>: ${loc.stock||'0'}개</div>` : ''}
-            ${isPreAssigned ? `<div style="color:#bf360c;"><b>선지정코드</b>: ${loc.preAssignedCode||'-'}</div>` : ''}
+            ${hasContent(loc) ? `<div style="color:#333;"><b>상품명</b>: ${loc.name || '-'}</div><div style="color:#1976d2;"><b>재고</b>: ${loc.stock || '0'}개</div>` : ''}
+            ${isPreAssigned ? `<div style="color:#bf360c;"><b>선지정코드</b>: ${loc.preAssignedCode || '-'}</div>` : ''}
         </div>`;
     }
 
-    function buildRack(locs, side) {
+    function getCell(locs, pos, num) {
+        return locs.find(d => {
+            const m = d.id.match(/(\d+)$/);
+            return (d.pos || '').toString().trim() === pos && m && parseInt(m[1]) === num;
+        }) || null;
+    }
+
+    function buildRack(locs, nums, side) {
+        let html = `<div style="padding:10px 8px;display:flex;flex-direction:column;gap:4px;">`;
+
         if (isStarZone) {
-            // ★구역: 단순 나열
-            let html = `<div style="padding:12px 8px;display:flex;flex-direction:column;gap:5px;">`;
+            // ★구역: 단순 가로 나열
+            html += `<div style="display:flex;flex-direction:${side === 'right' ? 'row-reverse' : 'row'};flex-wrap:wrap;gap:3px;">`;
             locs.forEach(loc => {
-                html += `<div style="position:relative;display:inline-block;"
-                    onmouseenter="this.querySelector('.sv-tip').style.display='block'"
-                    onmouseleave="this.querySelector('.sv-tip').style.display='none'">
-                    <div class="sv-cell" style="width:${cellSize}px;height:${cellSize+6}px;${cellStyle(loc)}
-                        border-radius:4px;display:flex;flex-direction:column;align-items:center;
-                        justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
-                        onmouseenter="this.style.transform='scale(1.06)'"
-                        onmouseleave="this.style.transform='scale(1)'">
+                html += `<div style="position:relative;" onmouseenter="this.querySelector('.sv-tip').style.display='block'" onmouseleave="this.querySelector('.sv-tip').style.display='none'">
+                    <div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
+                        onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
                         ${cellInner(loc)}
                     </div>${tooltipHtml(loc)}</div>`;
             });
             html += '</div>';
-            return html;
+        } else {
+            // 일반구역: pos(단) × num(번호) 격자
+            posLabels.forEach(pos => {
+                const rowDir = side === 'right' ? 'row-reverse' : 'row';
+                html += `<div style="display:flex;flex-direction:${rowDir};align-items:center;gap:3px;">
+                    <div style="font-size:10px;font-weight:bold;color:#bbb;min-width:18px;text-align:center;">${pos}</div>`;
+                nums.forEach(num => {
+                    const loc = getCell(locs, pos, num);
+                    html += `<div style="position:relative;" onmouseenter="this.querySelector && this.querySelector('.sv-tip') && (this.querySelector('.sv-tip').style.display='block')" onmouseleave="this.querySelector && this.querySelector('.sv-tip') && (this.querySelector('.sv-tip').style.display='none')">
+                        <div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
+                            onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
+                            ${loc ? cellInner(loc) : ''}
+                        </div>${loc ? tooltipHtml(loc) : ''}</div>`;
+                });
+                html += '</div>';
+            });
         }
 
-        // 일반구역: pos(단) × num(번호) 격자
-        let html = `<div style="padding:12px 8px;display:flex;flex-direction:column;gap:5px;">`;
-        posLabels.forEach(pos => {
-            const rowDir = side === 'right' ? 'row-reverse' : 'row';
-            html += `<div style="display:flex;flex-direction:${rowDir};align-items:center;gap:3px;">
-                <div style="font-size:10px;font-weight:bold;color:#aaa;min-width:20px;text-align:center;">${pos}단</div>`;
-            nums.forEach(num => {
-                const loc = getCell(locs, pos, num);
-                html += `<div style="position:relative;"
-                    onmouseenter="this.querySelector('.sv-tip').style.display='block'"
-                    onmouseleave="this.querySelector('.sv-tip').style.display='none'">
-                    <div class="sv-cell" style="width:${cellSize}px;height:${cellSize+6}px;${cellStyle(loc)}
-                        border-radius:4px;display:flex;flex-direction:column;align-items:center;
-                        justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
-                        onmouseenter="this.style.transform='scale(1.06)'"
-                        onmouseleave="this.style.transform='scale(1)'">
-                        ${loc ? cellInner(loc) : ''}
-                    </div>${loc ? tooltipHtml(loc) : ''}</div>`;
-            });
-            html += '</div>';
-        });
         html += '</div>';
         return html;
     }
 
-    const leftLabel = isStarZone ? '★★ 구역 (전반)' : `${pair.left}구역 ${pair.dong}동`;
-    const rightLabel = isStarZone ? '★★ 구역 (후반)' : (pair.right ? `${pair.right}구역 ${pair.dong}동` : '');
-    const corridorLabel = isStarZone ? '★★ 통로' : `${pair.dong}동 통로`;
+    const leftLabel = isStarZone ? '★★ 구역 (앞)' : `${item.zone}구역 ${item.dong}동 (앞: ${leftNums[0] || ''}~${leftNums[leftNums.length - 1] || ''})`;
+    const rightLabel = isStarZone ? '★★ 구역 (뒤)' : `${item.zone}구역 ${item.dong}동 (뒤: ${rightNums[0] || ''}~${rightNums[rightNums.length - 1] || ''})`;
+    const corridorLabel = isStarZone ? '★★ 통로' : `${item.zone}구역 ${item.dong}동 통로`;
 
     mapBody.innerHTML = `
         <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;">
             <div style="display:grid;grid-template-columns:1fr 70px 1fr;background:#f4f4f4;padding:8px 16px;border-bottom:1px solid #ddd;">
-                <div style="font-size:13px;font-weight:bold;color:#3d5afe;">${leftLabel}</div>
+                <div style="font-size:12px;font-weight:bold;color:#3d5afe;">${leftLabel}</div>
                 <div style="font-size:11px;color:#aaa;text-align:center;align-self:center;">통로</div>
-                <div style="font-size:13px;font-weight:bold;color:#e65100;text-align:right;">${rightLabel}</div>
+                <div style="font-size:12px;font-weight:bold;color:#e65100;text-align:right;">${rightLabel}</div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 70px 1fr;min-height:280px;overflow-x:auto;">
-                <div style="border-right:1px solid #eee;">${buildRack(leftLocs, 'left')}</div>
-                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                    gap:8px;background:#fafafa;border-left:1px solid #eee;padding:10px 0;">
-                    <div style="font-size:11px;color:#bbb;writing-mode:vertical-rl;letter-spacing:4px;">↑ ↑ ↑</div>
+                <div style="border-right:1px solid #eee;">${buildRack(leftLocs, leftNums, 'left')}</div>
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#fafafa;padding:10px 0;">
+                    <div style="font-size:11px;color:#ccc;writing-mode:vertical-rl;letter-spacing:4px;">↑ ↑ ↑</div>
                     <div style="font-size:10px;color:#bbb;writing-mode:vertical-rl;font-weight:bold;">${corridorLabel}</div>
-                    <div style="font-size:11px;color:#bbb;writing-mode:vertical-rl;letter-spacing:4px;">↓ ↓ ↓</div>
+                    <div style="font-size:11px;color:#ccc;writing-mode:vertical-rl;letter-spacing:4px;">↓ ↓ ↓</div>
                 </div>
-                <div style="border-left:1px solid #eee;">${buildRack(rightLocs, 'right')}</div>
+                <div style="border-left:1px solid #eee;">${buildRack(rightLocs, rightNums, 'right')}</div>
             </div>
             <div style="display:flex;gap:12px;padding:10px 16px;border-top:1px solid #ddd;flex-wrap:wrap;background:#fafafa;">
-                <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">
-                    <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#c8e6c9;border:1px solid #66bb6a;"></span>상품있음</span>
-                <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">
-                    <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#f0f0f0;border:1px solid #bbb;"></span>빈칸</span>
-                <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">
-                    <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#fff9c4;border:1px solid #f9a825;"></span>예약중</span>
-                <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;">
-                    <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#ffe0b2;border:1px solid #fb8c00;"></span>선지정</span>
+                <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#c8e6c9;border:1px solid #66bb6a;"></span>상품있음</span>
+                <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#f0f0f0;border:1px solid #ccc;"></span>빈칸</span>
+                <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#fff9c4;border:1px solid #f9a825;"></span>예약중</span>
+                <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#ffe0b2;border:1px solid #fb8c00;"></span>선지정</span>
             </div>
         </div>
     `;
