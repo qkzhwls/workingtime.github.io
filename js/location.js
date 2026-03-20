@@ -2007,16 +2007,15 @@ function renderCorridor(idx) {
         if (isPreAssigned) status = '📦 선지정';
         else if (isReserved) status = `🔒 예약중 (${loc.reservedBy || ''})`;
         else if (hasContent(loc)) status = '✅ 사용중';
-        return `<div style="position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
-            background:white;border:1px solid #ccc;border-radius:8px;padding:10px 12px;
+        const tipId = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
+        return `<div id="${tipId}" style="position:fixed;background:white;border:1px solid #ccc;border-radius:8px;padding:10px 12px;
             white-space:nowrap;pointer-events:none;font-size:12px;line-height:1.7;
-            box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:9999;display:none;" class="sv-tip">
+            box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:99999;display:none;" class="sv-tip">
             <div style="font-weight:bold;color:#3d5afe;">${loc.id}</div>
             <div style="color:#555;">${status}</div>
             ${hasContent(loc) ? `<div style="color:#333;"><b>상품명</b>: ${loc.name || '-'}</div><div style="color:#1976d2;"><b>재고</b>: ${loc.stock || '0'}개</div>` : ''}
             ${isPreAssigned ? `<div style="color:#bf360c;"><b>선지정코드</b>: ${loc.preAssignedCode || '-'}</div>` : ''}
-        </div>`;
-    }
+        </div>`;\n    }
 
     function getCell(locs, pos, num) {
         return locs.find(d => {
@@ -2029,10 +2028,12 @@ function renderCorridor(idx) {
         let html = `<div style="padding:10px 8px;display:flex;flex-direction:column;gap:4px;">`;
 
         if (isStarZone) {
-            // ★구역: 단순 가로 나열
             html += `<div style="display:flex;flex-direction:${side === 'right' ? 'row-reverse' : 'row'};flex-wrap:wrap;gap:3px;">`;
             locs.forEach(loc => {
-                html += `<div style="position:relative;" onmouseenter="this.querySelector('.sv-tip').style.display='block'" onmouseleave="this.querySelector('.sv-tip').style.display='none'">
+                const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
+                html += `<div style="position:relative;"
+                    onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
+                    onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
                     <div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
                         onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
                         ${cellInner(loc)}
@@ -2040,7 +2041,6 @@ function renderCorridor(idx) {
             });
             html += '</div>';
         } else {
-            // 일반구역: pos(단) × 해당 pos의 번호들 (pos별로 좌/우 번호 다름)
             posLabels.forEach(pos => {
                 const rowDir = side === 'right' ? 'row-reverse' : 'row';
                 const posNums = (numsByPos[pos] && numsByPos[pos][side]) || [];
@@ -2048,11 +2048,18 @@ function renderCorridor(idx) {
                     <div style="font-size:10px;font-weight:bold;color:#bbb;min-width:18px;text-align:center;">${pos}</div>`;
                 posNums.forEach(num => {
                     const loc = getCell(locs, pos, num);
-                    html += `<div style="position:relative;" onmouseenter="this.querySelector && this.querySelector('.sv-tip') && (this.querySelector('.sv-tip').style.display='block')" onmouseleave="this.querySelector && this.querySelector('.sv-tip') && (this.querySelector('.sv-tip').style.display='none')">
+                    if (!loc) {
+                        html += `<div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(null)}border-radius:4px;"></div>`;
+                        return;
+                    }
+                    const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
+                    html += `<div style="position:relative;"
+                        onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
+                        onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
                         <div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
                             onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
-                            ${loc ? cellInner(loc) : ''}
-                        </div>${loc ? tooltipHtml(loc) : ''}</div>`;
+                            ${cellInner(loc)}
+                        </div>${tooltipHtml(loc)}</div>`;
                 });
                 html += '</div>';
             });
