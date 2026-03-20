@@ -127,7 +127,8 @@
         .loading-text { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
         .loading-subtext { font-size: 13px; color: #ccc; margin-top: 10px; }
 
-        .incoming-sidebar { position: fixed; right: -360px; top: 0; width: 340px; height: 100vh; background: #fafafa; box-shadow: -4px 0 15px rgba(0,0,0,0.15); z-index: 9999; transition: right 0.3s ease; display: flex; flex-direction: column; }
+        .map-legend { display:inline-flex; align-items:center; padding:3px 10px; border-radius:4px; font-size:12px; font-weight:bold; color:#333; }
+        position: fixed; right: -360px; top: 0; width: 340px; height: 100vh; background: #fafafa; box-shadow: -4px 0 15px rgba(0,0,0,0.15); z-index: 9999; transition: right 0.3s ease; display: flex; flex-direction: column; }
         .incoming-sidebar.open { right: 0; }
         .incoming-header { background: #e65100; color: white; padding: 15px 20px; font-weight: bold; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
         
@@ -259,7 +260,32 @@
     </div>
 
     <div id="view-map" class="content-view" style="display:none;">
-        <div class="map-container" style="text-align:center; padding:100px; background:#fff; margin:20px; border-radius:12px; border:1px solid #ddd;">🚧 도면 보기 기능 준비 중</div>
+        <div id="map-root" style="margin: 0 20px 10px 20px;">
+            <!-- 범례 -->
+            <div style="display:flex; align-items:center; gap:16px; padding:10px 15px; background:#fff; border:1px solid #ddd; border-radius:10px; margin-bottom:10px; flex-wrap:wrap;">
+                <span style="font-weight:bold; font-size:13px; color:#555;">범례:</span>
+                <span class="map-legend" style="background:#f0f0f0; border:1.5px solid #bbb;">빈칸</span>
+                <span class="map-legend" style="background:#c8e6c9; border:1.5px solid #66bb6a; color:#1b5e20;">상품있음</span>
+                <span class="map-legend" style="background:#fff9c4; border:1.5px solid #f9a825; color:#e65100;">예약중</span>
+                <span class="map-legend" style="background:#ffe0b2; border:1.5px solid #fb8c00; color:#bf360c;">선지정</span>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+                    <label style="font-size:12px; color:#555; font-weight:bold;">칸 크기:</label>
+                    <input type="range" id="map-cell-size" min="30" max="90" value="54" style="width:80px;" oninput="updateMapCellSize(this.value)">
+                    <span id="map-cell-size-label" style="font-size:12px; color:#333; font-weight:bold;">54px</span>
+                </div>
+            </div>
+            <!-- 구역 탭 -->
+            <div id="map-zone-tabs" style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;"></div>
+            <!-- 도면 본체 -->
+            <div id="map-body" style="background:#fff; border:1px solid #ddd; border-radius:10px; padding:15px; overflow:auto; max-height:calc(100vh - 220px);"></div>
+        </div>
+        <!-- 툴팁 -->
+        <div id="map-tooltip" style="
+            display:none; position:fixed; z-index:99999;
+            background:#fff; border:1px solid #bbb; border-radius:8px;
+            box-shadow:0 4px 16px rgba(0,0,0,0.18); padding:12px 15px;
+            min-width:180px; max-width:280px; pointer-events:none; font-size:13px; line-height:1.7;
+        "></div>
     </div>
 
     <div id="dynamic-popups"></div>
@@ -392,6 +418,7 @@
             document.getElementById('view-map').style.display = view === 'map' ? 'block' : 'none';
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             event.currentTarget.classList.add('active');
+            if (view === 'map' && typeof window.renderMap === 'function') window.renderMap();
         }
 
         function toggleFilterPopup(e, id) {
