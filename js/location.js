@@ -1937,33 +1937,44 @@ function renderCorridor(idx) {
     const posLabels = [...posSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
     if (posLabels.length === 0) posLabels.push(...['1','2','3','4','5']);
 
-    // 번호 추출 및 절반으로 분리
+    // 번호 추출 및 pos별 좌/우 분리
     let leftLocs = [], rightLocs = [], leftNums = [], rightNums = [];
+    let numsByPos = {};
 
     if (isStarZone) {
-        // ★구역: 번호 순서로 절반씩
         const half = Math.ceil(allLocs.length / 2);
         leftLocs = allLocs.slice(0, half);
         rightLocs = allLocs.slice(half);
     } else {
-        // 일반구역: 번호 기준 절반으로 나눔 (구역마다 칸수 다름)
-        const numSet = new Set();
-        allLocs.forEach(d => {
-            const m = d.id.match(/(\d+)$/);
-            if (m) numSet.add(parseInt(m[1]));
+        const leftNumSet = new Set();
+        const rightNumSet = new Set();
+
+        posLabels.forEach(pos => {
+            const posLocs = allLocs.filter(d => (d.pos || '').toString().trim() === pos);
+            const nums = posLocs.map(d => {
+                const m = d.id.match(/(\d+)$/);
+                return m ? parseInt(m[1]) : 0;
+            }).filter(n => n > 0).sort((a, b) => a - b);
+
+            const posHalf = Math.ceil(nums.length / 2);
+            const leftN = nums.slice(0, posHalf);
+            const rightN = nums.slice(posHalf);
+
+            numsByPos[pos] = { left: leftN, right: rightN };
+            leftN.forEach(n => leftNumSet.add(n));
+            rightN.forEach(n => rightNumSet.add(n));
         });
-        const allNums = [...numSet].sort((a, b) => a - b);
-        const half = Math.ceil(allNums.length / 2);
-        leftNums = allNums.slice(0, half);   // 앞번호 (001~)
-        rightNums = allNums.slice(half);      // 뒷번호 (중간~)
+
+        leftNums = [...leftNumSet].sort((a, b) => a - b);
+        rightNums = [...rightNumSet].sort((a, b) => a - b);
 
         leftLocs = allLocs.filter(d => {
             const m = d.id.match(/(\d+)$/);
-            return m && leftNums.includes(parseInt(m[1]));
+            return m && leftNumSet.has(parseInt(m[1]));
         });
         rightLocs = allLocs.filter(d => {
             const m = d.id.match(/(\d+)$/);
-            return m && rightNums.includes(parseInt(m[1]));
+            return m && rightNumSet.has(parseInt(m[1]));
         });
     }
 
@@ -2029,12 +2040,13 @@ function renderCorridor(idx) {
             });
             html += '</div>';
         } else {
-            // 일반구역: pos(단) × num(번호) 격자
+            // 일반구역: pos(단) × 해당 pos의 번호들 (pos별로 좌/우 번호 다름)
             posLabels.forEach(pos => {
                 const rowDir = side === 'right' ? 'row-reverse' : 'row';
+                const posNums = (numsByPos[pos] && numsByPos[pos][side]) || [];
                 html += `<div style="display:flex;flex-direction:${rowDir};align-items:center;gap:3px;">
                     <div style="font-size:10px;font-weight:bold;color:#bbb;min-width:18px;text-align:center;">${pos}</div>`;
-                nums.forEach(num => {
+                posNums.forEach(num => {
                     const loc = getCell(locs, pos, num);
                     html += `<div style="position:relative;" onmouseenter="this.querySelector && this.querySelector('.sv-tip') && (this.querySelector('.sv-tip').style.display='block')" onmouseleave="this.querySelector && this.querySelector('.sv-tip') && (this.querySelector('.sv-tip').style.display='none')">
                         <div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
