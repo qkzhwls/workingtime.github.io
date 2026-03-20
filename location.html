@@ -350,7 +350,7 @@
     </div>
 
     <div id="recommend-modal" class="modal-overlay" onclick="closeRecommendModal(event)">
-        <div class="modal-content" onclick="event.stopPropagation()" style="width: 850px; max-width: 95vw; padding: 25px 20px;">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 980px; max-width: 96vw; padding: 25px 20px;">
             <div class="modal-header" style="color: #4caf50; display: flex; align-items: center;">
                 💡 로케이션 변경 리스트
                 <button onclick="window.openRatioModal()" style="margin-left:15px; padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">⚙️ 점수반영비율 설정</button>
@@ -362,11 +362,12 @@
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
                     <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <tr>
-                            <th style="width: 90px; border-top:none;">순위(점수)</th>
-                            <th style="width: 130px; border-top:none;">상품코드</th>
-                            <th style="border-top:none;">상품명</th>
-                            <th style="width: 140px; border-top:none;">현재 위치</th>
-                            <th style="width: 180px; background:#e8f5e9; color:#2e7d32; border-top:none;">➡️ 추천 로케이션 (빈칸)</th>
+                            <th style="width: 80px; border-top:none; font-size:13px;">순위(점수)</th>
+                            <th style="width: 120px; border-top:none; font-size:13px;">상품코드</th>
+                            <th style="border-top:none; font-size:13px;">상품명</th>
+                            <th style="width: 80px; border-top:none; font-size:13px; background:#fff8e1; color:#e65100;">이동수량</th>
+                            <th style="width: 130px; border-top:none; font-size:13px;">현재 위치</th>
+                            <th style="width: 180px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ 추천 로케이션</th>
                         </tr>
                     </thead>
                     <tbody id="recommend-tbody"></tbody>
