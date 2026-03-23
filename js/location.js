@@ -1983,23 +1983,34 @@ function renderCorridor(idx) {
     let bodyHtml = '';
 
     if (isStarZone) {
-        // ★구역: 번호 순서로 절반씩 위/아래
         const allLocs = originalData.filter(d => d.id.charAt(0) === '★')
             .sort((a, b) => parseInt((a.id.match(/\d+$/) || [0])[0]) - parseInt((b.id.match(/\d+$/) || [0])[0]));
         const half = Math.ceil(allLocs.length / 2);
         const topLocs = allLocs.slice(0, half);
         const botLocs = allLocs.slice(half);
 
+        // ★★구역 cellSize 자동계산 - 앞/뒤 중 긴 쪽 기준
+        const maxStarCols = Math.max(topLocs.length, botLocs.length);
+        const starAvailWidth = mapWidth - 20;
+        cellSize = maxStarCols > 0 ? Math.max(40, Math.min(100, Math.floor((starAvailWidth - (maxStarCols - 1) * 3) / maxStarCols))) : 54;
+
         function starRow(locs) {
+            const idFontSize = Math.max(7, Math.floor(cellSize / 8));
+            const nameFontSize = Math.max(10, Math.floor(cellSize / 5));
+            const maxChars = Math.max(4, Math.floor((cellSize - 6) / (nameFontSize * 0.55)));
             let h = `<div style="padding:8px;display:flex;flex-wrap:wrap;gap:3px;">`;
             locs.forEach(loc => {
                 const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
+                const nameText = hasContent(loc) ? (loc.name || loc.code || '') : '';
+                const nameColor = hasContent(loc) ? '#1b5e20' : '#999';
+                const displayName = nameText.substring(0, maxChars) || '빈칸';
                 h += `<div style="position:relative;"
                     onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
                     onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
                     <div style="width:${cellSize}px;height:${cellSize+6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
                         onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
-                        ${cellInner(loc)}
+                        <div style="font-size:${idFontSize}px;color:#bbb;line-height:1.1;">${loc.id}</div>
+                        <div style="font-size:${nameFontSize}px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cellSize-4}px;text-align:center;line-height:1.3;">${displayName}</div>
                     </div>${tooltipHtml(loc)}</div>`;
             });
             h += '</div>';
