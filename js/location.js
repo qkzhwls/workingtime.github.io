@@ -2029,7 +2029,7 @@ function renderCorridor(idx) {
         let html = `<div style="padding:10px 8px;display:flex;flex-direction:column;gap:4px;">`;
 
         if (isStarZone) {
-            html += `<div style="display:flex;flex-direction:${side === 'right' ? 'row-reverse' : 'row'};flex-wrap:wrap;gap:3px;">`;
+            html += `<div style="display:flex;flex-direction:row;flex-wrap:wrap;gap:3px;">`;
             locs.forEach(loc => {
                 const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
                 html += `<div style="position:relative;"
@@ -2043,7 +2043,7 @@ function renderCorridor(idx) {
             html += '</div>';
         } else {
             posLabels.forEach(pos => {
-                const rowDir = side === 'right' ? 'row-reverse' : 'row';
+                const rowDir = 'row';
                 const posNums = (numsByPos[pos] && numsByPos[pos][side]) || [];
                 html += `<div style="display:flex;flex-direction:${rowDir};align-items:center;gap:3px;">
                     <div style="font-size:10px;font-weight:bold;color:#bbb;min-width:18px;text-align:center;">${pos}</div>`;
@@ -2070,25 +2070,24 @@ function renderCorridor(idx) {
         return html;
     }
 
-    const leftLabel = isStarZone ? '★★ 구역 (앞)' : `${item.zone}구역 ${item.dong}동 (앞: ${leftNums[0] || ''}~${leftNums[leftNums.length - 1] || ''})`;
-    const rightLabel = isStarZone ? '★★ 구역 (뒤)' : `${item.zone}구역 ${item.dong}동 (뒤: ${rightNums[0] || ''}~${rightNums[rightNums.length - 1] || ''})`;
+    const topLabel = isStarZone ? '★★ 구역 (앞)' : `${item.zone}구역 ${item.dong}동 (앞: ${leftNums[0] || ''}~${leftNums[leftNums.length - 1] || ''})`;
+    const bottomLabel = isStarZone ? '★★ 구역 (뒤)' : `${item.zone}구역 ${item.dong}동 (뒤: ${rightNums[0] || ''}~${rightNums[rightNums.length - 1] || ''})`;
     const corridorLabel = isStarZone ? '★★ 통로' : `${item.zone}구역 ${item.dong}동 통로`;
 
     mapBody.innerHTML = `
         <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;">
-            <div style="display:grid;grid-template-columns:1fr 70px 1fr;background:#f4f4f4;padding:8px 16px;border-bottom:1px solid #ddd;">
-                <div style="font-size:12px;font-weight:bold;color:#3d5afe;">${leftLabel}</div>
-                <div style="font-size:11px;color:#aaa;text-align:center;align-self:center;">통로</div>
-                <div style="font-size:12px;font-weight:bold;color:#e65100;text-align:right;">${rightLabel}</div>
+            <div style="display:flex;justify-content:space-between;align-items:center;background:#f4f4f4;padding:8px 16px;border-bottom:1px solid #ddd;">
+                <div style="font-size:12px;font-weight:bold;color:#3d5afe;">${topLabel}</div>
+                <div style="font-size:12px;font-weight:bold;color:#e65100;">${bottomLabel}</div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 70px 1fr;min-height:280px;overflow-x:auto;">
-                <div style="border-right:1px solid #eee;">${buildRack(leftLocs, leftNums, 'left')}</div>
-                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#fafafa;padding:10px 0;">
-                    <div style="font-size:11px;color:#ccc;writing-mode:vertical-rl;letter-spacing:4px;">↑ ↑ ↑</div>
-                    <div style="font-size:10px;color:#bbb;writing-mode:vertical-rl;font-weight:bold;">${corridorLabel}</div>
-                    <div style="font-size:11px;color:#ccc;writing-mode:vertical-rl;letter-spacing:4px;">↓ ↓ ↓</div>
+            <div style="display:flex;flex-direction:column;overflow-x:auto;">
+                <div style="border-bottom:1px solid #eee;">${buildRack(leftLocs, leftNums, 'top')}</div>
+                <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:8px 16px;border-bottom:1px solid #eee;border-top:1px solid #eee;">
+                    <div style="font-size:11px;color:#ccc;letter-spacing:4px;">← ← ←</div>
+                    <div style="font-size:11px;color:#bbb;font-weight:bold;">${corridorLabel}</div>
+                    <div style="font-size:11px;color:#ccc;letter-spacing:4px;">→ → →</div>
                 </div>
-                <div style="border-left:1px solid #eee;">${buildRack(rightLocs, rightNums, 'right')}</div>
+                <div>${buildRack(rightLocs, rightNums, 'bottom')}</div>
             </div>
             <div style="display:flex;gap:12px;padding:10px 16px;border-top:1px solid #ddd;flex-wrap:wrap;background:#fafafa;">
                 <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#c8e6c9;border:1px solid #66bb6a;"></span>상품있음</span>
