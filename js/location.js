@@ -1869,20 +1869,7 @@ window.renderMap = function() {
     });
 
     zones.forEach(zone => {
-        if (zone === '★') {
-            svCorridorList.push({ zone: '★', dong: null, label: '★★ 구역' });
-        } else {
-            const dongSet = new Set();
-            originalData.forEach(d => {
-                if (d.id.charAt(0).toUpperCase() === zone && d.dong) {
-                    dongSet.add((d.dong || '').toString().trim());
-                }
-            });
-            const dongs = [...dongSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
-            dongs.forEach(dong => {
-                svCorridorList.push({ zone, dong, label: `${zone}구역 ${dong}동` });
-            });
-        }
+        svCorridorList.push({ zone, label: zone === '★' ? '★★ 구역' : `${zone}구역` });
     });
 
     // 탭 렌더링
@@ -1915,74 +1902,10 @@ function renderCorridor(idx) {
     const cellSize = document.getElementById('map-cell-size') ? Number(document.getElementById('map-cell-size').value) : 54;
     const isStarZone = item.zone === '★';
 
-    // 해당 구역+동의 로케이션 전체 수집
-    let allLocs = [];
-    if (isStarZone) {
-        allLocs = originalData.filter(d => d.id.charAt(0) === '★')
-            .sort((a, b) => {
-                const na = parseInt((a.id.match(/\d+$/) || [0])[0]);
-                const nb = parseInt((b.id.match(/\d+$/) || [0])[0]);
-                return na - nb;
-            });
-    } else {
-        allLocs = originalData.filter(d =>
-            d.id.charAt(0).toUpperCase() === item.zone &&
-            (d.dong || '').toString().trim() === item.dong
-        );
-    }
-
-    // pos(단) 목록
-    const posSet = new Set();
-    allLocs.forEach(d => { if (d.pos) posSet.add((d.pos || '').toString().trim()); });
-    const posLabels = [...posSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
-    if (posLabels.length === 0) posLabels.push(...['1','2','3','4','5']);
-
-    // 번호 추출 및 pos별 좌/우 분리
-    let leftLocs = [], rightLocs = [], leftNums = [], rightNums = [];
-    let numsByPos = {};
-
-    if (isStarZone) {
-        const half = Math.ceil(allLocs.length / 2);
-        leftLocs = allLocs.slice(0, half);
-        rightLocs = allLocs.slice(half);
-    } else {
-        const leftNumSet = new Set();
-        const rightNumSet = new Set();
-
-        posLabels.forEach(pos => {
-            const posLocs = allLocs.filter(d => (d.pos || '').toString().trim() === pos);
-            const nums = posLocs.map(d => {
-                const m = d.id.match(/(\d+)$/);
-                return m ? parseInt(m[1]) : 0;
-            }).filter(n => n > 0).sort((a, b) => a - b);
-
-            const posHalf = Math.ceil(nums.length / 2);
-            const leftN = nums.slice(0, posHalf);
-            const rightN = nums.slice(posHalf);
-
-            numsByPos[pos] = { left: leftN, right: rightN };
-            leftN.forEach(n => leftNumSet.add(n));
-            rightN.forEach(n => rightNumSet.add(n));
-        });
-
-        leftNums = [...leftNumSet].sort((a, b) => a - b);
-        rightNums = [...rightNumSet].sort((a, b) => a - b);
-
-        leftLocs = allLocs.filter(d => {
-            const m = d.id.match(/(\d+)$/);
-            return m && leftNumSet.has(parseInt(m[1]));
-        });
-        rightLocs = allLocs.filter(d => {
-            const m = d.id.match(/(\d+)$/);
-            return m && rightNumSet.has(parseInt(m[1]));
-        });
-    }
-
     // 셀 공통 함수
     function hasContent(loc) {
         return loc && ((loc.code && loc.code !== loc.id && loc.code.trim() !== '') || (loc.name && loc.name.trim() !== ''));
     }
-
     function cellStyle(loc) {
         if (!loc) return 'background:#f0f0f0; border:1px dashed #ddd;';
         if (loc.preAssigned) return 'background:#ffe0b2; border:1.5px solid #fb8c00;';
@@ -1990,7 +1913,6 @@ function renderCorridor(idx) {
         if (hasContent(loc)) return 'background:#c8e6c9; border:1.5px solid #66bb6a;';
         return 'background:#f0f0f0; border:1px solid #ccc;';
     }
-
     function cellInner(loc) {
         if (!loc) return '';
         const nameText = hasContent(loc) ? (loc.name || loc.code || '').substring(0, 6) : '';
@@ -1998,7 +1920,6 @@ function renderCorridor(idx) {
         return `<div style="font-size:9px;color:#aaa;line-height:1.3;">${loc.id}</div>
                 <div style="font-size:9px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cellSize - 6}px;text-align:center;">${nameText || '빈칸'}</div>`;
     }
-
     function tooltipHtml(loc) {
         if (!loc) return '';
         const isReserved = loc.reserved === true;
@@ -2017,7 +1938,6 @@ function renderCorridor(idx) {
             ${isPreAssigned ? `<div style="color:#bf360c;"><b>선지정코드</b>: ${loc.preAssignedCode || '-'}</div>` : ''}
         </div>`;
     }
-
     function getCell(locs, pos, num) {
         return locs.find(d => {
             const m = d.id.match(/(\d+)$/);
@@ -2025,12 +1945,18 @@ function renderCorridor(idx) {
         }) || null;
     }
 
-    function buildRack(locs, nums, side) {
-        let html = `<div style="padding:10px 8px;display:flex;flex-direction:column;gap:4px;">`;
-
-        if (isStarZone) {
-            html += `<div style="display:flex;flex-direction:row;flex-wrap:wrap;gap:3px;">`;
-            locs.forEach(loc => {
+    function buildRackSection(locs, numsByPos, posLabels, posKey, cellSize) {
+        let html = `<div style="padding:8px 8px;display:flex;flex-direction:column;gap:4px;">`;
+        posLabels.forEach(pos => {
+            const posNums = (numsByPos[pos] && numsByPos[pos][posKey]) || [];
+            html += `<div style="display:flex;flex-direction:row;align-items:center;gap:3px;">
+                <div style="font-size:10px;font-weight:bold;color:#bbb;min-width:18px;text-align:center;">${pos}</div>`;
+            posNums.forEach(num => {
+                const loc = getCell(locs, pos, num);
+                if (!loc) {
+                    html += `<div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(null)}border-radius:4px;"></div>`;
+                    return;
+                }
                 const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
                 html += `<div style="position:relative;"
                     onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
@@ -2041,55 +1967,117 @@ function renderCorridor(idx) {
                     </div>${tooltipHtml(loc)}</div>`;
             });
             html += '</div>';
-        } else {
-            posLabels.forEach(pos => {
-                const rowDir = 'row';
-                const posNums = (numsByPos[pos] && numsByPos[pos][side]) || [];
-                html += `<div style="display:flex;flex-direction:${rowDir};align-items:center;gap:3px;">
-                    <div style="font-size:10px;font-weight:bold;color:#bbb;min-width:18px;text-align:center;">${pos}</div>`;
-                posNums.forEach(num => {
-                    const loc = getCell(locs, pos, num);
-                    if (!loc) {
-                        html += `<div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(null)}border-radius:4px;"></div>`;
-                        return;
-                    }
-                    const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
-                    html += `<div style="position:relative;"
-                        onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
-                        onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
-                        <div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
-                            onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
-                            ${cellInner(loc)}
-                        </div>${tooltipHtml(loc)}</div>`;
-                });
-                html += '</div>';
-            });
-        }
-
+        });
         html += '</div>';
         return html;
     }
 
-    const topLabel = isStarZone ? '★★ 구역 (앞)' : `${item.zone}구역 ${item.dong}동 (앞: ${leftNums[0] || ''}~${leftNums[leftNums.length - 1] || ''})`;
-    const bottomLabel = isStarZone ? '★★ 구역 (뒤)' : `${item.zone}구역 ${item.dong}동 (뒤: ${rightNums[0] || ''}~${rightNums[rightNums.length - 1] || ''})`;
-    const corridorLabel = isStarZone ? '★★ 통로' : `${item.zone}구역 ${item.dong}동 통로`;
+    let bodyHtml = '';
 
-    mapBody.innerHTML = `
-        <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;">
-            <div style="display:flex;justify-content:space-between;align-items:center;background:#f4f4f4;padding:8px 16px;border-bottom:1px solid #ddd;">
-                <div style="font-size:12px;font-weight:bold;color:#3d5afe;">${topLabel}</div>
-                <div style="font-size:12px;font-weight:bold;color:#e65100;">${bottomLabel}</div>
-            </div>
-            <div style="display:flex;flex-direction:column;overflow-x:auto;">
-                <div style="border-bottom:1px solid #eee;">${buildRack(leftLocs, leftNums, 'top')}</div>
-                <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:8px 16px;border-bottom:1px solid #eee;border-top:1px solid #eee;">
+    if (isStarZone) {
+        // ★구역: 번호 순서로 절반씩 위/아래
+        const allLocs = originalData.filter(d => d.id.charAt(0) === '★')
+            .sort((a, b) => parseInt((a.id.match(/\d+$/) || [0])[0]) - parseInt((b.id.match(/\d+$/) || [0])[0]));
+        const half = Math.ceil(allLocs.length / 2);
+        const topLocs = allLocs.slice(0, half);
+        const botLocs = allLocs.slice(half);
+
+        function starRow(locs) {
+            let h = `<div style="padding:8px;display:flex;flex-wrap:wrap;gap:3px;">`;
+            locs.forEach(loc => {
+                const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
+                h += `<div style="position:relative;"
+                    onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
+                    onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
+                    <div style="width:${cellSize}px;height:${cellSize+6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
+                        onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
+                        ${cellInner(loc)}
+                    </div>${tooltipHtml(loc)}</div>`;
+            });
+            h += '</div>';
+            return h;
+        }
+
+        bodyHtml = `
+            <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;">
+                <div style="background:#f4f4f4;padding:6px 16px;font-size:12px;font-weight:bold;color:#3d5afe;border-bottom:1px solid #ddd;">★★ 구역 (앞)</div>
+                ${starRow(topLocs)}
+                <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:7px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
                     <div style="font-size:11px;color:#ccc;letter-spacing:4px;">← ← ←</div>
-                    <div style="font-size:11px;color:#bbb;font-weight:bold;">${corridorLabel}</div>
+                    <div style="font-size:11px;color:#bbb;font-weight:bold;">★★ 통로</div>
                     <div style="font-size:11px;color:#ccc;letter-spacing:4px;">→ → →</div>
                 </div>
-                <div>${buildRack(rightLocs, rightNums, 'bottom')}</div>
-            </div>
-            <div style="display:flex;gap:12px;padding:10px 16px;border-top:1px solid #ddd;flex-wrap:wrap;background:#fafafa;">
+                <div style="background:#f4f4f4;padding:6px 16px;font-size:12px;font-weight:bold;color:#e65100;border-bottom:1px solid #ddd;">★★ 구역 (뒤)</div>
+                ${starRow(botLocs)}
+            </div>`;
+    } else {
+        // 일반구역: 동별로 섹션 나눠서 표시
+        const dongSet = new Set();
+        originalData.forEach(d => {
+            if (d.id.charAt(0).toUpperCase() === item.zone && d.dong) {
+                dongSet.add((d.dong || '').toString().trim());
+            }
+        });
+        const dongs = [...dongSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+
+        dongs.forEach(dong => {
+            const allLocs = originalData.filter(d =>
+                d.id.charAt(0).toUpperCase() === item.zone &&
+                (d.dong || '').toString().trim() === dong
+            );
+
+            const posSet = new Set();
+            allLocs.forEach(d => { if (d.pos) posSet.add((d.pos || '').toString().trim()); });
+            const posLabels = [...posSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+            if (posLabels.length === 0) return;
+
+            const leftNumSet = new Set();
+            const rightNumSet = new Set();
+            const numsByPos = {};
+
+            posLabels.forEach(pos => {
+                const posLocs = allLocs.filter(d => (d.pos || '').toString().trim() === pos);
+                const nums = posLocs.map(d => {
+                    const m = d.id.match(/(\d+)$/);
+                    return m ? parseInt(m[1]) : 0;
+                }).filter(n => n > 0).sort((a, b) => a - b);
+                const posHalf = Math.ceil(nums.length / 2);
+                const leftN = nums.slice(0, posHalf);
+                const rightN = nums.slice(posHalf);
+                numsByPos[pos] = { left: leftN, right: rightN };
+                leftN.forEach(n => leftNumSet.add(n));
+                rightN.forEach(n => rightNumSet.add(n));
+            });
+
+            const leftNums = [...leftNumSet].sort((a, b) => a - b);
+            const rightNums = [...rightNumSet].sort((a, b) => a - b);
+            const leftLocs = allLocs.filter(d => { const m = d.id.match(/(\d+)$/); return m && leftNumSet.has(parseInt(m[1])); });
+            const rightLocs = allLocs.filter(d => { const m = d.id.match(/(\d+)$/); return m && rightNumSet.has(parseInt(m[1])); });
+
+            const topLabel = `${item.zone}구역 ${dong}동 (앞: ${leftNums[0] || ''}~${leftNums[leftNums.length-1] || ''})`;
+            const botLabel = `${item.zone}구역 ${dong}동 (뒤: ${rightNums[0] || ''}~${rightNums[rightNums.length-1] || ''})`;
+
+            bodyHtml += `
+                <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;margin-bottom:12px;">
+                    <div style="display:flex;justify-content:space-between;background:#f4f4f4;padding:6px 16px;border-bottom:1px solid #ddd;">
+                        <div style="font-size:12px;font-weight:bold;color:#3d5afe;">${topLabel}</div>
+                        <div style="font-size:12px;font-weight:bold;color:#e65100;">${botLabel}</div>
+                    </div>
+                    ${buildRackSection(leftLocs, numsByPos, posLabels, 'left', cellSize)}
+                    <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:7px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
+                        <div style="font-size:11px;color:#ccc;letter-spacing:4px;">← ← ←</div>
+                        <div style="font-size:11px;color:#bbb;font-weight:bold;">${item.zone}구역 ${dong}동 통로</div>
+                        <div style="font-size:11px;color:#ccc;letter-spacing:4px;">→ → →</div>
+                    </div>
+                    ${buildRackSection(rightLocs, numsByPos, posLabels, 'right', cellSize)}
+                </div>`;
+        });
+    }
+
+    mapBody.innerHTML = `
+        <div>
+            ${bodyHtml}
+            <div style="display:flex;gap:12px;padding:10px 0;flex-wrap:wrap;">
                 <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#c8e6c9;border:1px solid #66bb6a;"></span>상품있음</span>
                 <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#f0f0f0;border:1px solid #ccc;"></span>빈칸</span>
                 <span style="font-size:11px;color:#555;display:flex;align-items:center;gap:5px;"><span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#fff9c4;border:1px solid #f9a825;"></span>예약중</span>
