@@ -204,7 +204,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.7 (도면 폰트 비례 개선)</div>
+            <div class="version-badge">🚀 Ver 3.8 (도면 칸 자동크기)</div>
             
             <div class="upload-dropdown">
                 <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
@@ -268,11 +268,6 @@
                 <span class="map-legend" style="background:#c8e6c9; border:1.5px solid #66bb6a; color:#1b5e20;">상품있음</span>
                 <span class="map-legend" style="background:#fff9c4; border:1.5px solid #f9a825; color:#e65100;">예약중</span>
                 <span class="map-legend" style="background:#ffe0b2; border:1.5px solid #fb8c00; color:#bf360c;">선지정</span>
-                <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
-                    <label style="font-size:12px; color:#555; font-weight:bold;">칸 크기:</label>
-                    <input type="range" id="map-cell-size" min="30" max="90" value="54" style="width:80px;" oninput="updateMapCellSize(this.value)">
-                    <span id="map-cell-size-label" style="font-size:12px; color:#333; font-weight:bold;">54px</span>
-                </div>
             </div>
             <!-- 구역 탭 -->
             <div id="map-zone-tabs" style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;"></div>
