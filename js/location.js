@@ -2015,7 +2015,8 @@ function renderCorridor(idx) {
             <div style="color:#555;">${status}</div>
             ${hasContent(loc) ? `<div style="color:#333;"><b>상품명</b>: ${loc.name || '-'}</div><div style="color:#1976d2;"><b>재고</b>: ${loc.stock || '0'}개</div>` : ''}
             ${isPreAssigned ? `<div style="color:#bf360c;"><b>선지정코드</b>: ${loc.preAssignedCode || '-'}</div>` : ''}
-        </div>`;\n    }
+        </div>`;
+    }
 
     function getCell(locs, pos, num) {
         return locs.find(d => {
