@@ -1915,10 +1915,14 @@ function renderCorridor(idx) {
     }
     function cellInner(loc) {
         if (!loc) return '';
-        const nameText = hasContent(loc) ? (loc.name || loc.code || '').substring(0, 6) : '';
+        const nameText = hasContent(loc) ? (loc.name || loc.code || '') : '';
         const nameColor = hasContent(loc) ? '#1b5e20' : '#999';
-        return `<div style="font-size:9px;color:#aaa;line-height:1.3;">${loc.id}</div>
-                <div style="font-size:9px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cellSize - 6}px;text-align:center;">${nameText || '빈칸'}</div>`;
+        const idFontSize = Math.max(7, Math.floor(cellSize / 8));
+        const nameFontSize = Math.max(10, Math.floor(cellSize / 5));
+        const maxChars = Math.max(4, Math.floor((cellSize - 6) / (nameFontSize * 0.55)));
+        const displayName = nameText.substring(0, maxChars) || '빈칸';
+        return `<div style="font-size:${idFontSize}px;color:#bbb;line-height:1.1;">${loc.id}</div>
+                <div style="font-size:${nameFontSize}px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cellSize - 4}px;text-align:center;line-height:1.3;">${displayName}</div>`;
     }
     function tooltipHtml(loc) {
         if (!loc) return '';
@@ -2000,14 +2004,13 @@ function renderCorridor(idx) {
 
         bodyHtml = `
             <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;">
-                <div style="background:#f4f4f4;padding:6px 16px;font-size:12px;font-weight:bold;color:#3d5afe;border-bottom:1px solid #ddd;">★★ 구역 (앞)</div>
+                <div style="background:#f4f4f4;padding:6px 16px;font-size:13px;font-weight:bold;color:#3d5afe;border-bottom:1px solid #ddd;">★★ 구역</div>
                 ${starRow(topLocs)}
                 <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:7px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
                     <div style="font-size:11px;color:#ccc;letter-spacing:4px;">← ← ←</div>
                     <div style="font-size:11px;color:#bbb;font-weight:bold;">★★ 통로</div>
                     <div style="font-size:11px;color:#ccc;letter-spacing:4px;">→ → →</div>
                 </div>
-                <div style="background:#f4f4f4;padding:6px 16px;font-size:12px;font-weight:bold;color:#e65100;border-bottom:1px solid #ddd;">★★ 구역 (뒤)</div>
                 ${starRow(botLocs)}
             </div>`;
     } else {
@@ -2054,19 +2057,15 @@ function renderCorridor(idx) {
             const leftLocs = allLocs.filter(d => { const m = d.id.match(/(\d+)$/); return m && leftNumSet.has(parseInt(m[1])); });
             const rightLocs = allLocs.filter(d => { const m = d.id.match(/(\d+)$/); return m && rightNumSet.has(parseInt(m[1])); });
 
-            const topLabel = `${item.zone}구역 ${dong}동 (앞: ${leftNums[0] || ''}~${leftNums[leftNums.length-1] || ''})`;
-            const botLabel = `${item.zone}구역 ${dong}동 (뒤: ${rightNums[0] || ''}~${rightNums[rightNums.length-1] || ''})`;
-
             bodyHtml += `
                 <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;margin-bottom:12px;">
-                    <div style="display:flex;justify-content:space-between;background:#f4f4f4;padding:6px 16px;border-bottom:1px solid #ddd;">
-                        <div style="font-size:12px;font-weight:bold;color:#3d5afe;">${topLabel}</div>
-                        <div style="font-size:12px;font-weight:bold;color:#e65100;">${botLabel}</div>
+                    <div style="background:#f4f4f4;padding:5px 16px;border-bottom:1px solid #ddd;">
+                        <div style="font-size:13px;font-weight:bold;color:#3d5afe;">${item.zone}구역 ${dong}동</div>
                     </div>
                     ${buildRackSection(leftLocs, numsByPos, posLabels, 'left', cellSize)}
-                    <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:7px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
+                    <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:5px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
                         <div style="font-size:11px;color:#ccc;letter-spacing:4px;">← ← ←</div>
-                        <div style="font-size:11px;color:#bbb;font-weight:bold;">${item.zone}구역 ${dong}동 통로</div>
+                        <div style="font-size:11px;color:#bbb;font-weight:bold;">${dong}동 통로</div>
                         <div style="font-size:11px;color:#ccc;letter-spacing:4px;">→ → →</div>
                     </div>
                     ${buildRackSection(rightLocs, numsByPos, posLabels, 'right', cellSize)}
