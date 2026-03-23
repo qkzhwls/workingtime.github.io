@@ -1841,7 +1841,8 @@ window.cancelPreAssignMode = function() {
 let currentCorridorIdx = 0;
 let svCorridorList = [];
 
-window.updateMapCellSize = function() {
+window.updateMapCellSize = function(val) {
+    document.getElementById('map-cell-size-label').innerText = val + 'px';
     renderCorridor(currentCorridorIdx);
 };
 
@@ -1899,12 +1900,7 @@ function renderCorridor(idx) {
     if (!item) return;
 
     const isStarZone = item.zone === '★';
-
-    // cellSize 자동계산 - 나중에 동별 최대 칸수 파악 후 재계산
-    // 우선 mapBody 너비 기준으로 임시 계산
-    const mapWidth = (mapBody.offsetWidth || window.innerWidth - 60) - 30; // padding 제외
-    // 칸 수는 동별로 다르므로 일단 기본값으로 렌더 후 조정
-    let cellSize = 54; // 기본값, 아래에서 동별로 재계산
+    const cellSize = document.getElementById('map-cell-size') ? Number(document.getElementById('map-cell-size').value) : 54;
 
     // 셀 공통 함수
     function hasContent(loc) {
@@ -1989,10 +1985,7 @@ function renderCorridor(idx) {
         const topLocs = allLocs.slice(0, half);
         const botLocs = allLocs.slice(half);
 
-        // ★★구역 cellSize 자동계산 - 앞/뒤 중 긴 쪽 기준
-        const maxStarCols = Math.max(topLocs.length, botLocs.length);
-        const starAvailWidth = mapWidth - 20;
-        cellSize = maxStarCols > 0 ? Math.max(40, Math.min(100, Math.floor((starAvailWidth - (maxStarCols - 1) * 3) / maxStarCols))) : 54;
+        // ★★구역 cellSize는 슬라이더 값 사용
 
         function starRow(locs) {
             const idFontSize = Math.max(7, Math.floor(cellSize / 8));
@@ -2072,13 +2065,7 @@ function renderCorridor(idx) {
             const leftLocs = allLocs.filter(d => { const m = d.id.match(/(\d+)$/); return m && leftNumSet.has(parseInt(m[1])); });
             const rightLocs = allLocs.filter(d => { const m = d.id.match(/(\d+)$/); return m && rightNumSet.has(parseInt(m[1])); });
 
-            // 이 동의 한 줄 최대 칸 수로 cellSize 자동계산
-            const maxColCount = Math.max(...posLabels.map(pos => (numsByPos[pos]?.left?.length || 0)));
-            const posLabelWidth = 22; // 단 라벨 너비
-            const gapSize = 3; // gap
-            const availWidth = mapWidth - posLabelWidth - 20;
-            cellSize = maxColCount > 0 ? Math.max(40, Math.floor((availWidth - (maxColCount - 1) * gapSize) / maxColCount)) : 54;
-            cellSize = Math.min(cellSize, 100); // 최대 100px
+            // cellSize는 슬라이더 값 사용 (구역별 고정)
 
             bodyHtml += `
                 <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;margin-bottom:12px;">
@@ -2111,9 +2098,3 @@ function renderCorridor(idx) {
 
 window.addEventListener('keydown', function(e) { if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) { e.preventDefault(); alert("🚨 실시간 동기화 중입니다."); } });
 window.addEventListener('beforeunload', function(e) { e.preventDefault(); e.returnValue = ''; });
-window.addEventListener('resize', function() {
-    if (document.getElementById('view-map') && document.getElementById('view-map').style.display !== 'none') {
-        clearTimeout(window._mapResizeTimer);
-        window._mapResizeTimer = setTimeout(() => renderCorridor(currentCorridorIdx), 200);
-    }
-});
