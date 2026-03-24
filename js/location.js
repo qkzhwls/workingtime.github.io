@@ -961,6 +961,13 @@ window.applyUsageFilter = function(zone, state) {
     document.getElementById('view-map').style.display = 'none';
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelector('.tab-btn')?.classList.add('active');
+    // reserved/preassigned 필터 시 상품코드 버튼 파란색 표시
+    if (state === 'reserved' || state === 'preassigned') {
+        const btnCode = document.getElementById('btn-filter-code');
+        if (btnCode) btnCode.classList.add('active');
+    }
+    // 필터 초기화 버튼 표시
+    window.showFilterResetBtn();
 };
 
 window.calculateAndRenderUsage = function() {
@@ -1183,13 +1190,43 @@ window.toggleLocFilter = (val) => {
         else filters.loc.push(val); 
     } 
     setupFilterPopups(); 
-    applyFiltersAndSort(); 
+    applyFiltersAndSort();
+    window.showFilterResetBtn();
 };
 window.setFilter = (type, value) => { 
     filters[type] = value; 
     setupFilterPopups(); 
     applyFiltersAndSort(); 
-    if (typeof window.closeAllPopups === 'function') window.closeAllPopups(); 
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+    window.showFilterResetBtn();
+};
+
+window.showFilterResetBtn = function() {
+    const isFiltered = filters.loc.length > 0 ||
+        filters.code !== 'all' || filters.stock !== 'all' ||
+        filters.dong !== 'all' || filters.pos !== 'all' ||
+        filters.reserved === 'only' || filters.preassigned === 'only' ||
+        Object.keys(filters).some(k => k.startsWith('cus_') && filters[k] !== 'all');
+    let btn = document.getElementById('filter-reset-btn');
+    if (isFiltered) {
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = 'filter-reset-btn';
+            btn.innerHTML = '✕ 필터 초기화';
+            btn.style.cssText = 'padding:6px 12px; background:#ff5252; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer; font-size:13px;';
+            btn.onclick = () => {
+                filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
+                setupFilterPopups();
+                applyFiltersAndSort();
+                window.showFilterResetBtn();
+            };
+            const headerActions = document.querySelector('.header-actions');
+            if (headerActions) headerActions.prepend(btn);
+        }
+        btn.style.display = 'inline-block';
+    } else {
+        if (btn) btn.style.display = 'none';
+    }
 };
 
 function applyFiltersAndSort() {
