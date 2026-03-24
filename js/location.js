@@ -719,7 +719,8 @@ function renderTableHeader() {
         else if (col === 'std_stock') { html += createTh('stock', '정상재고', 130, true); popupHtml += `<div id="pop-stock" class="filter-popup"></div>`; }
         else if (col.startsWith('cus_')) {
             const label = col.replace('cus_', '');
-            html += createTh(col, label, 120, false); 
+            html += createTh(col, label, 120, true);
+            popupHtml += `<div id="pop-${col}" class="filter-popup"></div>`;
         }
     });
     
@@ -1102,6 +1103,16 @@ function updateFilterButtonStates() {
             else btn.classList.add('active');
         }
     });
+
+    // 커스텀 헤더 필터 버튼 활성 상태
+    window.visibleColumns.forEach(col => {
+        if (!col.startsWith('cus_')) return;
+        const btn = document.getElementById('btn-filter-' + col);
+        if (btn) {
+            if (!filters[col] || filters[col] === 'all') btn.classList.remove('active');
+            else btn.classList.add('active');
+        }
+    });
 }
 
 function setupFilterPopups() {
@@ -1128,7 +1139,26 @@ function setupFilterPopups() {
     stocks.forEach(s => { stockHtml += `<div class="filter-option ${filters.stock === s ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${filters.stock === s ? '✔️ ' : ''}${s}</div>`; });
     if(stockPop) stockPop.innerHTML = stockHtml;
 
-    updateFilterButtonStates(); 
+    updateFilterButtonStates();
+
+    // 커스텀 헤더 필터 팝업 생성
+    window.visibleColumns.forEach(col => {
+        if (!col.startsWith('cus_')) return;
+        const pop = document.getElementById(`pop-${col}`);
+        if (!pop) return;
+        const key = col.replace('cus_', '');
+        const curVal = filters[col] || 'all';
+        const vals = [...new Set(originalData.map(d => {
+            return (d.rawData && d.rawData[key]) ? d.rawData[key].toString().trim() : '';
+        }))].filter(Boolean).sort();
+        let html = getSortButtonsHtml(col) +
+            `<div class="filter-option ${curVal === 'all' ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curVal === 'all' ? '✔️ ' : ''}전체보기</div>`;
+        vals.forEach(v => {
+            const escaped = v.replace(/'/g, "\\'");
+            html += `<div class="filter-option ${curVal === v ? 'selected' : ''}" onclick="setFilter('${col}', '${escaped}')">${curVal === v ? '✔️ ' : ''}${v}</div>`;
+        });
+        pop.innerHTML = html;
+    });
 }
 
 window.executeSort = (key, direction) => { sortConfig = { key: key, direction: direction }; setupFilterPopups(); applyFiltersAndSort(); if (typeof window.closeAllPopups === 'function') window.closeAllPopups(); };
@@ -1157,10 +1187,24 @@ function applyFiltersAndSort() {
         if (filters.code === 'empty' && hasCode) return false;
         if (filters.code === 'not-empty' && !hasCode) return false;
         if (filters.stock !== 'all' && (item.stock || '0').toString() !== filters.stock) return false;
+        // 커스텀 헤더 필터
+        for (const col in filters) {
+            if (!col.startsWith('cus_') || filters[col] === 'all') continue;
+            const key = col.replace('cus_', '');
+            const val = (item.rawData && item.rawData[key]) ? item.rawData[key].toString().trim() : '';
+            if (val !== filters[col]) return false;
+        }
         return true;
     });
     filtered.sort((a, b) => {
-        let aVal = a[sortConfig.key] || ''; let bVal = b[sortConfig.key] || '';
+        let aVal, bVal;
+        if (sortConfig.key.startsWith('cus_')) {
+            const key = sortConfig.key.replace('cus_', '');
+            aVal = (a.rawData && a.rawData[key]) ? a.rawData[key].toString() : '';
+            bVal = (b.rawData && b.rawData[key]) ? b.rawData[key].toString() : '';
+        } else {
+            aVal = a[sortConfig.key] || ''; bVal = b[sortConfig.key] || '';
+        }
         if (sortConfig.key === 'stock') return sortConfig.direction === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
         return sortConfig.direction === 'asc' ? aVal.toString().localeCompare(bVal.toString()) : bVal.toString().localeCompare(aVal.toString());
     });
@@ -1473,11 +1517,17 @@ async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
         const allHeaders = Object.keys(rows[0] || {});
-        const exclude = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
+        const excludeRaw = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
+        // 공백제거 버전도 제외 목록에 포함
+        const exclude = [...new Set([...excludeRaw, ...excludeRaw.map(h => h.replace(/\s+/g, ''))])];
         
-        const customHeaders = allHeaders.filter(h => 
-            !exclude.includes(h) && h.trim() !== '' && !h.toUpperCase().includes('EMPTY') 
-        );
+        const customHeaders = allHeaders.filter(h => {
+            const clean = h.replace(/\s+/g, '');
+            return clean !== '' && 
+                   !h.toUpperCase().includes('EMPTY') &&
+                   !exclude.includes(h) &&
+                   !exclude.includes(clean);
+        });
         
         const newHeaders = [...new Set([...window.excelHeaders, ...customHeaders])];
         if (newHeaders.length > window.excelHeaders.length) {
