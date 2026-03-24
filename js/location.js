@@ -949,10 +949,18 @@ window.switchUsageTab = function(tab) { window.currentUsageTab = tab; window.cal
 window.applyUsageFilter = function(zone, state) {
     filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
     if (zone !== 'all') filters.loc = [zone];
-    if (state === 'used') filters.code = 'not-empty'; else if (state === 'empty') filters.code = 'empty';
+    if (state === 'used') filters.code = 'not-empty';
+    else if (state === 'empty') filters.code = 'empty';
+    else if (state === 'reserved') filters.reserved = 'only';
+    else if (state === 'preassigned') filters.preassigned = 'only';
     setupFilterPopups();
     applyFiltersAndSort();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+    // 리스트 탭으로 전환
+    document.getElementById('view-list').style.display = 'block';
+    document.getElementById('view-map').style.display = 'none';
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.tab-btn')?.classList.add('active');
 };
 
 window.calculateAndRenderUsage = function() {
@@ -1009,12 +1017,12 @@ window.calculateAndRenderUsage = function() {
             <div style="display:flex; justify-content: space-around; background: #eef1ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #c5cae9;">
                 <div style="text-align:center;">
                     <div style="font-size:11px; color:#555; font-weight:bold;">당일지정수량(예약)</div>
-                    <div style="font-size:18px; color:var(--primary); font-weight:900;">${todayReservedCount}</div>
+                    <div style="font-size:18px; color:var(--primary); font-weight:900; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all','reserved'); closeAllPopups();">${todayReservedCount}</div>
                 </div>
                 <div style="width:1px; background:#ccc;"></div>
                 <div style="text-align:center;">
                     <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량(준비중)</div>
-                    <div style="font-size:18px; color:#e65100; font-weight:900;">${preAssignedCount}</div>
+                    <div style="font-size:18px; color:#e65100; font-weight:900; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all','preassigned'); closeAllPopups();">${preAssignedCount}</div>
                 </div>
             </div>
             <div style="font-size:16px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div>
@@ -1194,6 +1202,8 @@ function applyFiltersAndSort() {
         if (filters.code === 'not-empty' && !hasCode) return false;
         if (filters.stock !== 'all' && (item.stock || '0').toString() !== filters.stock) return false;
         if (filters.stock2f && filters.stock2f !== 'all' && (item.stock2f || '0').toString() !== filters.stock2f) return false;
+        if (filters.reserved === 'only' && item.reserved !== true) return false;
+        if (filters.preassigned === 'only' && item.preAssigned !== true) return false;
         // 커스텀 헤더 필터
         for (const col in filters) {
             if (!col.startsWith('cus_') || filters[col] === 'all') continue;
