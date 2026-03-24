@@ -717,6 +717,7 @@ function renderTableHeader() {
         else if (col === 'std_name') { html += createTh('name', '상품명', 'auto', true); popupHtml += `<div id="pop-name" class="filter-popup"></div>`; }
         else if (col === 'std_option') { html += createTh('option', '옵션', 180, true); popupHtml += `<div id="pop-option" class="filter-popup"></div>`; }
         else if (col === 'std_stock') { html += createTh('stock', '정상재고', 130, true); popupHtml += `<div id="pop-stock" class="filter-popup"></div>`; }
+        else if (col === 'std_stock2f') { html += createTh('stock2f', '2층창고재고', 130, true); popupHtml += `<div id="pop-stock2f" class="filter-popup"></div>`; }
         else if (col.startsWith('cus_')) {
             const label = col.replace('cus_', '');
             html += createTh(col, label, 120, true);
@@ -747,7 +748,7 @@ window.openSettingsModal = (e) => {
     
     const stdCols = [
         { id: 'std_dong', label: '동' }, { id: 'std_pos', label: '위치' }, { id: 'std_id', label: '로케이션(ID)' },
-        { id: 'std_code', label: '상품코드' }, { id: 'std_name', label: '상품명' }, { id: 'std_option', label: '옵션' }, { id: 'std_stock', label: '정상재고' }
+        { id: 'std_code', label: '상품코드' }, { id: 'std_name', label: '상품명' }, { id: 'std_option', label: '옵션' }, { id: 'std_stock', label: '정상재고' }, { id: 'std_stock2f', label: '2층창고재고' }
     ];
     
     stdCols.forEach(col => {
@@ -1138,6 +1139,11 @@ function setupFilterPopups() {
     let stockHtml = getSortButtonsHtml('stock') + `<div class="filter-option ${filters.stock === 'all' ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${filters.stock === 'all' ? '✔️ ' : ''}전체보기</div>`;
     stocks.forEach(s => { stockHtml += `<div class="filter-option ${filters.stock === s ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${filters.stock === s ? '✔️ ' : ''}${s}</div>`; });
     if(stockPop) stockPop.innerHTML = stockHtml;
+    const stock2fPop = document.getElementById('pop-stock2f');
+    const stocks2f = [...new Set(originalData.map(d => (d.stock2f || '0').toString()))].sort((a, b) => Number(a) - Number(b));
+    let stock2fHtml = getSortButtonsHtml('stock2f') + `<div class="filter-option ${filters.stock2f === 'all' ? 'selected' : ''}" onclick="setFilter('stock2f', 'all')">${filters.stock2f === 'all' ? '✔️ ' : ''}전체보기</div>`;
+    stocks2f.forEach(s => { stock2fHtml += `<div class="filter-option ${filters.stock2f === s ? 'selected' : ''}" onclick="setFilter('stock2f', '${s}')">${filters.stock2f === s ? '✔️ ' : ''}${s}</div>`; });
+    if(stock2fPop) stock2fPop.innerHTML = stock2fHtml;
 
     updateFilterButtonStates();
 
@@ -1187,6 +1193,7 @@ function applyFiltersAndSort() {
         if (filters.code === 'empty' && hasCode) return false;
         if (filters.code === 'not-empty' && !hasCode) return false;
         if (filters.stock !== 'all' && (item.stock || '0').toString() !== filters.stock) return false;
+        if (filters.stock2f && filters.stock2f !== 'all' && (item.stock2f || '0').toString() !== filters.stock2f) return false;
         // 커스텀 헤더 필터
         for (const col in filters) {
             if (!col.startsWith('cus_') || filters[col] === 'all') continue;
@@ -1293,6 +1300,7 @@ function renderTable(data) {
             else if (col === 'std_name') html += `<td style="text-align:left;">${loc.name || ''}</td>`;
             else if (col === 'std_option') html += `<td style="text-align:left; font-size:12px;">${loc.option || ''}</td>`;
             else if (col === 'std_stock') html += `<td style="font-weight:bold;">${loc.stock || '0'}</td>`;
+            else if (col === 'std_stock2f') html += `<td style="font-weight:bold;">${loc.stock2f || '0'}</td>`;
             else if (col.startsWith('cus_')) {
                 const key = col.replace('cus_', '');
                 let val = (loc.rawData && loc.rawData[key]) ? loc.rawData[key] : '';
@@ -1530,7 +1538,8 @@ async function updateDatabaseA(rows, mode = 'daily') {
         });
         
         const newHeaders = [...new Set([...window.excelHeaders, ...customHeaders])];
-        if (newHeaders.length > window.excelHeaders.length) {
+        const hasNewHeader = customHeaders.some(h => !window.excelHeaders.includes(h));
+        if (hasNewHeader) {
             await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { excelHeaders: newHeaders }, { merge: true });
             window.excelHeaders = newHeaders;
         }
@@ -1598,8 +1607,18 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
                         let cleanK = k.replace(/\s+/g, '');
-                        if(row[cleanK] !== undefined && row[cleanK] !== null && row[cleanK].toString().trim() !== "") {
-                            cleanRawData[k] = row[cleanK].toString().trim();
+                        const rawVal = row[cleanK] !== undefined ? row[cleanK] : row[k];
+                        if(rawVal !== undefined && rawVal !== null && rawVal.toString().trim() !== "") {
+                            // 엑셀 날짜 시리얼 넘버 자동 변환
+                            const strVal = rawVal.toString().trim();
+                            const numVal = parseFloat(strVal);
+                            if(!isNaN(numVal) && numVal > 40000 && numVal < 60000 && strVal.includes('.')) {
+                                cleanRawData[k] = formatExcelDate(numVal);
+                            } else if(!isNaN(numVal) && Number.isInteger(numVal) && numVal > 40000 && numVal < 60000) {
+                                cleanRawData[k] = formatExcelDate(numVal);
+                            } else {
+                                cleanRawData[k] = strVal;
+                            }
                         }
                     });
 
