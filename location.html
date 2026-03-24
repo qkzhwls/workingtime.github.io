@@ -65,7 +65,9 @@
             text-align: center; 
             border: 1px solid #ccc; 
             font-size: 14px; 
-            word-break: break-all;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         
         .list-table tbody tr { cursor: pointer; transition: background 0.2s; }
@@ -204,7 +206,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.12 (2층창고재고 컬럼 추가 + 헤더 누락 수정)</div>
+            <div class="version-badge">🚀 Ver 3.13 (상품명 줄바꿈 수정)</div>
             
             <div class="upload-dropdown">
                 <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
