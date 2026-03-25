@@ -961,12 +961,7 @@ window.applyUsageFilter = function(zone, state) {
     document.getElementById('view-map').style.display = 'none';
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelector('.tab-btn')?.classList.add('active');
-    // reserved/preassigned 필터 시 상품코드 버튼 파란색 표시
-    if (state === 'reserved' || state === 'preassigned') {
-        const btnCode = document.getElementById('btn-filter-code');
-        if (btnCode) btnCode.classList.add('active');
-    }
-    // 필터 초기화 버튼 표시
+    // reserved/preassigned 필터 시 초기화 버튼 표시
     window.showFilterResetBtn();
 };
 
@@ -1115,8 +1110,13 @@ function updateFilterButtonStates() {
     ['code', 'dong', 'pos', 'stock'].forEach(type => {
         const btn = document.getElementById('btn-filter-' + type);
         if (btn) {
-            if (filters[type] === 'all') btn.classList.remove('active');
-            else btn.classList.add('active');
+            if (type === 'code') {
+                const active = filters.code !== 'all' || filters.reserved === 'only' || filters.preassigned === 'only';
+                if (active) btn.classList.add('active'); else btn.classList.remove('active');
+            } else {
+                if (filters[type] === 'all') btn.classList.remove('active');
+                else btn.classList.add('active');
+            }
         }
     });
 
@@ -1138,7 +1138,16 @@ function setupFilterPopups() {
     
     updateLocPopupUI();
     
-    let codeHtml = getSortButtonsHtml('code') + `<div class="filter-option ${filters.code === 'all' ? 'selected' : ''}" onclick="setFilter('code', 'all')">${filters.code === 'all' ? '✔️ ' : ''}전체보기</div><div class="filter-option ${filters.code === 'empty' ? 'selected' : ''}" onclick="setFilter('code', 'empty')">${filters.code === 'empty' ? '✔️ ' : ''}빈칸</div><div class="filter-option ${filters.code === 'not-empty' ? 'selected' : ''}" onclick="setFilter('code', 'not-empty')">${filters.code === 'not-empty' ? '✔️ ' : ''}내용있음</div>`;
+    const isReservedOnly = filters.reserved === 'only';
+    const isPreassignedOnly = filters.preassigned === 'only';
+    const codeAll = filters.code === 'all' && !isReservedOnly && !isPreassignedOnly;
+    let codeHtml = getSortButtonsHtml('code') +
+        `<div class="filter-option ${codeAll ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','all');setFilter('preassigned','all');">${codeAll ? '✔️ ' : ''}전체보기</div>` +
+        `<div class="filter-option ${filters.code === 'empty' ? 'selected' : ''}" onclick="setFilter('code','empty');setFilter('reserved','all');setFilter('preassigned','all');">${filters.code === 'empty' ? '✔️ ' : ''}빈칸</div>` +
+        `<div class="filter-option ${filters.code === 'not-empty' ? 'selected' : ''}" onclick="setFilter('code','not-empty');setFilter('reserved','all');setFilter('preassigned','all');">${filters.code === 'not-empty' ? '✔️ ' : ''}내용있음</div>` +
+        `<div class="filter-divider"></div>` +
+        `<div class="filter-option ${isReservedOnly ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','only');setFilter('preassigned','all');">${isReservedOnly ? '✔️ ' : ''}🔒 예약중</div>` +
+        `<div class="filter-option ${isPreassignedOnly ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','all');setFilter('preassigned','only');">${isPreassignedOnly ? '✔️ ' : ''}📦 선지정</div>`;
     if(codePop) codePop.innerHTML = codeHtml;
     if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
     if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
