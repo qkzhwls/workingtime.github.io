@@ -1277,8 +1277,8 @@ function applyFiltersAndSort() {
         if (filters.code === 'not-empty' && !hasCode) return false;
         if (filters.stock !== 'all' && (item.stock || '0').toString() !== filters.stock) return false;
         if (filters.stock2f && filters.stock2f !== 'all' && (item.stock2f || '0').toString() !== filters.stock2f) return false;
-        if (filters.reserved === 'only' && loc.codeTag !== '당일지정') return false;
-        if (filters.preassigned === 'only' && loc.codeTag !== '선지정') return false;
+        if (filters.reserved === 'only' && item.codeTag !== '당일지정') return false;
+        if (filters.preassigned === 'only' && item.codeTag !== '선지정') return false;
         // 커스텀 헤더 필터
         for (const col in filters) {
             if (!col.startsWith('cus_') || filters[col] === 'all') continue;
