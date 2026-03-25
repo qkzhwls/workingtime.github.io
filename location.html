@@ -206,7 +206,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.25 (추천 제외를 구역+동 조합 입력 방식으로 변경)</div>
+            <div class="version-badge">🚀 Ver 3.26 (2F 이동 추천 기능 추가)</div>
             
             <div class="upload-dropdown">
                 <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
@@ -379,9 +379,10 @@
 
     <div id="recommend-modal" class="modal-overlay" onclick="closeRecommendModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()" style="width: 980px; max-width: 96vw; padding: 25px 20px;">
-            <div class="modal-header" style="color: #4caf50; display: flex; align-items: center;">
+            <div class="modal-header" style="color: #4caf50; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
                 💡 로케이션 변경 리스트
-                <button onclick="window.openRatioModal()" style="margin-left:15px; padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">⚙️ 점수반영비율 설정</button>
+                <button onclick="window.openRatioModal()" style="padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">⚙️ 점수반영비율 설정</button>
+                <button onclick="window.show2FRecommendation()" style="padding:6px 12px; font-size:13px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🏢 2F 이동 추천</button>
             </div>
             <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
                 ※ 선지정으로 찜해둔 자리는 물건이 없더라도 이 추천 목록에서 완벽히 보호(제외)됩니다.
@@ -411,6 +412,60 @@
     </div>
 
     <div id="toast"></div>
+
+    <!-- 2F 이동 추천 모달 -->
+    <div id="modal-2f" class="modal-overlay" onclick="if(event.target.id==='modal-2f') document.getElementById('modal-2f').style.display='none'">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 1050px; max-width: 96vw; padding: 25px 20px;">
+            <div class="modal-header" style="color: #7b1fa2; display: flex; align-items: center; gap: 10px; flex-wrap:wrap;">
+                🏢 2F 이동 추천 리스트
+                <button onclick="document.getElementById('modal-2f').style.display='none'" style="margin-left:auto; background:none; border:none; font-size:24px; cursor:pointer;">×</button>
+            </div>
+            <div style="background:#f3e5f5; border:1px solid #ce93d8; border-radius:8px; padding:12px 15px; margin-bottom:15px;">
+                <div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
+                    <label style="font-size:13px; font-weight:bold; color:#4a148c;">📅 기준 기간:</label>
+                    <input type="number" id="2f-period-value" value="1" min="1" style="width:50px; padding:5px; text-align:center; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                    <select id="2f-period-unit" style="padding:5px 10px; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                        <option value="week">주</option>
+                        <option value="month" selected>개월</option>
+                    </select>
+                    <span style="font-size:12px; color:#666;">이상 배송 없는 상품</span>
+                    <label style="font-size:13px; font-weight:bold; color:#4a148c; margin-left:10px;">📦 재고 기준:</label>
+                    <input type="number" id="2f-stock-limit" value="999999" min="0" style="width:80px; padding:5px; text-align:center; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                    <span style="font-size:12px; color:#666;">개 이하</span>
+                    <button onclick="window.calc2FList()" style="padding:8px 16px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔍 조회</button>
+                </div>
+            </div>
+            <div style="font-size:11px; color:#666; margin-bottom:10px;">
+                ※ 마지막배송일 기준으로 설정 기간 동안 배송이 없고, 재고가 기준 이하인 상품을 2F 이동 대상으로 추천합니다.
+            </div>
+            <div class="modal-body" style="max-height: 50vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
+                    <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <tr>
+                            <th style="width:40px; border-top:none;"><input type="checkbox" id="2f-check-all" onclick="window.toggle2FCheckAll(this)"></th>
+                            <th style="width:50px; border-top:none; font-size:13px;">No</th>
+                            <th style="width:120px; border-top:none; font-size:13px;">상품코드</th>
+                            <th style="border-top:none; font-size:13px;">상품명</th>
+                            <th style="width:100px; border-top:none; font-size:13px;">옵션</th>
+                            <th style="width:70px; border-top:none; font-size:13px;">정상재고</th>
+                            <th style="width:100px; border-top:none; font-size:13px;">마지막배송일</th>
+                            <th style="width:100px; border-top:none; font-size:13px;">현재위치</th>
+                            <th style="width:180px; background:#f3e5f5; border-top:none; font-size:13px;">변경값</th>
+                            <th style="width:70px; border-top:none; font-size:13px;">개별변경</th>
+                        </tr>
+                    </thead>
+                    <tbody id="2f-tbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+                <div style="display:flex; gap:8px;">
+                    <button onclick="window.apply2FBatch()" style="padding:8px 15px; background:#7b1fa2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">✅ 선택 일괄 변경</button>
+                    <button onclick="window.download2FExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">📥 엑셀 다운로드</button>
+                </div>
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="document.getElementById('modal-2f').style.display='none'">닫기</button>
+            </div>
+        </div>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script type="module" src="js/location.js"></script>
