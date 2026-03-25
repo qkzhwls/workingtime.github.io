@@ -476,13 +476,19 @@ window.showRecommendation = function() {
     setTimeout(() => {
         window.currentRecommendations = [];
         
-        const allCodes = new Set([...Object.keys(zikjinData), ...Object.keys(weeklyData)]);
+        // ★ 로케이션에 실제 존재하는 상품코드만 대상
+        const allCodes = new Set(
+            originalData
+                .filter(d => d.code && d.code.trim() !== '' && d.code !== d.id)
+                .map(d => d.code.trim())
+        );
         let maxZQty = 0; let maxWQty = 0; let maxTrend = 0;
         let itemDataList = [];
 
         allCodes.forEach(code => {
             let zItem = zikjinData[code] || {}; let wItem = weeklyData[code] || {};
-            let name = zItem['상품명'] || wItem['상품명'] || '알 수 없음';
+            let locItem = originalData.find(d => d.code === code);
+            let name = (locItem && locItem.name) || zItem['상품명'] || wItem['상품명'] || '알 수 없음';
             let zQty = Number(zItem['수량'] || 0); 
             let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0); 
             let trendVal = 0;
