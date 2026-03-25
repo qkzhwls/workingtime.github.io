@@ -203,6 +203,19 @@ function setupRealtimeListenerA() {
         
         originalData = Object.values(tempLocMap);
         
+        // ★ codeTag 자정 초기화 체크
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        originalData.forEach(loc => {
+            if (loc.codeTag && loc.codeTagAt && loc.codeTagAt < todayStart) {
+                loc.codeTag = '';
+                loc.codeTagAt = 0;
+                // DB에서도 초기화 (비동기, 화면 렌더링 차단 안 함)
+                const zoneDocId = getZoneDocId(loc.id);
+                setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [loc.id]: { codeTag: '', codeTagAt: 0 } }, { merge: true }).catch(() => {});
+            }
+        });
+        
         renderTableHeader(); 
         applyFiltersAndSort(); 
         if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
@@ -988,10 +1001,8 @@ window.calculateAndRenderUsage = function() {
         locations.forEach(loc => {
             const isUsed = (loc.code && loc.code.trim() !== '' && loc.code !== loc.id) || (loc.name && loc.name.trim() !== '');
             if (isUsed) used++;
-            if ((loc.assignedAt && loc.assignedAt >= todayStart) || (loc.reserved && loc.reservedAt >= todayStart)) {
-                todayReservedCount++;
-            }
-            if (loc.preAssigned) preAssignedCount++;
+            if (loc.codeTag === '당일지정') todayReservedCount++;
+            if (loc.codeTag === '선지정') preAssignedCount++;
             
             const zone = loc.id.charAt(0).toUpperCase();
             if (!zoneStats[zone]) { zoneStats[zone] = { total: 0, used: 0 }; }
@@ -1018,13 +1029,13 @@ window.calculateAndRenderUsage = function() {
         html += `
             <div style="display:flex; justify-content: space-around; background: #eef1ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #c5cae9;">
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#555; font-weight:bold;">당일지정수량(예약)</div>
-                    <div style="font-size:18px; color:var(--primary); font-weight:900; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all','reserved'); closeAllPopups();">${todayReservedCount}</div>
+                    <div style="font-size:11px; color:#555; font-weight:bold;">당일지정수량</div>
+                    <div style="font-size:18px; color:var(--primary); font-weight:900;">${todayReservedCount}</div>
                 </div>
                 <div style="width:1px; background:#ccc;"></div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량(준비중)</div>
-                    <div style="font-size:18px; color:#e65100; font-weight:900; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all','preassigned'); closeAllPopups();">${preAssignedCount}</div>
+                    <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량</div>
+                    <div style="font-size:18px; color:#e65100; font-weight:900;">${preAssignedCount}</div>
                 </div>
             </div>
             <div style="font-size:16px; font-weight:bold; margin-bottom:5px; color:var(--primary); text-align:center;">📊 3층 전체 사용률: ${usageRate}%</div>
@@ -1146,7 +1157,7 @@ function setupFilterPopups() {
         `<div class="filter-option ${filters.code === 'empty' ? 'selected' : ''}" onclick="setFilter('code','empty');setFilter('reserved','all');setFilter('preassigned','all');">${filters.code === 'empty' ? '✔️ ' : ''}빈칸</div>` +
         `<div class="filter-option ${filters.code === 'not-empty' ? 'selected' : ''}" onclick="setFilter('code','not-empty');setFilter('reserved','all');setFilter('preassigned','all');">${filters.code === 'not-empty' ? '✔️ ' : ''}내용있음</div>` +
         `<div class="filter-divider"></div>` +
-        `<div class="filter-option ${isReservedOnly ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','only');setFilter('preassigned','all');">${isReservedOnly ? '✔️ ' : ''}🔒 예약중</div>` +
+        `<div class="filter-option ${isReservedOnly ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','only');setFilter('preassigned','all');">${isReservedOnly ? '✔️ ' : ''}📌 당일지정</div>` +
         `<div class="filter-option ${isPreassignedOnly ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','all');setFilter('preassigned','only');">${isPreassignedOnly ? '✔️ ' : ''}📦 선지정</div>`;
     if(codePop) codePop.innerHTML = codeHtml;
     if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
@@ -1266,8 +1277,8 @@ function applyFiltersAndSort() {
         if (filters.code === 'not-empty' && !hasCode) return false;
         if (filters.stock !== 'all' && (item.stock || '0').toString() !== filters.stock) return false;
         if (filters.stock2f && filters.stock2f !== 'all' && (item.stock2f || '0').toString() !== filters.stock2f) return false;
-        if (filters.reserved === 'only' && item.reserved !== true) return false;
-        if (filters.preassigned === 'only' && item.preAssigned !== true) return false;
+        if (filters.reserved === 'only' && loc.codeTag !== '당일지정') return false;
+        if (filters.preassigned === 'only' && loc.codeTag !== '선지정') return false;
         // 커스텀 헤더 필터
         for (const col in filters) {
             if (!col.startsWith('cus_') || filters[col] === 'all') continue;
@@ -1309,7 +1320,7 @@ window.handleRowClick = async function(event, locId) {
             if (loc.preAssignedCode === window.selectedPreAssignItem.code) {
                 if (confirm(`이미 '${loc.preAssignedCode}' 상품으로 선지정된 자리입니다.\n지정을 해제(취소)하시겠습니까?`)) {
                     await setDoc(doc(db, LOC_COLLECTION, zoneDocId), {
-                        [locId]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0', updatedAt: new Date() }
+                        [locId]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', preAssignedAt: 0, codeTag: '', codeTagAt: 0, code: '', name: '', option: '', stock: '0', updatedAt: new Date() }
                     }, { merge: true });
                     showToast(`[${locId}] 선지정 취소 완료`);
                     window.cancelPreAssignMode();
@@ -1326,9 +1337,12 @@ window.handleRowClick = async function(event, locId) {
                 [locId]: {
                     preAssigned: true, preAssignedCode: window.selectedPreAssignItem.code,
                     preAssignedName: window.selectedPreAssignItem.name, preAssignedQty: window.selectedPreAssignItem.qty,
+                    preAssignedAt: Date.now(),
                     code: window.selectedPreAssignItem.code, name: window.selectedPreAssignItem.name,
                     option: window.selectedPreAssignItem.option || '', stock: window.selectedPreAssignItem.qty.toString(), 
-                    reserved: false, reservedBy: '', reservedAt: 0, updatedAt: new Date()
+                    reserved: false, reservedBy: '', reservedAt: 0,
+                    codeTag: '선지정', codeTagAt: Date.now(),
+                    updatedAt: new Date()
                 }
             }, { merge: true });
             showToast(`[${locId}] 자리에 선지정 락(Lock)이 완료되었습니다!`);
@@ -1346,24 +1360,15 @@ function renderTable(data) {
     const checkedIds = new Set(Array.from(checkedBoxes).map(cb => cb.value));
     let html = ''; 
     data.forEach(loc => {
-        let isReserved = loc.reserved === true;
-        let isPreAssigned = loc.preAssigned === true;
         let rowStyle = ''; 
-        let badgeHtml = '';
+        let codeTagHtml = '';
         
-        if (isPreAssigned) { 
-            rowStyle = 'background-color: #ffe0b2 !important;'; 
-        } else if (isReserved) {
+        if (loc.codeTag === '당일지정') { 
             rowStyle = 'background-color: #fffde7 !important;';
-        }
-        
-        if (isReserved && !isPreAssigned) {
-            let reserverName = loc.reservedBy || '누군가';
-            badgeHtml += `<br><span class="badge-reserved" style="color:#f57f17; font-size:11px;">🔒 ${reserverName} 작업중</span>`;
-        }
-        
-        if (isPreAssigned) {
-            badgeHtml += `<br><span class="badge-incoming" style="background-color:#e65100; color:white; padding:2px 4px; border-radius:3px; font-size:11px; display:inline-block; margin-top:2px;">📦 입고선지정: ${loc.preAssignedQty}개 대기중</span>`;
+            codeTagHtml = `<br><span style="color:#1565c0; font-size:10px; font-weight:bold; background:#e3f2fd; padding:1px 5px; border-radius:3px;">📌 당일지정</span>`;
+        } else if (loc.codeTag === '선지정') {
+            rowStyle = 'background-color: #ffe0b2 !important;';
+            codeTagHtml = `<br><span style="color:#e65100; font-size:10px; font-weight:bold; background:#fff3e0; padding:1px 5px; border-radius:3px;">📦 선지정</span>`;
         }
         
         let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
@@ -1372,8 +1377,8 @@ function renderTable(data) {
         window.visibleColumns.forEach(col => {
             if (col === 'std_dong') html += `<td style="color:#666;">${loc.dong || ''}</td>`;
             else if (col === 'std_pos') html += `<td style="color:#666;">${loc.pos || ''}</td>`;
-            else if (col === 'std_id') html += `<td class="loc-copy-cell" onclick="copyLocationToClipboard(event, '${loc.id}')" title="클릭하여 복사 및 예약">${loc.id} ${badgeHtml}</td>`;
-            else if (col === 'std_code') html += `<td style="color:#3d5afe; font-weight:bold;">${loc.code === loc.id ? '' : (loc.code || '')}</td>`;
+            else if (col === 'std_id') html += `<td class="loc-copy-cell" onclick="copyLocationToClipboard(event, '${loc.id}')" title="클릭하여 복사 및 예약">${loc.id}</td>`;
+            else if (col === 'std_code') html += `<td style="color:#3d5afe; font-weight:bold;">${loc.code === loc.id ? '' : (loc.code || '')}${codeTagHtml}</td>`;
             else if (col === 'std_name') html += `<td style="text-align:left;">${loc.name || ''}</td>`;
             else if (col === 'std_option') html += `<td style="text-align:left; font-size:12px;">${loc.option || ''}</td>`;
             else if (col === 'std_stock') html += `<td style="font-weight:bold;">${loc.stock || '0'}</td>`;
@@ -1645,13 +1650,17 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     reserved: false,
                     reservedAt: 0,
                     reservedBy: '',
+                    assignedAt: 0,
                     updatedAt: new Date(),
                     rawDataStr: '{}',
                     rawData: deleteField(),
                     preAssigned: loc.preAssigned || false,
                     preAssignedCode: loc.preAssignedCode || '',
                     preAssignedName: loc.preAssignedName || '',
-                    preAssignedQty: loc.preAssignedQty || ''
+                    preAssignedQty: loc.preAssignedQty || '',
+                    preAssignedAt: loc.preAssignedAt || 0,
+                    codeTag: loc.codeTag || '',
+                    codeTagAt: loc.codeTagAt || 0
                 };
             });
         }
@@ -1704,11 +1713,15 @@ async function updateDatabaseA(rows, mode = 'daily') {
                         pos: existingData.pos || '',
                         reserved: false, 
                         reservedAt: 0, 
-                        reservedBy: '', 
+                        reservedBy: '',
+                        assignedAt: 0,
                         preAssigned: existingData.preAssigned || false,
                         preAssignedCode: existingData.preAssignedCode || '',
                         preAssignedName: existingData.preAssignedName || '',
-                        preAssignedQty: existingData.preAssignedQty || ''
+                        preAssignedQty: existingData.preAssignedQty || '',
+                        preAssignedAt: existingData.preAssignedAt || 0,
+                        codeTag: existingData.codeTag || '',
+                        codeTagAt: existingData.codeTagAt || 0
                     };
 
                     updateData.updatedAt = new Date();
@@ -1735,6 +1748,7 @@ async function updateDatabaseA(rows, mode = 'daily') {
                             updateData.preAssignedCode = '';
                             updateData.preAssignedName = '';
                             updateData.preAssignedQty = '';
+                            updateData.preAssignedAt = 0;
                         }
                     }
                     
@@ -1800,7 +1814,7 @@ window.copyLocationToClipboard = async (event, locId) => {
             
             if (isReserved && reserverName === currentUserName) {
                 if (confirm(`[${locId}] 내가 예약한 자리입니다.\n해제하시겠습니까?`)) {
-                    await setDoc(docRef, { [locId]: { reserved: false, reservedAt: 0, reservedBy: '', assignedAt: 0, updatedAt: new Date() } }, { merge: true });
+                    await setDoc(docRef, { [locId]: { reserved: false, reservedAt: 0, reservedBy: '', assignedAt: 0, codeTag: '', codeTagAt: 0, updatedAt: new Date() } }, { merge: true });
                     showToast(`[${locId}] 해제 완료`);
                 } else { navigator.clipboard.writeText(locId); showToast(`[${locId}] 복사 완료!`); }
                 return;
@@ -1808,7 +1822,7 @@ window.copyLocationToClipboard = async (event, locId) => {
             
             if (isReserved) {
                 if (confirm(`[${locId}]은 현재 [${reserverName}]님이 사용 중입니다.\n강제로 예약을 가져오시겠습니까?`)) {
-                    await setDoc(docRef, { [locId]: { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName, updatedAt: new Date() } }, { merge: true });
+                    await setDoc(docRef, { [locId]: { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName, codeTag: '당일지정', codeTagAt: now, updatedAt: new Date() } }, { merge: true });
                     navigator.clipboard.writeText(locId); showToast(`[${locId}] 강제 복사 완료!`);
                 }
                 return; 
@@ -1816,7 +1830,7 @@ window.copyLocationToClipboard = async (event, locId) => {
             
             if (data.preAssigned) { 
                 if (confirm(`📦 [${locId}]는 입고예정(${data.preAssignedCode}) 선지정 구역입니다.\n선지정을 해제(취소)하시겠습니까?`)) {
-                    await setDoc(docRef, { [locId]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0', updatedAt: new Date() } }, { merge: true });
+                    await setDoc(docRef, { [locId]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', preAssignedAt: 0, codeTag: '', codeTagAt: 0, code: '', name: '', option: '', stock: '0', updatedAt: new Date() } }, { merge: true });
                     showToast(`[${locId}] 선지정 해제 완료!`);
                     return; 
                 } else {
@@ -1824,7 +1838,7 @@ window.copyLocationToClipboard = async (event, locId) => {
                 }
             }
             
-            await setDoc(docRef, { [locId]: { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName, updatedAt: new Date() } }, { merge: true });
+            await setDoc(docRef, { [locId]: { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName, codeTag: '당일지정', codeTagAt: now, updatedAt: new Date() } }, { merge: true });
             navigator.clipboard.writeText(locId).then(() => { showToast(`[${locId}] 복사 및 예약 완료!`); });
         }
     } catch (error) { alert('예약 처리 오류'); }
@@ -1904,7 +1918,7 @@ window.cancelPreAssignment = async () => {
     if(!confirm(`[${id}] 선지정을 취소하시겠습니까?`)) return;
     try {
         const zoneDocId = getZoneDocId(id);
-        await setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [id]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', code: '', name: '', option: '', stock: '0', updatedAt: new Date() } }, { merge: true });
+        await setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [id]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', preAssignedAt: 0, codeTag: '', codeTagAt: 0, code: '', name: '', option: '', stock: '0', updatedAt: new Date() } }, { merge: true });
         document.getElementById('edit-modal').style.display = 'none';
         showToast("취소되었습니다.");
     } catch (error) { console.error(error); }
