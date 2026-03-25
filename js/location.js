@@ -804,13 +804,22 @@ window.calc2FList = function() {
         const locs = codeMap[code];
         const firstLoc = locs[0];
         
+        // rawData에서 키를 유연하게 찾는 헬퍼
+        const getRawVal = (rd, targetKey) => {
+            if (!rd) return '';
+            if (rd[targetKey]) return rd[targetKey];
+            const norm = targetKey.replace(/[\s\u00A0]/g, '');
+            for (const k of Object.keys(rd)) {
+                if (k.replace(/[\s\u00A0]/g, '') === norm) return rd[k];
+            }
+            return '';
+        };
+
         // 마지막배송일 찾기 (커스텀 헤더에서)
         let lastDelivery = '';
         for (const loc of locs) {
-            if (loc.rawData) {
-                const val = loc.rawData['마지막배송일'] || '';
-                if (val && val > lastDelivery) lastDelivery = val;
-            }
+            const val = getRawVal(loc.rawData, '마지막배송일');
+            if (val && val > lastDelivery) lastDelivery = val;
         }
 
         // 마지막배송일이 없으면 대상에 포함 (배송 기록 없음 = 오래된 것)
@@ -825,10 +834,8 @@ window.calc2FList = function() {
         // 옵션추가항목1 값 가져오기
         let extraOpt = '';
         for (const loc of locs) {
-            if (loc.rawData && loc.rawData['옵션추가항목1']) {
-                extraOpt = loc.rawData['옵션추가항목1'];
-                break;
-            }
+            const val = getRawVal(loc.rawData, '옵션추가항목1');
+            if (val) { extraOpt = val; break; }
         }
 
         const locIds = locs.map(l => l.id).join(', ');
@@ -1923,10 +1930,25 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     
                     let cleanRawData = {};
                     customHeaders.forEach(k => {
-                        let cleanK = k.replace(/\s+/g, '');
-                        const rawVal = row[cleanK] !== undefined ? row[cleanK] : row[k];
+                        // 엑셀 파싱 키와 customHeader 키 매칭 (공백/특수문자 무시)
+                        const normalizeKey = (s) => (s || '').toString().replace(/[\s\u00A0\u200B\uFEFF]/g, '');
+                        const normK = normalizeKey(k);
+                        
+                        // row에서 직접 매칭 시도
+                        let rawVal = row[k];
+                        if (rawVal === undefined) rawVal = row[normK];
+                        
+                        // 그래도 없으면 row의 모든 키를 정규화해서 비교
+                        if (rawVal === undefined) {
+                            for (const rowKey of Object.keys(row)) {
+                                if (normalizeKey(rowKey) === normK) {
+                                    rawVal = row[rowKey];
+                                    break;
+                                }
+                            }
+                        }
+                        
                         if(rawVal !== undefined && rawVal !== null && rawVal.toString().trim() !== "") {
-                            // 엑셀 날짜 시리얼 넘버 자동 변환
                             const strVal = rawVal.toString().trim();
                             const numVal = parseFloat(strVal);
                             if(!isNaN(numVal) && numVal > 40000 && numVal < 60000 && strVal.includes('.')) {
