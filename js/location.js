@@ -363,6 +363,7 @@ window.openRatioModal = function(e) {
                             <div class="puzzle-row"><div class="puzzle-label" style="background:#64b5f6;">2순위</div><div class="puzzle-drop-area" id="pz-2" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
                             <div class="puzzle-row"><div class="puzzle-label" style="background:#ba68c8; color:white;">3순위</div><div class="puzzle-drop-area" id="pz-3" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
                             <div class="puzzle-row" style="margin-top:5px;"><div class="puzzle-label" style="background:#eee; border:1px solid #ccc;">미지정<br>(후순위)</div><div class="puzzle-drop-area" id="pz-none" style="background:#f0f0f0; border-color:#ccc;" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
+                            <div class="puzzle-row" style="margin-top:5px;"><div class="puzzle-label" style="background:#ff5252; color:white;">❌ 제외</div><div class="puzzle-drop-area" id="pz-exclude" style="background:#ffebee; border-color:#ef9a9a;" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, this)"></div></div>
                         </div>
                     </div>
                 </div>
@@ -377,9 +378,13 @@ window.openRatioModal = function(e) {
                         
                         <div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 동 우선순위</div>
                         <div class="sort-container" id="sort-dongs" ondragover="handleSortDragOver(event)"></div>
+                        <div style="font-size:11px; font-weight:bold; margin-top:8px; margin-bottom:4px; color:#ff5252;">❌ 동 제외 (여기에 놓으면 추천에서 제외)</div>
+                        <div class="sort-container" id="sort-dongs-exclude" style="background:#ffebee; border:2px dashed #ef9a9a; min-height:35px;" ondragover="handleSortDragOver(event)"></div>
 
                         <div style="font-size:13px; font-weight:bold; margin-top:15px; margin-bottom:5px; color:var(--primary);">▶ 위치 우선순위</div>
                         <div class="sort-container" id="sort-poses" ondragover="handleSortDragOver(event)"></div>
+                        <div style="font-size:11px; font-weight:bold; margin-top:8px; margin-bottom:4px; color:#ff5252;">❌ 위치 제외 (여기에 놓으면 추천에서 제외)</div>
+                        <div class="sort-container" id="sort-poses-exclude" style="background:#ffebee; border:2px dashed #ef9a9a; min-height:35px;" ondragover="handleSortDragOver(event)"></div>
                     </div>
                 </div>
                 
@@ -399,10 +404,16 @@ window.openRatioModal = function(e) {
     const priZones = window.recommendPriorities.zones || {0:[], 1:[], 2:[], 3:[]};
     for(let i=0; i<=3; i++) document.getElementById(`pz-${i}`).innerHTML = '';
     document.getElementById('pz-none').innerHTML = '';
+    document.getElementById('pz-exclude').innerHTML = '';
+
+    const excludeZones = window.recommendPriorities.excludeZones || [];
 
     allAlphabets.forEach(alpha => {
         let placedRank = -1;
-        for(let i=0; i<=3; i++) { if(priZones[i] && priZones[i].includes(alpha)) { placedRank = i; break; } }
+        let isExcluded = excludeZones.includes(alpha);
+        if (!isExcluded) {
+            for(let i=0; i<=3; i++) { if(priZones[i] && priZones[i].includes(alpha)) { placedRank = i; break; } }
+        }
         
         const block = document.createElement('div');
         block.className = 'puzzle-block';
@@ -411,13 +422,17 @@ window.openRatioModal = function(e) {
         block.ondragstart = window.handleDragStart;
         block.ondragend = window.handleDragEnd;
 
-        if(placedRank !== -1) document.getElementById(`pz-${placedRank}`).appendChild(block);
+        if(isExcluded) document.getElementById('pz-exclude').appendChild(block);
+        else if(placedRank !== -1) document.getElementById(`pz-${placedRank}`).appendChild(block);
         else document.getElementById('pz-none').appendChild(block);
     });
 
-    const renderSortBlocks = (containerId, items, defaultItems) => {
+    const renderSortBlocks = (containerId, items, defaultItems, excludeContainerId, excludeItems) => {
         const container = document.getElementById(containerId);
         container.innerHTML = '';
+        const exContainer = document.getElementById(excludeContainerId);
+        exContainer.innerHTML = '';
+        const exSet = new Set(excludeItems || []);
         let finalItems = [...new Set([...items, ...defaultItems])]; 
         finalItems.forEach(item => {
             const block = document.createElement('div');
@@ -426,12 +441,13 @@ window.openRatioModal = function(e) {
             block.draggable = true;
             block.ondragstart = window.handleDragStart;
             block.ondragend = window.handleDragEnd;
-            container.appendChild(block);
+            if (exSet.has(item)) exContainer.appendChild(block);
+            else container.appendChild(block);
         });
     };
 
-    renderSortBlocks('sort-dongs', window.recommendPriorities.dongs || [], ['1','2','3','4','5','6']);
-    renderSortBlocks('sort-poses', window.recommendPriorities.poses || [], ['1','2','3','4','5']);
+    renderSortBlocks('sort-dongs', window.recommendPriorities.dongs || [], ['1','2','3','4','5','6'], 'sort-dongs-exclude', window.recommendPriorities.excludeDongs || []);
+    renderSortBlocks('sort-poses', window.recommendPriorities.poses || [], ['1','2','3','4','5'], 'sort-poses-exclude', window.recommendPriorities.excludePoses || []);
     
     modal.style.display = 'flex';
 };
@@ -451,7 +467,12 @@ window.saveMasterSettingsModal = async function() {
     const newDongs = Array.from(document.getElementById('sort-dongs').querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
     const newPoses = Array.from(document.getElementById('sort-poses').querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
 
-    const newPriorities = { zones: newZones, dongs: newDongs, poses: newPoses };
+    // ★ 제외 데이터 수집
+    const excludeZones = Array.from(document.getElementById('pz-exclude').querySelectorAll('.puzzle-block')).map(b => b.innerText.trim());
+    const excludeDongs = Array.from(document.getElementById('sort-dongs-exclude').querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
+    const excludePoses = Array.from(document.getElementById('sort-poses-exclude').querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
+
+    const newPriorities = { zones: newZones, dongs: newDongs, poses: newPoses, excludeZones, excludeDongs, excludePoses };
 
     try {
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
@@ -522,7 +543,18 @@ window.showRecommendation = function() {
 
         let emptyLocs = originalData.filter(d => {
             const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
-            return !hasContent && !d.preAssigned; 
+            if (hasContent || d.preAssigned) return false;
+            // ★ 제외 구역/동/위치 필터
+            const exZones = window.recommendPriorities.excludeZones || [];
+            const exDongs = window.recommendPriorities.excludeDongs || [];
+            const exPoses = window.recommendPriorities.excludePoses || [];
+            const prefix = (d.id || '').charAt(0).toUpperCase();
+            const dong = (d.dong || '').toString().trim();
+            const pos = (d.pos || '').toString().trim();
+            if (exZones.includes(prefix)) return false;
+            if (dong && exDongs.includes(dong)) return false;
+            if (pos && exPoses.includes(pos)) return false;
+            return true;
         });
 
         const getZoneRank = (locId) => {
