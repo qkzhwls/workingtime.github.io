@@ -761,6 +761,195 @@ window.downloadRecommendationExcel = function() {
     XLSX.writeFile(wb, `로케이션변경추천리스트_${dateString}.xlsx`);
 };
 
+// ========================================
+// ★ 2F 이동 추천 기능
+// ========================================
+window.current2FList = [];
+
+window.show2FRecommendation = function() {
+    document.getElementById('modal-2f').style.display = 'flex';
+};
+
+window.toggle2FCheckAll = function(source) {
+    document.querySelectorAll('.check-2f-item').forEach(cb => cb.checked = source.checked);
+};
+
+window.calc2FList = function() {
+    const periodVal = Number(document.getElementById('2f-period-value').value) || 1;
+    const periodUnit = document.getElementById('2f-period-unit').value;
+    const stockLimit = Number(document.getElementById('2f-stock-limit').value) || 999999;
+
+    const now = new Date();
+    let cutoffDate;
+    if (periodUnit === 'week') {
+        cutoffDate = new Date(now.getTime() - (periodVal * 7 * 24 * 60 * 60 * 1000));
+    } else {
+        cutoffDate = new Date(now.getFullYear(), now.getMonth() - periodVal, now.getDate());
+    }
+    const cutoffStr = cutoffDate.toISOString().slice(0, 10).replace(/-/g, '-');
+
+    // 상품코드별로 그룹핑
+    const codeMap = {};
+    originalData.forEach(loc => {
+        const code = loc.code;
+        if (!code || code.trim() === '' || code === loc.id) return;
+        if (!codeMap[code]) codeMap[code] = [];
+        codeMap[code].push(loc);
+    });
+
+    window.current2FList = [];
+    const tbody = document.getElementById('2f-tbody');
+
+    for (const code in codeMap) {
+        const locs = codeMap[code];
+        const firstLoc = locs[0];
+        
+        // 마지막배송일 찾기 (커스텀 헤더에서)
+        let lastDelivery = '';
+        for (const loc of locs) {
+            if (loc.rawData) {
+                const val = loc.rawData['마지막배송일'] || '';
+                if (val && val > lastDelivery) lastDelivery = val;
+            }
+        }
+
+        // 마지막배송일이 없으면 대상에 포함 (배송 기록 없음 = 오래된 것)
+        // 마지막배송일이 있으면 cutoff 이전인지 확인
+        if (lastDelivery && lastDelivery > cutoffStr) continue;
+
+        // 정상재고 합산
+        let totalStock = 0;
+        locs.forEach(l => totalStock += Number(l.stock || 0));
+        if (totalStock > stockLimit) continue;
+
+        // 옵션추가항목1 값 가져오기
+        let extraOpt = '';
+        for (const loc of locs) {
+            if (loc.rawData && loc.rawData['옵션추가항목1']) {
+                extraOpt = loc.rawData['옵션추가항목1'];
+                break;
+            }
+        }
+
+        const locIds = locs.map(l => l.id).join(', ');
+        const name = firstLoc.name || '';
+        const option = firstLoc.option || '';
+        
+        // 변경값: 2F-코드 옵션추가항목1값
+        const changeValue = `2F-${code}${extraOpt ? ' ' + extraOpt : ''}`;
+
+        window.current2FList.push({
+            code, name, option, totalStock, lastDelivery: lastDelivery || '기록없음',
+            locIds, locs, changeValue, extraOpt
+        });
+    }
+
+    // 마지막배송일 오래된 순 정렬 (기록없음이 맨 위)
+    window.current2FList.sort((a, b) => {
+        if (a.lastDelivery === '기록없음' && b.lastDelivery !== '기록없음') return -1;
+        if (a.lastDelivery !== '기록없음' && b.lastDelivery === '기록없음') return 1;
+        return a.lastDelivery.localeCompare(b.lastDelivery);
+    });
+
+    let html = '';
+    window.current2FList.forEach((item, idx) => {
+        const rowBg = idx % 2 === 0 ? '#ffffff' : '#f9fafb';
+        html += `
+            <tr style="background:${rowBg};">
+                <td><input type="checkbox" class="check-2f-item" data-idx="${idx}"></td>
+                <td style="font-weight:bold; color:#7b1fa2;">${idx + 1}</td>
+                <td style="font-weight:bold; color:#1a237e;">${item.code}</td>
+                <td style="text-align:left; font-size:13px;">${item.name}</td>
+                <td style="font-size:12px;">${item.option}</td>
+                <td style="font-weight:bold;">${item.totalStock}</td>
+                <td style="font-size:12px; color:${item.lastDelivery === '기록없음' ? '#ff5252' : '#555'};">${item.lastDelivery}</td>
+                <td style="font-size:12px;">${item.locIds}</td>
+                <td style="background:#f3e5f5; font-weight:bold; color:#4a148c; font-size:12px;">${item.changeValue}</td>
+                <td><button onclick="window.apply2FSingle(${idx})" style="padding:4px 10px; background:#7b1fa2; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold;">변경</button></td>
+            </tr>
+        `;
+    });
+
+    if (window.current2FList.length === 0) {
+        html = '<tr><td colspan="10" style="padding:40px; color:#888;">조건에 해당하는 상품이 없습니다.</td></tr>';
+    }
+
+    tbody.innerHTML = html;
+    document.getElementById('2f-check-all').checked = false;
+};
+
+window.apply2FSingle = async function(idx) {
+    const item = window.current2FList[idx];
+    if (!item) return;
+    if (!confirm(`[${item.code}] ${item.name}\n현재위치: ${item.locIds}\n\n→ 로케이션 값을 "${item.changeValue}"로 변경하시겠습니까?`)) return;
+    
+    try {
+        for (const loc of item.locs) {
+            const zoneDocId = getZoneDocId(loc.id);
+            await setDoc(doc(db, LOC_COLLECTION, zoneDocId), {
+                [loc.id]: { code: item.changeValue, name: item.name, option: item.option, updatedAt: new Date() }
+            }, { merge: true });
+        }
+        showToast(`✅ [${item.code}] → ${item.changeValue} 변경 완료!`);
+        window.calc2FList(); // 리스트 새로고침
+    } catch(e) { console.error(e); alert('변경 중 오류가 발생했습니다.'); }
+};
+
+window.apply2FBatch = async function() {
+    const checked = document.querySelectorAll('.check-2f-item:checked');
+    if (checked.length === 0) return alert('변경할 항목을 선택해주세요.');
+    
+    const indices = Array.from(checked).map(cb => Number(cb.dataset.idx));
+    const items = indices.map(i => window.current2FList[i]).filter(Boolean);
+    
+    if (!confirm(`선택한 ${items.length}개 상품의 로케이션을 2F 값으로 일괄 변경하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
+    
+    window.showLoading(`🏢 ${items.length}개 상품 2F 이동 처리 중...`);
+    
+    try {
+        for (const item of items) {
+            for (const loc of item.locs) {
+                const zoneDocId = getZoneDocId(loc.id);
+                await setDoc(doc(db, LOC_COLLECTION, zoneDocId), {
+                    [loc.id]: { code: item.changeValue, name: item.name, option: item.option, updatedAt: new Date() }
+                }, { merge: true });
+            }
+        }
+        window.hideLoading();
+        showToast(`✅ ${items.length}개 상품 2F 이동 완료!`);
+        window.calc2FList();
+    } catch(e) { window.hideLoading(); console.error(e); alert('일괄 변경 중 오류가 발생했습니다.'); }
+};
+
+window.download2FExcel = function() {
+    if (!window.current2FList || window.current2FList.length === 0) {
+        alert("다운로드할 데이터가 없습니다. 먼저 조회해주세요.");
+        return;
+    }
+
+    const excelData = window.current2FList.map((item, idx) => ({
+        "No": idx + 1,
+        "상품코드": item.code,
+        "상품명": item.name,
+        "옵션": item.option,
+        "정상재고": item.totalStock,
+        "마지막배송일": item.lastDelivery,
+        "현재위치": item.locIds,
+        "변경값": item.changeValue
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    ws['!cols'] = [
+        { wch: 5 }, { wch: 15 }, { wch: 40 }, { wch: 25 },
+        { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 30 }
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "2F이동추천");
+    const today = new Date();
+    const dateString = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+    XLSX.writeFile(wb, `2F이동추천리스트_${dateString}.xlsx`);
+};
+
 function renderTableHeader() {
     const theadTr = document.getElementById('dynamic-thead-tr');
     const popupContainer = document.getElementById('dynamic-popups');
