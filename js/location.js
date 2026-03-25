@@ -1178,11 +1178,29 @@ function setupFilterPopups() {
         if (!pop) return;
         const key = col.replace('cus_', '');
         const curVal = filters[col] || 'all';
+
+        // ★ 옵션추가항목1: 빈칸/내용있음 전용 필터
+        if (key === '옵션추가항목1') {
+            let html = getSortButtonsHtml(col) +
+                `<div class="filter-option ${curVal === 'all' ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curVal === 'all' ? '✔️ ' : ''}전체보기</div>` +
+                `<div class="filter-option ${curVal === 'empty' ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${curVal === 'empty' ? '✔️ ' : ''}빈칸</div>` +
+                `<div class="filter-option ${curVal === 'not-empty' ? 'selected' : ''}" onclick="setFilter('${col}', 'not-empty')">${curVal === 'not-empty' ? '✔️ ' : ''}내용있음</div>`;
+            pop.innerHTML = html;
+            return;
+        }
+
         const vals = [...new Set(originalData.map(d => {
             return (d.rawData && d.rawData[key]) ? d.rawData[key].toString().trim() : '';
         }))].filter(Boolean).sort();
+
         let html = getSortButtonsHtml(col) +
             `<div class="filter-option ${curVal === 'all' ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curVal === 'all' ? '✔️ ' : ''}전체보기</div>`;
+
+        // ★ 입고대기: 빈칸 옵션 추가
+        if (key === '입고대기') {
+            html += `<div class="filter-option ${curVal === 'empty' ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${curVal === 'empty' ? '✔️ ' : ''}빈칸</div>`;
+        }
+
         vals.forEach(v => {
             const escaped = v.replace(/'/g, "\\'");
             html += `<div class="filter-option ${curVal === v ? 'selected' : ''}" onclick="setFilter('${col}', '${escaped}')">${curVal === v ? '✔️ ' : ''}${v}</div>`;
@@ -1255,7 +1273,10 @@ function applyFiltersAndSort() {
             if (!col.startsWith('cus_') || filters[col] === 'all') continue;
             const key = col.replace('cus_', '');
             const val = (item.rawData && item.rawData[key]) ? item.rawData[key].toString().trim() : '';
-            if (val !== filters[col]) return false;
+            // ★ 빈칸/내용있음 필터 지원
+            if (filters[col] === 'empty') { if (val !== '') return false; }
+            else if (filters[col] === 'not-empty') { if (val === '') return false; }
+            else { if (val !== filters[col]) return false; }
         }
         return true;
     });
