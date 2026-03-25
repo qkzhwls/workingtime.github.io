@@ -10,7 +10,7 @@ let zikjinData = {};
 let weeklyData = {}; 
 let incomingData = {}; 
 let sortConfig = { key: 'id', direction: 'asc' }; 
-let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
+let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all', reserved: 'all', preassigned: 'all' };
 
 const RESERVE_EXPIRE_MS = Infinity; 
 
@@ -960,7 +960,7 @@ window.saveCapacity2F = async function() {
 window.switchUsageTab = function(tab) { window.currentUsageTab = tab; window.calculateAndRenderUsage(); };
 
 window.applyUsageFilter = function(zone, state) {
-    filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
+    filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all', reserved: 'all', preassigned: 'all' };
     if (zone !== 'all') filters.loc = [zone];
     if (state === 'used') filters.code = 'not-empty';
     else if (state === 'empty') filters.code = 'empty';
@@ -1153,12 +1153,12 @@ function setupFilterPopups() {
     const isPreassignedOnly = filters.preassigned === 'only';
     const codeAll = filters.code === 'all' && !isReservedOnly && !isPreassignedOnly;
     let codeHtml = getSortButtonsHtml('code') +
-        `<div class="filter-option ${codeAll ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','all');setFilter('preassigned','all');">${codeAll ? '✔️ ' : ''}전체보기</div>` +
-        `<div class="filter-option ${filters.code === 'empty' ? 'selected' : ''}" onclick="setFilter('code','empty');setFilter('reserved','all');setFilter('preassigned','all');">${filters.code === 'empty' ? '✔️ ' : ''}빈칸</div>` +
-        `<div class="filter-option ${filters.code === 'not-empty' ? 'selected' : ''}" onclick="setFilter('code','not-empty');setFilter('reserved','all');setFilter('preassigned','all');">${filters.code === 'not-empty' ? '✔️ ' : ''}내용있음</div>` +
+        `<div class="filter-option ${codeAll ? 'selected' : ''}" onclick="setCodeTagFilter('all')">${codeAll ? '✔️ ' : ''}전체보기</div>` +
+        `<div class="filter-option ${filters.code === 'empty' ? 'selected' : ''}" onclick="setCodeTagFilter('empty')">${filters.code === 'empty' ? '✔️ ' : ''}빈칸</div>` +
+        `<div class="filter-option ${filters.code === 'not-empty' ? 'selected' : ''}" onclick="setCodeTagFilter('not-empty')">${filters.code === 'not-empty' ? '✔️ ' : ''}내용있음</div>` +
         `<div class="filter-divider"></div>` +
-        `<div class="filter-option ${isReservedOnly ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','only');setFilter('preassigned','all');">${isReservedOnly ? '✔️ ' : ''}📌 당일지정</div>` +
-        `<div class="filter-option ${isPreassignedOnly ? 'selected' : ''}" onclick="setFilter('code','all');setFilter('reserved','all');setFilter('preassigned','only');">${isPreassignedOnly ? '✔️ ' : ''}📦 선지정</div>`;
+        `<div class="filter-option ${isReservedOnly ? 'selected' : ''}" onclick="setCodeTagFilter('당일지정')">${isReservedOnly ? '✔️ ' : ''}📌 당일지정</div>` +
+        `<div class="filter-option ${isPreassignedOnly ? 'selected' : ''}" onclick="setCodeTagFilter('선지정')">${isPreassignedOnly ? '✔️ ' : ''}📦 선지정</div>`;
     if(codePop) codePop.innerHTML = codeHtml;
     if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
     if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
@@ -1238,33 +1238,28 @@ window.setFilter = (type, value) => {
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
     window.showFilterResetBtn();
 };
+window.setCodeTagFilter = (mode) => {
+    if (mode === '당일지정') {
+        filters.code = 'all'; filters.reserved = 'only'; filters.preassigned = 'all';
+    } else if (mode === '선지정') {
+        filters.code = 'all'; filters.reserved = 'all'; filters.preassigned = 'only';
+    } else if (mode === 'empty') {
+        filters.code = 'empty'; filters.reserved = 'all'; filters.preassigned = 'all';
+    } else if (mode === 'not-empty') {
+        filters.code = 'not-empty'; filters.reserved = 'all'; filters.preassigned = 'all';
+    } else {
+        filters.code = 'all'; filters.reserved = 'all'; filters.preassigned = 'all';
+    }
+    setupFilterPopups();
+    applyFiltersAndSort();
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+    window.showFilterResetBtn();
+};
 
 window.showFilterResetBtn = function() {
-    const isFiltered = filters.loc.length > 0 ||
-        filters.code !== 'all' || filters.stock !== 'all' ||
-        filters.dong !== 'all' || filters.pos !== 'all' ||
-        filters.reserved === 'only' || filters.preassigned === 'only' ||
-        Object.keys(filters).some(k => k.startsWith('cus_') && filters[k] !== 'all');
+    // 필터 초기화 버튼 비활성화
     let btn = document.getElementById('filter-reset-btn');
-    if (isFiltered) {
-        if (!btn) {
-            btn = document.createElement('button');
-            btn.id = 'filter-reset-btn';
-            btn.innerHTML = '✕ 필터 초기화';
-            btn.style.cssText = 'padding:6px 12px; background:#ff5252; color:white; border:none; border-radius:4px; font-weight:bold; cursor:pointer; font-size:13px;';
-            btn.onclick = () => {
-                filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all' };
-                setupFilterPopups();
-                applyFiltersAndSort();
-                window.showFilterResetBtn();
-            };
-            const headerActions = document.querySelector('.header-actions');
-            if (headerActions) headerActions.prepend(btn);
-        }
-        btn.style.display = 'inline-block';
-    } else {
-        if (btn) btn.style.display = 'none';
-    }
+    if (btn) btn.style.display = 'none';
 };
 
 function applyFiltersAndSort() {
@@ -1829,13 +1824,10 @@ window.copyLocationToClipboard = async (event, locId) => {
             }
             
             if (data.preAssigned) { 
-                if (confirm(`📦 [${locId}]는 입고예정(${data.preAssignedCode}) 선지정 구역입니다.\n선지정을 해제(취소)하시겠습니까?`)) {
-                    await setDoc(docRef, { [locId]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', preAssignedAt: 0, codeTag: '', codeTagAt: 0, code: '', name: '', option: '', stock: '0', updatedAt: new Date() } }, { merge: true });
-                    showToast(`[${locId}] 선지정 해제 완료!`);
-                    return; 
-                } else {
-                    if (!confirm(`무시하고 일반 작업을 위해 예약(🔒)하시겠습니까?`)) return;
-                }
+                // 선지정 자리: 예약(복사)만 진행, codeTag는 선지정 유지
+                await setDoc(docRef, { [locId]: { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName, updatedAt: new Date() } }, { merge: true });
+                navigator.clipboard.writeText(locId).then(() => { showToast(`[${locId}] 복사 및 예약 완료! (선지정 유지)`); });
+                return;
             }
             
             await setDoc(docRef, { [locId]: { reserved: true, reservedAt: now, assignedAt: now, reservedBy: currentUserName, codeTag: '당일지정', codeTagAt: now, updatedAt: new Date() } }, { merge: true });
