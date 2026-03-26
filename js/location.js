@@ -815,10 +815,11 @@ window.calc2FList = function() {
             return '';
         };
 
-        // 마지막배송일 찾기 (커스텀 헤더에서)
+        // 마지막배송일 찾기 (마지막배송일 우선, 없으면 마지막입고일)
         let lastDelivery = '';
         for (const loc of locs) {
-            const val = getRawVal(loc.rawData, '마지막배송일');
+            let val = getRawVal(loc.rawData, '마지막배송일');
+            if (!val) val = getRawVal(loc.rawData, '마지막입고일');
             if (val && val > lastDelivery) lastDelivery = val;
         }
 
@@ -1844,7 +1845,10 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
     try {
-        const allHeaders = Object.keys(rows[0] || {});
+        // ★ 모든 행의 키를 합쳐서 전체 헤더 추출 (첫 행에 빈 값이면 키가 누락되는 문제 해결)
+        const allHeadersSet = new Set();
+        rows.forEach(row => { Object.keys(row).forEach(k => allHeadersSet.add(k)); });
+        const allHeaders = [...allHeadersSet];
         const excludeRaw = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
         // 공백제거 버전도 제외 목록에 포함
         const exclude = [...new Set([...excludeRaw, ...excludeRaw.map(h => h.replace(/\s+/g, ''))])];
@@ -1860,11 +1864,10 @@ async function updateDatabaseA(rows, mode = 'daily') {
         const newHeaders = [...new Set([...window.excelHeaders, ...customHeaders])];
         const hasNewHeader = customHeaders.some(h => !window.excelHeaders.includes(h));
         
-        // ★ 디버그 로그 (customHeaders 확인)
-        console.log('=== [DEBUG] 최신화 디버깅 ===');
-        console.log('allHeaders (엑셀 파싱 키):', allHeaders);
-        console.log('customHeaders (커스텀 헤더):', customHeaders);
-        console.log('첫 번째 row:', JSON.stringify(rows[0] || {}).substring(0, 800));
+        // ★ 디버그 로그
+        console.log('=== [DEBUG] 최신화 ===');
+        console.log('allHeaders:', allHeaders.length, '개 →', allHeaders);
+        console.log('customHeaders:', customHeaders.length, '개 →', customHeaders);
         
         if (hasNewHeader) {
             await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { excelHeaders: newHeaders }, { merge: true });
