@@ -504,9 +504,8 @@ window.saveMasterSettingsModal = async function() {
 
 // ★ 메인 테이블 엑셀 다운로드 (HTML 테이블 .xls 형식)
 window.downloadMainExcel = function() {
-    // 1. 체크된 항목 확인
-    const checked = document.querySelectorAll('.loc-check:checked:not(#check-all)');
-    const checkedIds = new Set(Array.from(checked).map(cb => cb.value));
+    // 1. 체크된 항목 확인 (가상 스크롤 전역 상태 사용)
+    const checkedIds = VS.checkedIds;
     
     let targetData;
     let fileLabel;
@@ -1698,13 +1697,65 @@ window.handleRowClick = async function(event, locId) {
     openEditModal(locId);
 };
 
+// ★ 가상 스크롤 전역 상태
+const VS = {
+    data: [],
+    rowHeight: 42,
+    bufferRows: 20,
+    checkedIds: new Set(),
+    scrollHandler: null
+};
+
 function renderTable(data) {
-    const tbody = document.getElementById('location-list-body');
-    if (!tbody) return;
+    VS.data = data;
+    
+    // 체크 상태 보존
     const checkedBoxes = document.querySelectorAll('.loc-check:checked');
-    const checkedIds = new Set(Array.from(checkedBoxes).map(cb => cb.value));
-    let html = ''; 
-    data.forEach(loc => {
+    checkedBoxes.forEach(cb => { if (cb.value && cb.value !== 'on') VS.checkedIds.add(cb.value); });
+    
+    const container = document.getElementById('list-container');
+    const tbody = document.getElementById('location-list-body');
+    if (!tbody || !container) return;
+    
+    if (data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
+        return;
+    }
+    
+    // 스크롤 이벤트 등록 (1회)
+    if (!VS.scrollHandler) {
+        VS.scrollHandler = () => { requestAnimationFrame(() => renderVisibleRows()); };
+        container.addEventListener('scroll', VS.scrollHandler);
+    }
+    
+    renderVisibleRows();
+}
+
+function renderVisibleRows() {
+    const container = document.getElementById('list-container');
+    const tbody = document.getElementById('location-list-body');
+    if (!tbody || !container || VS.data.length === 0) return;
+    
+    const totalRows = VS.data.length;
+    const totalHeight = totalRows * VS.rowHeight;
+    
+    // thead 높이 감안 (약 45px)
+    const scrollTop = Math.max(0, container.scrollTop - 45);
+    const viewHeight = container.clientHeight;
+    
+    let startIdx = Math.floor(scrollTop / VS.rowHeight) - VS.bufferRows;
+    let endIdx = Math.ceil((scrollTop + viewHeight) / VS.rowHeight) + VS.bufferRows;
+    startIdx = Math.max(0, startIdx);
+    endIdx = Math.min(totalRows, endIdx);
+    
+    const topPad = startIdx * VS.rowHeight;
+    const bottomPad = (totalRows - endIdx) * VS.rowHeight;
+    
+    let html = '';
+    if (topPad > 0) html += `<tr style="height:${topPad}px;"><td colspan="20"></td></tr>`;
+    
+    for (let i = startIdx; i < endIdx; i++) {
+        const loc = VS.data[i];
         let rowStyle = ''; 
         let codeTagHtml = '';
         
@@ -1716,9 +1767,9 @@ function renderTable(data) {
             codeTagHtml = `<br><span style="color:#e65100; font-size:10px; font-weight:bold; background:#fff3e0; padding:1px 5px; border-radius:3px;">📦 선지정</span>`;
         }
         
-        let isChecked = checkedIds.has(loc.id) ? 'checked' : '';
+        let isChecked = VS.checkedIds.has(loc.id) ? 'checked' : '';
         html += `<tr onclick="handleRowClick(event, '${loc.id}')" style="${rowStyle}">`;
-        html += `<td onclick="event.stopPropagation()"><input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked}></td>`;
+        html += `<td onclick="event.stopPropagation()"><input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked} onchange="window.vsCheckChanged(this)"></td>`;
         window.visibleColumns.forEach(col => {
             if (col === 'std_dong') html += `<td style="color:#666;">${loc.dong || ''}</td>`;
             else if (col === 'std_pos') html += `<td style="color:#666;">${loc.pos || ''}</td>`;
@@ -1735,9 +1786,28 @@ function renderTable(data) {
             }
         });
         html += `</tr>`;
-    });
-    tbody.innerHTML = html || '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
+    }
+    
+    if (bottomPad > 0) html += `<tr style="height:${bottomPad}px;"><td colspan="20"></td></tr>`;
+    
+    tbody.innerHTML = html;
 }
+
+// 체크박스 상태를 가상 스크롤에서 유지
+window.vsCheckChanged = function(cb) {
+    if (cb.checked) VS.checkedIds.add(cb.value);
+    else VS.checkedIds.delete(cb.value);
+};
+
+// toggleAllCheckboxes 오버라이드 - 전체 데이터 기준으로 동작
+window.toggleAllCheckboxes = (source) => {
+    if (source.checked) {
+        VS.data.forEach(d => VS.checkedIds.add(d.id));
+    } else {
+        VS.checkedIds.clear();
+    }
+    renderVisibleRows();
+};
 
 const extractDataFromHTML = function(htmlString) {
     const parser = new DOMParser();
@@ -2215,10 +2285,6 @@ function showToast(message) {
     const toast = document.getElementById("toast");
     if(toast) { toast.innerText = message; toast.classList.add("show"); setTimeout(() => { toast.classList.remove("show"); }, 1500); }
 }
-
-window.toggleAllCheckboxes = (source) => {
-    document.querySelectorAll('.loc-check').forEach(cb => cb.checked = source.checked);
-};
 
 window.addSingleLocationFromSetting = async () => {
     const inputObj = document.getElementById('setting-new-loc'); const newId = inputObj.value.trim().toUpperCase();
