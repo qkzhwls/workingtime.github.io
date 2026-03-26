@@ -502,6 +502,10 @@ window.saveMasterSettingsModal = async function() {
     } catch(e) { console.error(e); alert("설정 저장 중 오류가 발생했습니다."); }
 };
 
+window.openRecommendModal = function() {
+    document.getElementById('recommend-modal').style.display = 'flex';
+};
+
 window.showRecommendation = function() {
     window.showLoading("💡 우선순위 알고리즘을 분석하여 최적의 로케이션을 매칭 중입니다...");
 
