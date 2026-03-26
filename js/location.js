@@ -502,7 +502,7 @@ window.saveMasterSettingsModal = async function() {
     } catch(e) { console.error(e); alert("설정 저장 중 오류가 발생했습니다."); }
 };
 
-// ★ 메인 테이블 엑셀 다운로드
+// ★ 메인 테이블 엑셀 다운로드 (HTML 테이블 .xls 형식)
 window.downloadMainExcel = function() {
     // 1. 체크된 항목 확인
     const checked = document.querySelectorAll('.loc-check:checked:not(#check-all)');
@@ -512,15 +512,12 @@ window.downloadMainExcel = function() {
     let fileLabel;
     
     if (checkedIds.size > 0) {
-        // 체크된 것만
         targetData = originalData.filter(d => checkedIds.has(d.id));
         fileLabel = `로케이션_선택${targetData.length}건`;
     } else if (window.lastFilteredData && window.lastFilteredData.length !== originalData.length) {
-        // 필터 적용된 상태
         targetData = window.lastFilteredData;
         fileLabel = `로케이션_필터${targetData.length}건`;
     } else {
-        // 전체
         targetData = originalData;
         fileLabel = `로케이션_전체${targetData.length}건`;
     }
@@ -530,38 +527,82 @@ window.downloadMainExcel = function() {
         return;
     }
     
-    // 엑셀 데이터 생성
-    const excelData = targetData.map(loc => {
-        const row = {
-            '로케이션': loc.id,
-            '동': loc.dong || '',
-            '위치': loc.pos || '',
-            '상품코드': (loc.code === loc.id ? '' : loc.code) || '',
-            '상품명': loc.name || '',
-            '옵션': loc.option || '',
-            '정상재고': loc.stock || '0',
-            '2층창고재고': loc.stock2f || '0'
-        };
-        // 커스텀 헤더 추가
-        window.excelHeaders.forEach(h => {
-            row[h] = (loc.rawData && loc.rawData[h]) ? loc.rawData[h] : '';
+    // 헤더 구성
+    const stdHeaders = ['로케이션', '동', '위치', '상품코드', '상품명', '옵션', '정상재고', '2층창고재고'];
+    const cusHeaders = window.excelHeaders || [];
+    const allHeaders = [...stdHeaders, ...cusHeaders];
+    
+    // HTML 테이블 생성
+    let headerRow = allHeaders.map(h => `<td class=header>${h}</td>`).join('');
+    
+    let dataRows = '';
+    targetData.forEach(loc => {
+        const code = (loc.code === loc.id ? '' : loc.code) || '';
+        const stock = loc.stock || '0';
+        const stock2f = loc.stock2f || '0';
+        
+        let row = '';
+        row += `<td class='style1'>${loc.id}</td>`;
+        row += `<td class='style2'>${loc.dong || ''}</td>`;
+        row += `<td class='style2'>${loc.pos || ''}</td>`;
+        row += `<td class='style1'>${code}</td>`;
+        row += `<td class='style1'>${loc.name || ''}</td>`;
+        row += `<td class='style1'>${loc.option || ''}</td>`;
+        row += `<td class='style3'>${stock}</td>`;
+        row += `<td class='style3'>${stock2f}</td>`;
+        
+        cusHeaders.forEach(h => {
+            const val = (loc.rawData && loc.rawData[h]) ? loc.rawData[h] : '';
+            const isNum = !isNaN(val) && val !== '';
+            row += `<td class='${isNum ? 'style3' : 'style2'}'>${val}</td>`;
         });
-        return row;
+        
+        dataRows += `<tr>${row}</tr>\n`;
     });
     
-    const ws = XLSX.utils.json_to_sheet(excelData);
-    const colWidths = [
-        { wch: 12 }, { wch: 5 }, { wch: 5 }, { wch: 15 }, { wch: 40 },
-        { wch: 25 }, { wch: 10 }, { wch: 12 }
-    ];
-    window.excelHeaders.forEach(() => colWidths.push({ wch: 15 }));
-    ws['!cols'] = colWidths;
+    const htmlContent = `
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<meta http-equiv='Content-Type' content='text/html; charset=utf-8'>
+<head>
+<style>
+    br {mso-data-placement:same-cell;}
+    .header {font:bold 10pt "굴림"; white-space:nowrap; background:#CCFFCC;}
+    .style1 {font:9pt "굴림"; white-space:nowrap; mso-number-format:\\@;}
+    .style2 {font:9pt "굴림"; white-space:nowrap;}
+    .style3 {font:9pt "굴림"; white-space:nowrap; mso-number-format:"0_ ";}
+</style>
+<!--[if gte mso 9]>
+<xml>
+<x:ExcelWorkbook>
+<x:ExcelWorksheets>
+<x:ExcelWorksheet>
+<x:Name>로케이션</x:Name>
+<x:WorksheetOptions><x:Selected/></x:WorksheetOptions>
+</x:ExcelWorksheet>
+</x:ExcelWorksheets>
+</x:ExcelWorkbook>
+</xml>
+<![endif]-->
+</head>
+<body>
+<table border="1" cellspacing="0" cellpadding="2">
+<tr>${headerRow}</tr>
+${dataRows}
+</table>
+</body>
+</html>`;
     
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '로케이션');
+    const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
     const today = new Date();
     const dateString = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
-    XLSX.writeFile(wb, `${fileLabel}_${dateString}.xlsx`);
+    a.download = `${fileLabel}_${dateString}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 };
 
 window.openRecommendModal = function() {
