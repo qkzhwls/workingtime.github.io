@@ -163,7 +163,7 @@ function setupRealtimeListenerA() {
             if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
             if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
-            if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders;
+            if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders.filter(h => h && !h.includes('<') && !h.includes('>') && !h.includes('='));
             
             if (conf.recommendRatios) {
                 let r = conf.recommendRatios;
@@ -529,7 +529,7 @@ window.downloadMainExcel = function() {
     
     // 헤더 구성
     const stdHeaders = ['로케이션', '동', '위치', '상품코드', '상품명', '옵션', '정상재고', '2층창고재고'];
-    const cusHeaders = window.excelHeaders || [];
+    const cusHeaders = (window.excelHeaders || []).filter(h => h && !h.includes('<') && !h.includes('>') && !h.includes('='));
     const allHeaders = [...stdHeaders, ...cusHeaders];
     
     // HTML 테이블 생성
@@ -1963,6 +1963,7 @@ async function updateDatabaseA(rows, mode = 'daily') {
             const clean = h.replace(/\s+/g, '');
             return clean !== '' && 
                    !h.toUpperCase().includes('EMPTY') &&
+                   !h.includes('<') && !h.includes('>') && !h.includes('=') &&
                    !exclude.includes(h) &&
                    !exclude.includes(clean);
         });
