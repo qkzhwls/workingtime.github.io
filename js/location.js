@@ -873,60 +873,16 @@ window.calc2FList = function() {
                 <td style="font-size:12px; color:${item.lastDelivery === '기록없음' ? '#ff5252' : '#555'};">${item.lastDelivery}</td>
                 <td style="font-size:12px;">${item.locIds}</td>
                 <td style="background:#f3e5f5; font-weight:bold; color:#4a148c; font-size:12px;">${item.changeValue}</td>
-                <td><button onclick="window.apply2FSingle(${idx})" style="padding:4px 10px; background:#7b1fa2; color:white; border:none; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold;">변경</button></td>
             </tr>
         `;
     });
 
     if (window.current2FList.length === 0) {
-        html = '<tr><td colspan="10" style="padding:40px; color:#888;">조건에 해당하는 상품이 없습니다.</td></tr>';
+        html = '<tr><td colspan="9" style="padding:40px; color:#888;">조건에 해당하는 상품이 없습니다.</td></tr>';
     }
 
     tbody.innerHTML = html;
     document.getElementById('2f-check-all').checked = false;
-};
-
-window.apply2FSingle = async function(idx) {
-    const item = window.current2FList[idx];
-    if (!item) return;
-    if (!confirm(`[${item.code}] ${item.name}\n현재위치: ${item.locIds}\n\n→ 로케이션 값을 "${item.changeValue}"로 변경하시겠습니까?`)) return;
-    
-    try {
-        for (const loc of item.locs) {
-            const zoneDocId = getZoneDocId(loc.id);
-            await setDoc(doc(db, LOC_COLLECTION, zoneDocId), {
-                [loc.id]: { code: item.changeValue, name: item.name, option: item.option, updatedAt: new Date() }
-            }, { merge: true });
-        }
-        showToast(`✅ [${item.code}] → ${item.changeValue} 변경 완료!`);
-        window.calc2FList(); // 리스트 새로고침
-    } catch(e) { console.error(e); alert('변경 중 오류가 발생했습니다.'); }
-};
-
-window.apply2FBatch = async function() {
-    const checked = document.querySelectorAll('.check-2f-item:checked');
-    if (checked.length === 0) return alert('변경할 항목을 선택해주세요.');
-    
-    const indices = Array.from(checked).map(cb => Number(cb.dataset.idx));
-    const items = indices.map(i => window.current2FList[i]).filter(Boolean);
-    
-    if (!confirm(`선택한 ${items.length}개 상품의 로케이션을 2F 값으로 일괄 변경하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
-    
-    window.showLoading(`🏢 ${items.length}개 상품 2F 이동 처리 중...`);
-    
-    try {
-        for (const item of items) {
-            for (const loc of item.locs) {
-                const zoneDocId = getZoneDocId(loc.id);
-                await setDoc(doc(db, LOC_COLLECTION, zoneDocId), {
-                    [loc.id]: { code: item.changeValue, name: item.name, option: item.option, updatedAt: new Date() }
-                }, { merge: true });
-            }
-        }
-        window.hideLoading();
-        showToast(`✅ ${items.length}개 상품 2F 이동 완료!`);
-        window.calc2FList();
-    } catch(e) { window.hideLoading(); console.error(e); alert('일괄 변경 중 오류가 발생했습니다.'); }
 };
 
 window.download2FExcel = function() {
@@ -935,7 +891,20 @@ window.download2FExcel = function() {
         return;
     }
 
-    const excelData = window.current2FList.map((item, idx) => ({
+    // 체크된 항목이 있으면 선택만, 없으면 전체 다운로드
+    const checked = document.querySelectorAll('.check-2f-item:checked');
+    let targetList;
+    let fileLabel;
+    if (checked.length > 0) {
+        const indices = Array.from(checked).map(cb => Number(cb.dataset.idx));
+        targetList = indices.map(i => window.current2FList[i]).filter(Boolean);
+        fileLabel = `2F이동추천_선택${targetList.length}건`;
+    } else {
+        targetList = window.current2FList;
+        fileLabel = `2F이동추천_전체${targetList.length}건`;
+    }
+
+    const excelData = targetList.map((item, idx) => ({
         "No": idx + 1,
         "상품코드": item.code,
         "상품명": item.name,
@@ -955,7 +924,7 @@ window.download2FExcel = function() {
     XLSX.utils.book_append_sheet(wb, ws, "2F이동추천");
     const today = new Date();
     const dateString = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
-    XLSX.writeFile(wb, `2F이동추천리스트_${dateString}.xlsx`);
+    XLSX.writeFile(wb, `${fileLabel}_${dateString}.xlsx`);
 };
 
 function renderTableHeader() {
