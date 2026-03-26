@@ -502,6 +502,68 @@ window.saveMasterSettingsModal = async function() {
     } catch(e) { console.error(e); alert("설정 저장 중 오류가 발생했습니다."); }
 };
 
+// ★ 메인 테이블 엑셀 다운로드
+window.downloadMainExcel = function() {
+    // 1. 체크된 항목 확인
+    const checked = document.querySelectorAll('.loc-check:checked:not(#check-all)');
+    const checkedIds = new Set(Array.from(checked).map(cb => cb.value));
+    
+    let targetData;
+    let fileLabel;
+    
+    if (checkedIds.size > 0) {
+        // 체크된 것만
+        targetData = originalData.filter(d => checkedIds.has(d.id));
+        fileLabel = `로케이션_선택${targetData.length}건`;
+    } else if (window.lastFilteredData && window.lastFilteredData.length !== originalData.length) {
+        // 필터 적용된 상태
+        targetData = window.lastFilteredData;
+        fileLabel = `로케이션_필터${targetData.length}건`;
+    } else {
+        // 전체
+        targetData = originalData;
+        fileLabel = `로케이션_전체${targetData.length}건`;
+    }
+    
+    if (!targetData || targetData.length === 0) {
+        alert('다운로드할 데이터가 없습니다.');
+        return;
+    }
+    
+    // 엑셀 데이터 생성
+    const excelData = targetData.map(loc => {
+        const row = {
+            '로케이션': loc.id,
+            '동': loc.dong || '',
+            '위치': loc.pos || '',
+            '상품코드': (loc.code === loc.id ? '' : loc.code) || '',
+            '상품명': loc.name || '',
+            '옵션': loc.option || '',
+            '정상재고': loc.stock || '0',
+            '2층창고재고': loc.stock2f || '0'
+        };
+        // 커스텀 헤더 추가
+        window.excelHeaders.forEach(h => {
+            row[h] = (loc.rawData && loc.rawData[h]) ? loc.rawData[h] : '';
+        });
+        return row;
+    });
+    
+    const ws = XLSX.utils.json_to_sheet(excelData);
+    const colWidths = [
+        { wch: 12 }, { wch: 5 }, { wch: 5 }, { wch: 15 }, { wch: 40 },
+        { wch: 25 }, { wch: 10 }, { wch: 12 }
+    ];
+    window.excelHeaders.forEach(() => colWidths.push({ wch: 15 }));
+    ws['!cols'] = colWidths;
+    
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '로케이션');
+    const today = new Date();
+    const dateString = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
+    XLSX.writeFile(wb, `${fileLabel}_${dateString}.xlsx`);
+};
+
 window.openRecommendModal = function() {
     document.getElementById('recommend-modal').style.display = 'flex';
 };
@@ -1543,6 +1605,7 @@ function applyFiltersAndSort() {
         if (sortConfig.key === 'stock') return sortConfig.direction === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
         return sortConfig.direction === 'asc' ? aVal.toString().localeCompare(bVal.toString()) : bVal.toString().localeCompare(aVal.toString());
     });
+    window.lastFilteredData = filtered;
     renderTable(filtered);
 }
 
