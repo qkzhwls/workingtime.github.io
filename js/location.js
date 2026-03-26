@@ -1396,32 +1396,35 @@ window.calculateAndRenderUsage = function() {
         let detailHtml = `<div id="usage-details-content" style="display:none; margin-top:15px; border-top:1px solid #eee; padding-top:15px;">`;
         detailHtml += `<div style="font-size:11px; color:#888; text-align:center; margin-bottom:10px;">※ 숫자를 클릭하면 리스트에 해당 내용만 보입니다.</div>`;
         
-        detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 구역별 사용률</div>`;
+        detailHtml += `<div onclick="document.getElementById('sec-zone-detail').style.display = document.getElementById('sec-zone-detail').style.display==='none'?'block':'none'; this.querySelector('.toggle-icon').textContent = document.getElementById('sec-zone-detail').style.display==='none'?'▶':'▼';" style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary); cursor:pointer; user-select:none;"><span class="toggle-icon">▶</span> 구역별 사용률</div>`;
+        detailHtml += `<div id="sec-zone-detail" style="display:none;">`;
         detailHtml += `<table class="usage-table" style="width:100%; margin-bottom:15px;"><thead><tr><th>구역명</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
         const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
         zones.forEach(z => {
             const zTotal = zoneStats[z].total; const zUsed = zoneStats[z].used; const zEmpty = zTotal - zUsed; const zRate = ((zUsed / zTotal) * 100).toFixed(1);
             detailHtml += `<tr><td><strong>${z}</strong> 구역</td><td>${zTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')">${zUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')">${zEmpty}</td><td>${zRate}%</td></tr>`;
         });
-        detailHtml += `</tbody></table>`;
+        detailHtml += `</tbody></table></div>`;
 
-        detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 동별 사용률</div>`;
+        detailHtml += `<div onclick="document.getElementById('sec-dong-detail').style.display = document.getElementById('sec-dong-detail').style.display==='none'?'block':'none'; this.querySelector('.toggle-icon').textContent = document.getElementById('sec-dong-detail').style.display==='none'?'▶':'▼';" style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary); cursor:pointer; user-select:none;"><span class="toggle-icon">▶</span> 동별 사용률</div>`;
+        detailHtml += `<div id="sec-dong-detail" style="display:none;">`;
         detailHtml += `<table class="usage-table" style="width:100%; margin-bottom:15px;"><thead><tr><th>동</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
         const dongs = Object.keys(dongStats).sort((a,b) => a.localeCompare(b, undefined, {numeric: true}));
         dongs.forEach(d => {
             const dTotal = dongStats[d].total; const dUsed = dongStats[d].used; const dEmpty = dTotal - dUsed; const dRate = ((dUsed / dTotal) * 100).toFixed(1);
             detailHtml += `<tr><td><strong>${d}</strong> 동</td><td>${dTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="setFilter('dong', '${d}'); applyUsageFilter('all', 'used')">${dUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="setFilter('dong', '${d}'); applyUsageFilter('all', 'empty')">${dEmpty}</td><td>${dRate}%</td></tr>`;
         });
-        detailHtml += `</tbody></table>`;
+        detailHtml += `</tbody></table></div>`;
 
-        detailHtml += `<div style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary);">▶ 위치별 사용률</div>`;
+        detailHtml += `<div onclick="document.getElementById('sec-pos-detail').style.display = document.getElementById('sec-pos-detail').style.display==='none'?'block':'none'; this.querySelector('.toggle-icon').textContent = document.getElementById('sec-pos-detail').style.display==='none'?'▶':'▼';" style="font-size:13px; font-weight:bold; margin-bottom:5px; color:var(--primary); cursor:pointer; user-select:none;"><span class="toggle-icon">▶</span> 위치별 사용률</div>`;
+        detailHtml += `<div id="sec-pos-detail" style="display:none;">`;
         detailHtml += `<table class="usage-table" style="width:100%;"><thead><tr><th>위치</th><th>총 칸수</th><th>사용중</th><th>빈칸</th><th>사용률</th></tr></thead><tbody>`;
         const poses = Object.keys(posStats).sort((a,b) => a.localeCompare(b, undefined, {numeric: true}));
         poses.forEach(p => {
             const pTotal = posStats[p].total; const pUsed = posStats[p].used; const pEmpty = pTotal - pUsed; const pRate = ((pUsed / pTotal) * 100).toFixed(1);
             detailHtml += `<tr><td><strong>${p}</strong> 위치</td><td>${pTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="setFilter('pos', '${p}'); applyUsageFilter('all', 'used')">${pUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="setFilter('pos', '${p}'); applyUsageFilter('all', 'empty')">${pEmpty}</td><td>${pRate}%</td></tr>`;
         });
-        detailHtml += `</tbody></table>`;
+        detailHtml += `</tbody></table></div>`;
         detailHtml += `</div>`; 
 
         html += detailHtml;
@@ -1429,7 +1432,43 @@ window.calculateAndRenderUsage = function() {
     } else {
         let sum2F = 0; originalData.forEach(loc => { sum2F += Number(loc.stock2f || 0); });
         let rate2F = ((sum2F / window.capacity2F) * 100).toFixed(1);
-        html += `<div style="font-size:15px; font-weight:bold; margin-bottom:15px; color:var(--primary); text-align:center;">🏢 2층 전체 창고 사용률: ${rate2F}%</div><table class="usage-table" style="width:100%;"><tr><th style="background:#eef1ff; width: 40%;">총 적재가능수량</th><td style="text-align: right;"><input type="number" id="input-cap-2f" value="${window.capacity2F}" style="width:80px; padding:3px; text-align:right; font-size:13px; font-weight:bold;"> 장 <button onclick="saveCapacity2F()" style="padding:4px 8px; margin-left:5px; font-size:11px; background:var(--primary); color:white; border:none; border-radius:3px; cursor:pointer;">기준변경</button></td></tr><tr><th style="background:#eef1ff;">현재 적재수량</th><td style="font-weight:bold; color:var(--primary); text-align: right;">${sum2F.toLocaleString()} 장</td></tr><tr><th style="background:#eef1ff;">남은 수량</th><td style="font-weight:bold; color:#ff5252; text-align: right;">${(window.capacity2F - sum2F).toLocaleString()} 장</td></tr></table>`;
+        let remaining2F = window.capacity2F - sum2F;
+        
+        // ★ 만재 예측: 입고대기 데이터의 입고일자별 수량 누적
+        let incomingSchedule = []; // {date, qty}
+        for (let code in incomingData) {
+            const item = incomingData[code];
+            const date = item['공장출고예상일'] || '';
+            const qty = Number(item['입고대기수량'] || 0);
+            if (date && qty > 0) {
+                incomingSchedule.push({ date, qty });
+            }
+        }
+        incomingSchedule.sort((a, b) => a.date.localeCompare(b.date));
+        
+        let fullDate = '';
+        let cumQty = 0;
+        let totalIncoming = 0;
+        for (const entry of incomingSchedule) {
+            cumQty += entry.qty;
+            totalIncoming += entry.qty;
+            if (cumQty >= remaining2F && !fullDate) {
+                fullDate = entry.date;
+            }
+        }
+        
+        let predictionHtml = '';
+        if (remaining2F <= 0) {
+            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측</th><td style="font-weight:bold; color:#d32f2f; text-align:right;">이미 초과 상태입니다!</td></tr>`;
+        } else if (fullDate) {
+            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일</th><td style="font-weight:bold; color:#e65100; text-align:right;">${fullDate} (입고예정 ${totalIncoming.toLocaleString()}장 중 ${cumQty >= remaining2F ? remaining2F.toLocaleString() : cumQty.toLocaleString()}장 도달 시점)</td></tr>`;
+        } else if (incomingSchedule.length > 0) {
+            predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측</th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정(${totalIncoming.toLocaleString()}장) 전량 입고 후에도 여유 ${(remaining2F - totalIncoming).toLocaleString()}장</td></tr>`;
+        } else {
+            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측</th><td style="color:#888; text-align:right;">입고대기 데이터 없음 (시트 동기화 필요)</td></tr>`;
+        }
+        
+        html += `<div style="font-size:15px; font-weight:bold; margin-bottom:15px; color:var(--primary); text-align:center;">🏢 2층 전체 창고 사용률: ${rate2F}%</div><table class="usage-table" style="width:100%;"><tr><th style="background:#eef1ff; width: 40%;">총 적재가능수량</th><td style="text-align: right;"><input type="number" id="input-cap-2f" value="${window.capacity2F}" style="width:80px; padding:3px; text-align:right; font-size:13px; font-weight:bold;"> 장 <button onclick="saveCapacity2F()" style="padding:4px 8px; margin-left:5px; font-size:11px; background:var(--primary); color:white; border:none; border-radius:3px; cursor:pointer;">기준변경</button></td></tr><tr><th style="background:#eef1ff;">현재 적재수량</th><td style="font-weight:bold; color:var(--primary); text-align: right;">${sum2F.toLocaleString()} 장</td></tr><tr><th style="background:#eef1ff;">남은 수량</th><td style="font-weight:bold; color:#ff5252; text-align: right;">${remaining2F.toLocaleString()} 장</td></tr>${predictionHtml}</table>`;
     }
     popup.innerHTML = html;
 };
