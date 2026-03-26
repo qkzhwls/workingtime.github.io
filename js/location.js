@@ -592,7 +592,8 @@ ${dataRows}
 </body>
 </html>`;
     
-    const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + htmlContent], { type: 'application/vnd.ms-excel;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
