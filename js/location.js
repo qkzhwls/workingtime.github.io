@@ -1929,6 +1929,13 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     const existingData = existingLocMap[cleanLocId] || {};
                     
                     let cleanRawData = {};
+                    const isFirstRow = (i === 0);
+                    if (isFirstRow) {
+                        console.log('=== [DEBUG] 최신화 디버깅 ===');
+                        console.log('customHeaders:', customHeaders);
+                        console.log('row keys:', Object.keys(row));
+                        console.log('row 전체:', JSON.stringify(row).substring(0, 500));
+                    }
                     customHeaders.forEach(k => {
                         // 엑셀 파싱 키와 customHeader 키 매칭 (공백/특수문자 무시)
                         const normalizeKey = (s) => (s || '').toString().replace(/[\s\u00A0\u200B\uFEFF]/g, '');
@@ -1960,6 +1967,10 @@ async function updateDatabaseA(rows, mode = 'daily') {
                             }
                         }
                     });
+
+                    if (isFirstRow) {
+                        console.log('cleanRawData 결과:', JSON.stringify(cleanRawData));
+                    }
 
                     let updateData = zoneUpdates[zoneDocId][cleanLocId] || { 
                         dong: existingData.dong || '',
