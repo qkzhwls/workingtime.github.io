@@ -853,12 +853,42 @@ window.calc2FList = function() {
     }
 
     // 마지막배송일 오래된 순 정렬 (기록없음이 맨 위)
+    window.current2FSortAsc = true;
     window.current2FList.sort((a, b) => {
-        if (a.lastDelivery === '기록없음' && b.lastDelivery !== '기록없음') return -1;
-        if (a.lastDelivery !== '기록없음' && b.lastDelivery === '기록없음') return 1;
-        return a.lastDelivery.localeCompare(b.lastDelivery);
+        const aVal = a.lastDelivery === '기록없음' ? '0000-00-00' : a.lastDelivery;
+        const bVal = b.lastDelivery === '기록없음' ? '0000-00-00' : b.lastDelivery;
+        return aVal.localeCompare(bVal);
     });
 
+    const icon = document.getElementById('2f-sort-icon');
+    if (icon) icon.textContent = '▲';
+    
+    window.render2FTable();
+};
+
+window.current2FSortAsc = true; // 기본: 오래된 순 (오름차순)
+
+window.sort2FList = function() {
+    if (!window.current2FList || window.current2FList.length === 0) return;
+    
+    window.current2FSortAsc = !window.current2FSortAsc;
+    
+    window.current2FList.sort((a, b) => {
+        const aVal = a.lastDelivery === '기록없음' ? '0000-00-00' : a.lastDelivery;
+        const bVal = b.lastDelivery === '기록없음' ? '0000-00-00' : b.lastDelivery;
+        return window.current2FSortAsc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    });
+    
+    // 아이콘 업데이트
+    const icon = document.getElementById('2f-sort-icon');
+    if (icon) icon.textContent = window.current2FSortAsc ? '▲' : '▼';
+    
+    // 테이블 다시 렌더링
+    window.render2FTable();
+};
+
+window.render2FTable = function() {
+    const tbody = document.getElementById('2f-tbody');
     let html = '';
     window.current2FList.forEach((item, idx) => {
         const rowBg = idx % 2 === 0 ? '#ffffff' : '#f9fafb';
@@ -876,11 +906,9 @@ window.calc2FList = function() {
             </tr>
         `;
     });
-
     if (window.current2FList.length === 0) {
         html = '<tr><td colspan="9" style="padding:40px; color:#888;">조건에 해당하는 상품이 없습니다.</td></tr>';
     }
-
     tbody.innerHTML = html;
     document.getElementById('2f-check-all').checked = false;
 };
