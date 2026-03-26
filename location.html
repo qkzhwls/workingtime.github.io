@@ -206,8 +206,10 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.33 (변경리스트 모달 먼저 열고 계산 버튼 분리)</div>
+            <div class="version-badge">🚀 Ver 3.34 (메인 엑셀 다운로드 기능 추가)</div>
             
+            <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
+
             <div class="upload-dropdown">
                 <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
                 <div class="upload-menu" id="main-tools-menu" onclick="event.stopPropagation()" style="width: 270px;">
