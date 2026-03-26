@@ -206,7 +206,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.31 (2F 개별/일괄변경 삭제, 엑셀 선택 다운로드)</div>
+            <div class="version-badge">🚀 Ver 3.32 (2F 마지막배송일 정렬 기능 추가)</div>
             
             <div class="upload-dropdown">
                 <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
@@ -448,7 +448,7 @@
                             <th style="border-top:none; font-size:13px;">상품명</th>
                             <th style="width:100px; border-top:none; font-size:13px;">옵션</th>
                             <th style="width:70px; border-top:none; font-size:13px;">정상재고</th>
-                            <th style="width:100px; border-top:none; font-size:13px;">마지막배송일</th>
+                            <th style="width:100px; border-top:none; font-size:13px; cursor:pointer;" onclick="window.sort2FList()">마지막배송일 <span id="2f-sort-icon">▲</span></th>
                             <th style="width:100px; border-top:none; font-size:13px;">현재위치</th>
                             <th style="width:180px; background:#f3e5f5; border-top:none; font-size:13px;">변경값</th>
                         </tr>
