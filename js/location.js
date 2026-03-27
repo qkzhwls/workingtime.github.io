@@ -1298,9 +1298,11 @@ window.saveCapacity2F = async function() {
     const input = document.getElementById('input-cap-2f');
     if (!input) return;
     const newVal = parseInt(input.value.replace(/,/g, ''), 10);
-    if (isNaN(num)) return alert("올바른 수량을 입력해주세요.");
+    if (isNaN(newVal) || newVal <= 0) return alert("올바른 수량을 입력해주세요.");
     try {
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { capacity2F: newVal }, { merge: true });
+        window.capacity2F = newVal;
+        window.calculateAndRenderUsage();
         alert(`2층 기준 수량이 ${newVal.toLocaleString()}장으로 변경되었습니다.`);
     } catch(e) { console.error(e); alert("오류가 발생했습니다."); }
 };
