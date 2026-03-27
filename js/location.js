@@ -1260,10 +1260,14 @@ window.syncIncomingData = async () => {
             let qty = Number(rawQty) || 0;
             
             let rawDate = "";
+            let rawFactoryDate = "";
+            let rawArrivalDate = "";
             if (row.source === '제작') {
-                rawDate = row['공장출고예상일자'] || row['공장출고예상일'] || row['출고예상일'];
+                rawFactoryDate = row['공장출고예상일자'] || row['공장출고예상일'] || row['출고예상일'] || '';
+                rawDate = rawFactoryDate;
             } else if (row.source === '사입') {
-                rawDate = row['검수창고도착일'];
+                rawArrivalDate = row['검수창고도착일'] || '';
+                rawDate = rawArrivalDate;
             }
             
             let date = formatExcelDate(rawDate);
@@ -1273,11 +1277,13 @@ window.syncIncomingData = async () => {
                 '상품명': name,
                 '옵션': row['옵션'] || '',
                 '입고대기수량': qty,
-                '공장출고예상일': date,
+                '공장출고예상일': row.source === '제작' ? formatExcelDate(rawFactoryDate) : '',
+                '검수창고도착일': row.source === '사입' ? formatExcelDate(rawArrivalDate) : '',
                 '도착예상일': formatExcelDate(row['도착예상일'] || ''),
+                '표시날짜': date,
                 'source': row.source || '기타'
             };
-        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['공장출고예상일'] && row['공장출고예상일'].toString().trim() !== '');
+        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['표시날짜'] && row['표시날짜'].toString().trim() !== '');
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
@@ -1441,8 +1447,8 @@ window.calculateAndRenderUsage = function() {
         let totalIncoming = 0;
         for (let code in incomingData) {
             const item = incomingData[code];
-            // 도착예상일 우선, 없으면 공장출고예상일 폴백
-            const rawDate = item['도착예상일'] || item['공장출고예상일'] || '';
+            // 도착예상일 우선, 없으면 표시날짜 폴백
+            const rawDate = item['도착예상일'] || item['표시날짜'] || '';
             const date = rawDate.toString().trim();
             const qty = Number(item['입고대기수량'] || 0);
             if (date && qty > 0) {
@@ -2423,7 +2429,7 @@ window.renderIncomingQueue = function() {
         if(filterSource !== 'all' && item.source !== filterSource) return false;
         if(existingLocMap[item['상품코드']]) return false; 
         
-        if(!item['공장출고예상일'] || item['공장출고예상일'].toString().trim() === '') return false;
+        if(!item['표시날짜'] || item['표시날짜'].toString().trim() === '') return false;
         
         return true;
     });
@@ -2431,7 +2437,7 @@ window.renderIncomingQueue = function() {
     list.sort((a, b) => {
         if(sortType === 'qty-desc') return Number(b['입고대기수량'] || 0) - Number(a['입고대기수량'] || 0);
         else if(sortType === 'date-asc') {
-            let dA = a['공장출고예상일'] || '9999-99-99'; let dB = b['공장출고예상일'] || '9999-99-99';
+            let dA = a['표시날짜'] || '9999-99-99'; let dB = b['표시날짜'] || '9999-99-99';
             return dA.localeCompare(dB);
         }
         return 0;
@@ -2440,8 +2446,9 @@ window.renderIncomingQueue = function() {
     let html = '';
     list.forEach(item => {
         let code = item['상품코드']; let qty = item['입고대기수량'] || 0;
-        let name = item['상품명'] || ''; let date = item['공장출고예상일'] || '-';
+        let name = item['상품명'] || '';
         let src = item.source || '-';
+        let date = src === '제작' ? (item['공장출고예상일'] || item['표시날짜'] || '-') : (item['검수창고도착일'] || item['표시날짜'] || '-');
         let option = item['옵션'] || '';
         html += `
             <div class="incoming-item" onclick="activatePreAssignMode('${code}', '${name.replace(/'/g, "\\'")}', '${qty}', '${option.replace(/'/g, "\\'")}')">
