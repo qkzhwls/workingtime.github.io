@@ -3,300 +3,526 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>관리자 페이지</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <title>3층 로케이션 관리 시스템 (통합 DB)</title>
     <style>
-        body { font-family: 'Noto Sans KR', sans-serif; }
-        input[type="text"], input[type="number"] {
-            @apply w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500;
-        }
-        .config-card { @apply bg-white p-6 rounded-lg shadow-md border border-gray-200; }
-        .btn { @apply px-4 py-2 rounded-md font-semibold text-sm transition; }
-        .btn-primary { @apply bg-blue-600 text-white hover:bg-blue-700; }
-        .btn-secondary { @apply bg-gray-200 text-gray-800 hover:bg-gray-300; }
-        .btn-danger { @apply bg-red-500 text-white hover:bg-red-600; }
-        .btn-small { @apply px-2 py-1 text-xs; }
+        :root { --primary: #3d5afe; --bg: #f8f9fa; --card: #ffffff; }
+        body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
+        
+        .controls-header { margin: 15px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; align-items: center; }
+        .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
+        .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 
-        .drag-handle {
-            @apply cursor-move text-gray-400 hover:text-gray-600 mr-2 text-lg inline-block align-middle -mt-1;
+        .usage-container { position: relative; display: inline-block; margin-left: 10px; }
+        .btn-usage { padding: 8px 15px; background: #ff9800; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
+        .btn-usage:hover { background: #e68a00; }
+        .usage-popup { 
+            display: none; position: absolute; top: 100%; left: 0; 
+            background: white; border: 1px solid #ccc; border-radius: 8px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3); padding: 15px; z-index: 10000; 
+            width: max-content; margin-top: 5px; max-height: 70vh; overflow-y: auto;
         }
-        .dragging {
-            @apply opacity-50 bg-blue-100;
-        }
-        .drag-over {
-             @apply border-t-2 border-blue-500;
-        }
+        .usage-table { border-collapse: collapse; background: white; font-size: 13px; color: #333; text-align: center; }
+        .usage-table th { background: #f4f4f4; padding: 8px 12px; border: 1px solid #ddd; font-weight: bold; }
+        .usage-table td { padding: 8px 12px; border: 1px solid #ddd; }
+        .usage-table tr:nth-child(even) { background-color: #f9f9f9; }
 
-        .modal-close-btn {
-            position: absolute;
-            top: 1rem;
-            right: 1rem;
-            font-size: 1.5rem;
-            line-height: 1;
-            color: #9ca3af;
-            cursor: pointer;
-            background: none;
-            border: none;
-        }
-        .modal-close-btn:hover {
-            color: #1f2937;
-        }
+        .header-actions { display: flex; gap: 10px; align-items: center; }
+        
+        /* ✨ 버전 뱃지 스타일 업데이트 */
+        .version-badge { background: #e0f7fa; color: #006064; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #80deea; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 
-        .arrow-rotated {
-            transform: rotate(-180deg);
-        }
+        .upload-dropdown { position: relative; display: inline-block; }
+        .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
+        .btn-main-upload:hover { filter: brightness(1.2); }
+        .btn-settings { background: #607d8b; padding: 8px 12px; border-radius: 6px; font-weight: bold; border: none; color: white; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
+        .btn-settings:hover { background: #455a64; }
 
-        .is-quantity-item {
-            background-color: #fef9c3;
+        .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
+        .upload-menu label, .upload-menu div.menu-item { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
+        .upload-menu label:hover, .upload-menu div.menu-item:hover { background: #f0f4ff; color: var(--primary); }
+        .upload-menu input[type="file"] { display: none; } 
+        .menu-divider { border-top: 2px solid #ddd; margin: 0; }
+
+        .action-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; width: 150px; }
+        .btn-add { padding: 6px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .btn-add:hover { background: #324ee0; }
+        .btn-delete-bulk { padding: 6px 12px; background: #ff5252; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
+        .btn-delete-bulk:hover { background: #e04848; }
+
+        .list-container { 
+            overflow: auto; 
+            background: white; 
+            margin: 0 20px 10px 20px;
+            padding: 0; 
+            border-radius: 12px; 
+            border: 1px solid #ccc; 
+            height: calc(100vh - 120px); 
         }
-        .is-quantity-item:hover {
-            background-color: #fef08a;
+        .list-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
+        .list-table th, .list-table td { 
+            padding: 12px 15px; 
+            text-align: center; 
+            border: 1px solid #ccc; 
+            font-size: 14px; 
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
+        
+        .list-table tbody tr { cursor: pointer; transition: background 0.2s; }
+        .list-table tbody tr:hover { filter: brightness(0.95); }
+        
+        .list-table th { 
+            background: #f4f4f4; 
+            position: sticky; 
+            top: -1px; 
+            z-index: 10; 
+            user-select: none;
+            box-shadow: inset 0 -1px 0 #ccc, inset 0 1px 0 #ccc; 
+        }
+        .th-content { display: flex; justify-content: center; align-items: center; gap: 8px; }
+        .title-text { font-size: 15px; font-weight: 800; color: #222; }
+        
+        .filter-btn { cursor: pointer; padding: 2px 6px; border-radius: 4px; color: #666; font-size: 12px; background: #e0e0e0; transition: 0.2s; }
+        .filter-btn:hover { background: #d0d0d0; color: var(--primary); }
+        .filter-btn.active { background: var(--primary); color: white; }
+
+        .filter-popup { display: none; position: absolute; background: white; border: 1px solid #999; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 9999; min-width: 160px; max-height: 350px; overflow-y: auto; text-align: left; padding: 8px 0; }
+        .filter-option { padding: 8px 15px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+        .filter-option:hover { background: #f0f2ff; color: var(--primary); }
+        .filter-option.selected { font-weight: bold; color: var(--primary); background: #eef1ff; }
+        .filter-divider { height: 1px; background: #ddd; margin: 4px 0; }
+
+        .checkbox-cell { width: 40px; }
+        .loc-check { cursor: pointer; width: 16px; height: 16px; }
+
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: white; padding: 25px; border-radius: 10px; width: 400px;
+            max-height: 85vh; overflow-y: auto;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #333; }
+        .modal-body { display: flex; flex-direction: column; gap: 12px; }
+        .modal-body label { font-size: 13px; font-weight: bold; color: #555; margin-bottom: -5px; }
+        .modal-body input { padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        .modal-body input[readonly] { background: #eee; color: #666; cursor: not-allowed; }
+        .modal-footer { margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px; }
+        .btn-modal-save { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn-modal-cancel { padding: 8px 16px; background: #888; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+
+        .loc-copy-cell { cursor: copy; font-weight: bold; font-size: 15px; transition: color 0.2s; }
+        .loc-copy-cell:hover { color: var(--primary); text-decoration: underline; }
+        .badge-reserved { display: inline-block; background: #ff9800; color: white; font-weight: bold; font-size: 11px; padding: 3px 6px; border-radius: 4px; margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .badge-incoming { display: inline-block; background: #e65100; color: white; font-weight: bold; font-size: 11px; padding: 3px 6px; border-radius: 4px; margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        
+        #toast { visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center; border-radius: 8px; padding: 12px; position: fixed; z-index: 10001; left: 50%; bottom: 30px; transform: translateX(-50%); font-size: 14px; opacity: 0; transition: opacity 0.3s, bottom 0.3s; }
+        #toast.show { visibility: visible; opacity: 1; bottom: 50px; }
+
+        .loading-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75); z-index: 999999; flex-direction: column; justify-content: center; align-items: center; color: white; backdrop-filter: blur(3px); }
+        .spinner { border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--primary); border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 20px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loading-text { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
+        .loading-subtext { font-size: 13px; color: #ccc; margin-top: 10px; }
+
+        .map-legend { display:inline-flex; align-items:center; padding:3px 10px; border-radius:4px; font-size:12px; font-weight:bold; color:#333; }
+        .incoming-sidebar { position: fixed; right: -360px; top: 0; width: 340px; height: 100vh; background: #fafafa; box-shadow: -4px 0 15px rgba(0,0,0,0.15); z-index: 9999; transition: right 0.3s ease; display: flex; flex-direction: column; }
+        .incoming-sidebar.open { right: 0; }
+        .incoming-header { background: #e65100; color: white; padding: 15px 20px; font-weight: bold; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
+        
+        .incoming-filters { padding: 15px; background: #f5f5f5; border-bottom: 1px solid #ddd; display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+        .incoming-filters > div { display: flex; justify-content: space-between; align-items: center; }
+        .incoming-filters select { padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; width: 160px; background: white; font-weight:bold; color:#333; }
+        
+        .incoming-list { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .incoming-item { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 12px; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .incoming-item:hover { border-color: #e65100; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(230,81,0,0.15); }
+        
+        .pre-assign-banner { display: none; position: fixed; top: 15px; left: 50%; transform: translateX(-50%); background: #e65100; color: white; padding: 12px 25px; border-radius: 30px; font-weight: bold; z-index: 10002; box-shadow: 0 4px 15px rgba(0,0,0,0.3); align-items: center; gap: 20px; font-size: 15px; }
+        .pre-assign-banner button { background: white; color: #e65100; border: none; padding: 6px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .pre-assign-banner button:hover { background: #ffe0b2; }
     </style>
 </head>
-<body class="bg-gray-100 p-8">
+<body onclick="closeAllPopups()">
+    <div id="pre-assign-banner" class="pre-assign-banner">
+        <span>📦 선지정 모드: <span id="pre-assign-banner-text" style="color:#ffe0b2; text-decoration:underline;"></span> 지정할 빈칸을 클릭하세요!</span>
+        <button onclick="cancelPreAssignMode()">작업 취소</button>
+    </div>
 
-    <div id="admin-content" class="hidden max-w-7xl mx-auto space-y-8">
-        <header class="flex justify-between items-center mb-6 pb-4 border-b">
-            <h1 class="text-3xl font-bold text-gray-900">관리자 페이지</h1>
-            <div class="flex gap-4 items-center"> <a href="index.html" class="btn btn-secondary text-base"> <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block -mt-1 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                    </svg>
-                    메인 앱으로 돌아가기
-                </a>
-                <button id="save-all-btn" class="btn btn-primary text-base px-6 py-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block -mt-1 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                        <path d="M7.707 10.293a1 1 0 10-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 11.586V6h5a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2h5v5.586l-1.293-1.293zM9 4a1 1 0 012 0v2H9V4z" />
-                    </svg>
-                    모든 변경사항 저장
-                </button>
-            </div> </header>
-
-        <div class="config-card">
-            <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                <h2 class="text-2xl font-bold text-gray-800">실시간 현황판 관리 (순서 변경 가능)</h2>
-                <svg class="h-6 w-6 transform transition-transform arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
+    <div id="incoming-sidebar" class="incoming-sidebar">
+        <div class="incoming-header">
+            <span>📦 입고 대기 목록 (신규)</span>
+            <button onclick="toggleIncomingSidebar()" style="background:none; border:none; color:white; font-size:24px; cursor:pointer;">×</button>
+        </div>
+        <div style="display:flex; justify-content:space-between; padding: 10px 15px; background: #fff; border-bottom: 1px solid #ddd; gap:10px;">
+            <button onclick="syncIncomingData()" style="flex:1; padding:6px 10px; background:#ff9800; color:white; border:none; border-radius:4px; font-size:12px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">🔄 시트 동기화</button>
+            <button onclick="openSheetModal(event)" style="flex:1; padding:6px 10px; background:#607d8b; color:white; border:none; border-radius:4px; font-size:12px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">⚙️ 링크 설정</button>
+        </div>
+        <div style="padding:10px 15px; background:#fff3e0; border-bottom:1px solid #ffe0b2; font-size:11px; color:#e65100; font-weight:bold; line-height:1.4;">
+            ※ 미입고수량 0개, 기존 로케이션 배정 완료, 선지정 완료된 상품은 목록에서 자동으로 숨겨집니다.
+        </div>
+        <div class="incoming-filters">
+            <div>
+                <b>📂 분류</b>
+                <select id="filter-source" onchange="renderIncomingQueue()">
+                    <option value="all">전체보기 (제작+사입)</option>
+                    <option value="제작">제작 (오더리스트)</option>
+                    <option value="사입">사입 (사입리스트)</option>
+                </select>
             </div>
-            <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">(메인 화면 상단의 실시간 현황판에 표시될 항목입니다. 순서 변경 및 삭제 시 반영됩니다)</p>
-                <div class="p-4 bg-gray-50 rounded-lg border mt-2">
-                    <div id="dashboard-items-container" class="space-y-1">
-                        </div>
-                </div>
-                <div class="flex gap-2 mt-4">
-                    <button id="add-dashboard-item-btn" class="btn btn-secondary">+ 현황판 항목 추가</button>
-                    <button id="add-custom-dashboard-item-btn" class="btn btn-secondary">+ 새 수량 항목 추가</button>
-                </div>
+            <div>
+                <b>🔄 정렬</b>
+                <select id="sort-incoming" onchange="renderIncomingQueue()">
+                    <option value="qty-desc">미입고수량 많은 순</option>
+                    <option value="date-asc">출고예상일 빠른 순</option>
+                </select>
             </div>
         </div>
-
-        <div class="config-card">
-            <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                <div class="flex-grow flex justify-between items-center">
-                    <h2 class="text-2xl font-bold text-gray-800">팀원 및 시급 관리 (그룹 순서 변경 가능)</h2>
-                    <button id="add-team-group-btn" class="btn btn-secondary -mr-4">+ 새 그룹 추가</button>
-                </div>
-                <svg class="h-6 w-6 transform transition-transform ml-4 arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
+        <div id="incoming-list" class="incoming-list">
             </div>
-            <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">(메인 앱의 '팀원 선택' 모달에 표시될 그룹입니다. 순서 변경 시 반영됩니다)</p>
-                <div id="team-groups-container" class="space-y-6">
-                </div>
+    </div>
+
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loading-text">데이터 동기화 중입니다...</div>
+        <div class="loading-subtext">창을 닫거나 새로고침하지 마세요.</div>
+    </div>
+
+    <div id="firebase-guide" style="display:none;"><pre>match /Locations/{document=**} { allow read, write: if true; }</pre></div>
+
+    <div class="controls-header">
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchView('list')">데이터 리스트</button>
+            <button class="tab-btn" onclick="switchView('map')">도면 보기</button>
+            
+            <div class="usage-container">
+                <button class="btn-usage" onclick="toggleUsagePopup(event)">📊 사용률</button>
+                <div class="usage-popup" id="usage-popup" onclick="event.stopPropagation()"></div>
             </div>
         </div>
+        
+        <div class="header-actions">
+            <div class="version-badge">🚀 Ver 3.46 (입고대기 날짜 디버그 로그)</div>
+            
+            <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
-        <div class="config-card">
-            <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                <h2 class="text-2xl font-bold text-gray-800">주요 업무 관리 (순서 변경 가능)</h2>
-                <svg class="h-6 w-6 transform transition-transform arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-            </div>
-            <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">(메인 화면 대시보드에 표시될 업무 카드 목록입니다. 순서 변경 시 메인 화면에도 반영됨)</p>
-
-                <div class="p-4 bg-gray-50 rounded-lg border mt-2">
-                    <div id="key-tasks-container" class="space-y-1">
-                        </div>
-                </div>
-                <button id="add-key-task-btn" class="btn btn-secondary mt-4">+ '업무 관리'에서 가져오기</button>
-            </div>
-        </div>
-
-        <div class="config-card">
-            <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                 <div class="flex-grow flex justify-between items-center">
-                    <h2 class="text-2xl font-bold text-gray-800">업무 관리 (그룹 순서 변경 가능)</h2>
-                    <button id="add-task-group-btn" class="btn btn-secondary -mr-4">+ 새 업무 그룹 추가</button>
-                </div>
-                <svg class="h-6 w-6 transform transition-transform ml-4 arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-            </div>
-            <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">(메인 앱의 '기타 업무' 모달에 표시될 목록입니다. 그룹 순서 변경 시 반영됩니다)</p>
-                <div id="task-groups-container" class="space-y-6">
-                </div>
-            </div>
-        </div>
-
-         <div class="config-card">
-            <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                <h2 class="text-2xl font-bold text-gray-800">처리량 집계 업무 관리 (순서 변경 가능)</h2>
-                <svg class="h-6 w-6 transform transition-transform arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-            </div>
-             <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">('업무 관리'에 등록된 업무 이름과 정확히 일치해야 합니다)</p>
-                <div class="p-4 bg-gray-50 rounded-lg border mt-2">
-                    <div id="quantity-tasks-container" class="space-y-1">
-                        </div>
-                </div>
-                <button id="add-quantity-task-btn" class="btn btn-secondary mt-4">+ '업무 관리'에서 가져오기</button>
-            </div>
-        </div>
-
-        <div class="config-card">
-             <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                <h2 class="text-2xl font-bold text-blue-800">상품 원가 및 손익 분석 설정</h2>
-                <svg class="h-6 w-6 transform transition-transform arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-            </div>
-             <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">(상품 1개당 소요되는 고정 비용과 인건비 계산 대상을 설정합니다)</p>
-                <div class="p-5 bg-blue-50 rounded-lg border border-blue-100 mt-2 space-y-6">
+            <div class="upload-dropdown">
+                <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
+                <div class="upload-menu" id="main-tools-menu" onclick="event.stopPropagation()" style="width: 270px;">
                     
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div>
-                            <label for="fixed-material-cost" class="block text-sm font-bold text-gray-700 mb-1">개당 고정 부자재비 (원)</label>
-                            <input type="number" id="fixed-material-cost" value="0" class="w-full p-2 border border-gray-300 rounded-md" placeholder="예: 159">
-                            <p class="text-xs text-gray-500 mt-1">예: 포장봉투 49원 + 배송봉투 110원 = 159원</p>
-                        </div>
-                        <div>
-                            <label for="fixed-shipping-cost" class="block text-sm font-bold text-gray-700 mb-1">개당 고정 택배비 (원)</label>
-                            <input type="number" id="fixed-shipping-cost" value="0" class="w-full p-2 border border-gray-300 rounded-md" placeholder="예: 2050">
-                        </div>
-                        <div>
-                            <label for="fixed-direct-delivery-cost" class="block text-sm font-bold text-purple-700 mb-1">직진배송 화물비 (1회당)</label>
-                            <input type="number" id="fixed-direct-delivery-cost" value="0" class="w-full p-2 border border-purple-300 rounded-md bg-purple-50" placeholder="예: 50000">
-                            <p class="text-xs text-purple-500 mt-1">* '직진배송' 업무 발생 시 1회당 추가되는 고정 비용입니다.</p>
-                        </div>
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold;">📊 기본 데이터 관리</div>
+                    <label>
+                        <span style="color:var(--primary);">📥 로케이션 일일 최신화 (재고업뎃)</span>
+                        <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
+                    </label>
+                    
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">💡 로케이션 변경 추천</div>
+                    
+                    <label style="border-bottom: 1px solid #eee;">
+                        <span style="color:#1976d2;">📂 1-1. 직진배송 데이터 업로드</span>
+                        <input type="file" id="excel-upload-zikjin" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
+                    </label>
+                    <label style="border-bottom: 1px solid #eee;">
+                        <span style="color:#d32f2f;">📂 1-2. 주차별 데이터 업로드</span>
+                        <input type="file" id="excel-upload-weekly" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
+                    </label>
+                    
+                    <div class="menu-item" style="text-align:center; color:var(--primary);" onclick="window.openRecommendModal(); closeAllPopups();">
+                        🚀 <strong>2. 로케이션 변경 리스트 보기</strong>
                     </div>
 
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-2">원가(인건비) 계산에 포함할 물류 업무 선택</label>
-                        <div id="cost-calc-tasks-container" class="bg-white p-3 rounded border border-gray-200 max-h-40 overflow-y-auto grid grid-cols-2 md:grid-cols-3 gap-2">
-                            </div>
-                        <p class="text-xs text-gray-500 mt-1">* 선택한 업무들의 인건비 총합을 전체 출고량으로 나누어 '개당 작업비'를 산출합니다.</p>
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">📦 입고 관리</div>
+                    <div class="menu-item" style="text-align:center; color:#e65100; font-size: 14px;" onclick="toggleIncomingSidebar(event)">
+                        📋 <strong>입고대기 선지정 패널 열기</strong>
                     </div>
 
                 </div>
             </div>
-        </div>
 
-        <div class="config-card">
-            <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                <h2 class="text-2xl font-bold text-gray-800">현황판-처리량 연동 설정</h2>
-                <svg class="h-6 w-6 transform transition-transform arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-            </div>
-             <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">('처리량 집계 업무'를 어떤 '현황판 수량 항목'에 연결할지 설정합니다)</p>
-                <div class="p-4 bg-gray-50 rounded-lg border mt-2">
-                    <div id="quantity-mapping-container" class="space-y-3">
-                        </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="config-card">
-             <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                <h2 class="text-2xl font-bold text-gray-800">알바 기본 시급 설정</h2>
-                <svg class="h-6 w-6 transform transition-transform arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-            </div>
-             <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">(새로운 알바 인원을 추가할 때 기본으로 적용될 시급입니다)</p>
-                <div class="p-4 bg-gray-50 rounded-lg border mt-2">
-                    <label for="default-part-timer-wage" class="block text-sm font-medium text-gray-700 mb-1">기본 시급 (원)</label>
-                    <input type="number" id="default-part-timer-wage" value="10000" class="max-w-xs p-2 border border-gray-300 rounded-md" placeholder="예: 10000">
-                </div>
-            </div>
-        </div>
-
-        <div class="config-card">
-             <div class="flex justify-between items-center mb-4 cursor-pointer config-card-toggle">
-                <h2 class="text-2xl font-bold text-gray-800">매출액 연동 분석 기준 설정</h2>
-                <svg class="h-6 w-6 transform transition-transform arrow-rotated" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
-                </svg>
-            </div>
-             <div class="config-card-content hidden">
-                <p class="text-sm text-gray-500 mb-4 -mt-2">(업무 리포트의 '매출액 연동 분석' 기능에 사용되는 기준값입니다)</p>
-                <div class="p-4 bg-gray-50 rounded-lg border mt-2">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label for="revenue-increment-unit" class="block text-sm font-medium text-gray-700 mb-1">매출액 증가 기준 단위 (원)</label>
-                            <input type="number" id="revenue-increment-unit" value="10000000" class="w-full p-2 border border-gray-300 rounded-md" placeholder="예: 10000000">
-                            <p class="text-xs text-gray-500 mt-1">이 금액이 증가할 때마다 필요한 추가 인원수를 계산합니다.</p>
-                        </div>
-                        <div>
-                            <label for="standard-monthly-work-hours" class="block text-sm font-medium text-gray-700 mb-1">1인당 월 표준 근무시간 (시간)</label>
-                            <input type="number" id="standard-monthly-work-hours" value="209" class="w-full p-2 border border-gray-300 rounded-md" placeholder="예: 209">
-                            <p class="text-xs text-gray-500 mt-1">필요 총 업무 시간을 인원수로 환산할 때 사용합니다.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-    </div>
-
-    <div id="select-task-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center hidden z-50 p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative">
-            <div class="p-6 border-b border-gray-200 flex justify-between items-center">
-                <h2 id="select-task-modal-title" class="text-xl font-bold text-gray-900">업무 선택</h2>
-                <button class="modal-close-btn" data-modal-id="select-task-modal">&times;</button>
-            </div>
-            <div id="select-task-list" class="p-6 max-h-[60vh] overflow-y-auto grid grid-cols-2 md:grid-cols-3 gap-2">
-                </div>
+            <button class="btn-settings" onclick="openSettingsModal(event)">⚙️ 환경설정</button>
         </div>
     </div>
 
-    <div id="confirm-add-to-quantity-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center hidden z-50 p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative">
-            <button class="modal-close-btn" data-modal-id="confirm-add-to-quantity-modal">&times;</button>
-            <div class="p-6 text-center">
-                <svg class="mx-auto mb-4 text-blue-500 w-12 h-12" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11V6m0 8h.01M19 10a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
-                <h3 class="mb-5 text-lg font-normal text-gray-700">처리량 집계</h3>
-                <p id="confirm-add-to-quantity-message" class="mb-6 text-sm text-gray-500">이 업무를 처리량 집계 목록에도 추가하시겠습니까?</p>
-                <div class="flex justify-center gap-3">
-                    <button type="button" id="confirm-add-to-quantity-btn" class="btn btn-primary">예, 추가합니다</button>
-                    <button type="button" id="cancel-add-to-quantity-btn" class="btn btn-secondary">아니요</button>
+    <div id="view-list" class="content-view active">
+        <div class="list-container" id="list-container">
+            <table class="list-table">
+                <thead>
+                    <tr id="dynamic-thead-tr">
+                        <th class="checkbox-cell"><input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)"></th>
+                        <th style="width: 80px;"><div class="th-content"><span class="title-text">동</span></div></th>
+                    </tr>
+                </thead>
+                <tbody id="location-list-body">
+                    <tr><td colspan="10" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="view-map" class="content-view" style="display:none;">
+        <div id="map-root" style="margin: 0 20px 10px 20px;">
+            <!-- 범례 -->
+            <div style="display:flex; align-items:center; gap:16px; padding:10px 15px; background:#fff; border:1px solid #ddd; border-radius:10px; margin-bottom:10px; flex-wrap:wrap;">
+                <span style="font-weight:bold; font-size:13px; color:#555;">범례:</span>
+                <span class="map-legend" style="background:#f0f0f0; border:1.5px solid #bbb;">빈칸</span>
+                <span class="map-legend" style="background:#c8e6c9; border:1.5px solid #66bb6a; color:#1b5e20;">상품있음</span>
+                <span class="map-legend" style="background:#fff9c4; border:1.5px solid #f9a825; color:#e65100;">예약중</span>
+                <span class="map-legend" style="background:#ffe0b2; border:1.5px solid #fb8c00; color:#bf360c;">선지정</span>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+                    <label style="font-size:12px; color:#555; font-weight:bold;">칸 크기:</label>
+                    <input type="range" id="map-cell-size" min="30" max="120" value="54" style="width:80px;" oninput="updateMapCellSize(this.value)">
+                    <span id="map-cell-size-label" style="font-size:12px; color:#333; font-weight:bold;">54px</span>
+                </div>
+            </div>
+            <!-- 구역 탭 -->
+            <div id="map-zone-tabs" style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;"></div>
+            <!-- 도면 본체 -->
+            <div id="map-body" style="background:#fff; border:1px solid #ddd; border-radius:10px; padding:15px; overflow:auto; max-height:calc(100vh - 220px);"></div>
+        </div>
+        <!-- 툴팁 -->
+        <div id="map-tooltip" style="
+            display:none; position:fixed; z-index:99999;
+            background:#fff; border:1px solid #bbb; border-radius:8px;
+            box-shadow:0 4px 16px rgba(0,0,0,0.18); padding:12px 15px;
+            min-width:180px; max-width:280px; pointer-events:none; font-size:13px; line-height:1.7;
+        "></div>
+    </div>
+
+    <div id="dynamic-popups"></div>
+
+    <div id="settings-modal" class="modal-overlay" onclick="closeSettingsModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">⚙️ 시스템 환경설정</div>
+            
+            <div style="margin-bottom: 25px;">
+                <h4 style="margin-bottom: 10px; font-size:14px; border-bottom: 2px solid #eee; padding-bottom: 5px; color:var(--primary);">1. 빈 로케이션 추가 / 삭제</h4>
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <input type="text" id="setting-new-loc" class="action-input" placeholder="예: A-1-001" style="flex:1;" onkeypress="if(event.key === 'Enter') addSingleLocationFromSetting()">
+                    <button class="btn-add" onclick="addSingleLocationFromSetting()">➕ 개별 추가</button>
+                </div>
+                <div style="font-size: 12px; color: #555; background:#f9f9f9; padding:8px; border-radius:6px; border:1px solid #ddd;">
+                    ※ 삭제 방법: 바깥의 메인 데이터 리스트에서 체크박스를 선택한 후 아래 버튼을 누르세요.<br>
+                    <button class="btn-delete-bulk" style="margin-top:8px; width:100%;" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 25px;">
+                <h4 style="margin-bottom: 10px; font-size:14px; border-bottom: 2px solid #eee; padding-bottom: 5px; color:var(--primary);">2. 화면 표시 헤더(열) 설정</h4>
+                <div style="font-size:11px; color:#888; margin-bottom:8px;">※ 체크한 항목만 리스트 화면에 표시됩니다. (주황색은 엑셀에서 새로 추가된 항목)</div>
+                <div id="setting-headers-container" style="display: flex; flex-wrap: wrap; gap: 10px; max-height: 120px; overflow-y: auto; padding: 12px; border: 1px solid #ccc; border-radius: 5px; background:#fcfcfc;">
+                </div>
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <h4 style="margin-bottom: 10px; font-size:14px; border-bottom: 2px solid #eee; padding-bottom: 5px; color:#e65100;">3. 구조(동/위치) 영구 세팅 업로드</h4>
+                <div style="font-size:11px; color:#555; background:#fff3e0; padding:8px; border-radius:6px; border:1px solid #ffe0b2; margin-bottom:10px; line-height:1.4;">
+                    ※ 주의: 이 버튼은 <strong>최초 로케이션/동/위치 세팅</strong>을 하거나 랙 구조를 아예 변경할 때만 사용하세요. 기존의 동/위치가 덮어쓰기 됩니다.
+                </div>
+                <label style="display:block; text-align:center; padding:10px 15px; background:#e65100; color:white; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s;">
+                    📂 영구 보전 데이터(엑셀) 업로드
+                    <input type="file" id="excel-upload-permanent" accept=".xls,.xlsx,.csv,.html,.htm" style="display:none;">
+                </label>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn-modal-cancel" onclick="closeSettingsModal()">닫기</button>
+                <button class="btn-modal-save" onclick="saveHeaderSettings()">헤더 설정 저장</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="edit-modal" class="modal-overlay" onclick="closeEditModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">상품 정보 수동 수정</div>
+            <div class="modal-body">
+                <label>로케이션 (수정 불가)</label><input type="text" id="modal-id" readonly>
+                <label>동</label><input type="text" id="modal-dong" placeholder="예: 1">
+                <label>위치</label><input type="text" id="modal-pos" placeholder="예: 1">
+                <label>상품코드</label><input type="text" id="modal-code" placeholder="상품코드 입력">
+                <label>상품명</label><input type="text" id="modal-name" placeholder="상품명 입력">
+                <label>옵션</label><input type="text" id="modal-option" placeholder="옵션 입력">
+                <label>정상재고</label><input type="number" id="modal-stock" placeholder="0">
+            </div>
+            <div class="modal-footer" style="justify-content: space-between;">
+                <button id="btn-modal-unassign" class="btn-modal-cancel" style="background:#e65100; display:none;" onclick="cancelPreAssignment()">선지정 취소</button>
+                <div style="display:flex; gap:10px; margin-left:auto;">
+                    <button class="btn-modal-cancel" onclick="closeEditModal()">취소</button>
+                    <button class="btn-modal-save" onclick="saveManualEdit()">저장</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <div id="select-dashboard-item-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center hidden z-50 p-4">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative">
-            <div class="p-6 border-b border-gray-200 flex justify-between items-center">
-                <h2 id="select-dashboard-item-modal-title" class="text-xl font-bold text-gray-900">현황판 항목 선택</h2>
-                <button class="modal-close-btn" data-modal-id="select-dashboard-item-modal">&times;</button>
-            </div>
-            <div id="select-dashboard-item-list" class="p-6 max-h-[60vh] overflow-y-auto grid grid-cols-2 gap-2">
+    <div id="sheet-modal" class="modal-overlay" onclick="closeSheetModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 450px;">
+            <div class="modal-header">입고예정 구글시트 연동 설정 (2개)</div>
+            <div class="modal-body">
+                <label style="color:var(--primary);">① 오더리스트(제작) CSV 링크</label>
+                <input type="text" id="modal-sheet-url-order" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
+                
+                <label style="color:var(--primary); margin-top:15px;">② 사입리스트 CSV 링크</label>
+                <input type="text" id="modal-sheet-url-buy" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
+                
+                <div style="font-size:11px; color:#666; margin-top:10px; line-height:1.4; background:#f9f9f9; padding:10px; border-radius:6px; border:1px solid #ddd;">
+                    ※ 각 원본 시트의 해당 탭(시트)을 선택한 후 <strong>[파일] > [공유] > [웹에 게시]</strong> 클릭<br>
+                    ※ 형식을 '웹페이지'가 아닌 <strong>'CSV'</strong>로 변경한 뒤 각각 생성된 링크를 칸에 맞게 붙여넣으세요.
                 </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal-cancel" onclick="closeSheetModal()">취소</button>
+                <button class="btn-modal-save" onclick="saveSheetUrl()">저장</button>
+            </div>
         </div>
     </div>
-    <script type="module" src="js/admin.js"></script>
+
+    <div id="recommend-modal" class="modal-overlay" onclick="closeRecommendModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 980px; max-width: 96vw; padding: 25px 20px;">
+            <div class="modal-header" style="color: #4caf50; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                💡 로케이션 변경 리스트
+                <button onclick="window.showRecommendation()" style="padding:6px 12px; font-size:13px; background:#4caf50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🔍 계산</button>
+                <button onclick="window.openRatioModal()" style="padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">⚙️ 점수반영비율 설정</button>
+                <button onclick="window.show2FRecommendation()" style="padding:6px 12px; font-size:13px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🏢 2F 이동 추천</button>
+            </div>
+            <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
+                ※ 선지정으로 찜해둔 자리는 물건이 없더라도 이 추천 목록에서 완벽히 보호(제외)됩니다.
+            </div>
+            <div class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
+                    <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <tr>
+                            <th style="width: 80px; border-top:none; font-size:13px;">순위(점수)</th>
+                            <th style="width: 120px; border-top:none; font-size:13px;">상품코드</th>
+                            <th style="border-top:none; font-size:13px;">상품명</th>
+                            <th style="width: 80px; border-top:none; font-size:13px; background:#fff8e1; color:#e65100;">이동수량</th>
+                            <th style="width: 130px; border-top:none; font-size:13px;">현재 위치</th>
+                            <th style="width: 180px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ 추천 로케이션</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recommend-tbody"></tbody>
+                </table>
+            </div>
+            
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+                <button onclick="downloadRecommendationExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📥 엑셀 다운로드</button>
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="closeRecommendModal()">닫기</button>
+            </div>
+            
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <!-- 2F 이동 추천 모달 -->
+    <div id="modal-2f" class="modal-overlay" onclick="if(event.target.id==='modal-2f') document.getElementById('modal-2f').style.display='none'">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 1050px; max-width: 96vw; padding: 25px 20px;">
+            <div class="modal-header" style="color: #7b1fa2; display: flex; align-items: center; gap: 10px; flex-wrap:wrap;">
+                🏢 2F 이동 추천 리스트
+                <button onclick="document.getElementById('modal-2f').style.display='none'" style="margin-left:auto; background:none; border:none; font-size:24px; cursor:pointer;">×</button>
+            </div>
+            <div style="background:#f3e5f5; border:1px solid #ce93d8; border-radius:8px; padding:12px 15px; margin-bottom:15px;">
+                <div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
+                    <label style="font-size:13px; font-weight:bold; color:#4a148c;">📅 기준 기간:</label>
+                    <input type="number" id="2f-period-value" value="1" min="1" style="width:50px; padding:5px; text-align:center; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                    <select id="2f-period-unit" style="padding:5px 10px; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                        <option value="week">주</option>
+                        <option value="month" selected>개월</option>
+                    </select>
+                    <span style="font-size:12px; color:#666;">이상 배송 없는 상품</span>
+                    <label style="font-size:13px; font-weight:bold; color:#4a148c; margin-left:10px;">📦 재고 기준:</label>
+                    <input type="number" id="2f-stock-limit" value="999999" min="0" style="width:80px; padding:5px; text-align:center; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                    <span style="font-size:12px; color:#666;">개 이하</span>
+                    <button onclick="window.calc2FList()" style="padding:8px 16px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔍 조회</button>
+                </div>
+            </div>
+            <div style="font-size:11px; color:#666; margin-bottom:10px;">
+                ※ 마지막배송일 기준으로 설정 기간 동안 배송이 없고, 재고가 기준 이하인 상품을 2F 이동 대상으로 추천합니다.
+            </div>
+            <div class="modal-body" style="max-height: 50vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
+                    <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <tr>
+                            <th style="width:40px; border-top:none;"><input type="checkbox" id="2f-check-all" onclick="window.toggle2FCheckAll(this)"></th>
+                            <th style="width:50px; border-top:none; font-size:13px;">No</th>
+                            <th style="width:120px; border-top:none; font-size:13px;">상품코드</th>
+                            <th style="border-top:none; font-size:13px;">상품명</th>
+                            <th style="width:100px; border-top:none; font-size:13px;">옵션</th>
+                            <th style="width:70px; border-top:none; font-size:13px;">정상재고</th>
+                            <th style="width:100px; border-top:none; font-size:13px; cursor:pointer;" onclick="window.sort2FList()">마지막배송일 <span id="2f-sort-icon">▲</span></th>
+                            <th style="width:100px; border-top:none; font-size:13px;">현재위치</th>
+                            <th style="width:180px; background:#f3e5f5; border-top:none; font-size:13px;">변경값</th>
+                        </tr>
+                    </thead>
+                    <tbody id="2f-tbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+                <div style="display:flex; gap:8px;">
+                    <button onclick="window.download2FExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">📥 엑셀 다운로드 (체크 시 선택만)</button>
+                </div>
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="document.getElementById('modal-2f').style.display='none'">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script type="module" src="js/location.js"></script>
+    <script>
+        function switchView(view) {
+            document.getElementById('view-list').style.display = view === 'list' ? 'block' : 'none';
+            document.getElementById('view-map').style.display = view === 'map' ? 'block' : 'none';
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+            if (view === 'map' && typeof window.renderMap === 'function') window.renderMap();
+        }
+
+        function toggleFilterPopup(e, id) {
+            e.stopPropagation();
+            const pop = document.getElementById(id);
+            const isVisible = pop.style.display === 'block';
+            closeAllPopups();
+            if (!isVisible && pop) {
+                const rect = e.target.getBoundingClientRect();
+                pop.style.display = 'block';
+                pop.style.top = (rect.bottom + window.scrollY + 5) + 'px';
+                pop.style.left = (rect.left + window.scrollX - 50) + 'px'; 
+            }
+        }
+
+        function toggleUploadMenu(e, menuId) {
+            e.stopPropagation();
+            const menu = document.getElementById(menuId);
+            const isVisible = menu.style.display === 'block';
+            closeAllPopups(); 
+            if (!isVisible) { menu.style.display = 'block'; }
+        }
+
+        window.closeAllPopups = function() {
+            document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
+            const usagePop = document.getElementById('usage-popup');
+            if(usagePop) usagePop.style.display = 'none';
+            document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
+        }
+        
+        document.querySelectorAll('.filter-popup').forEach(p => { p.addEventListener('click', function(e) { e.stopPropagation(); }); });
+
+        window.closeEditModal = function(e) { if (!e || e.target.id === 'edit-modal') document.getElementById('edit-modal').style.display = 'none'; }
+        window.closeSheetModal = function(e) { if (!e || e.target.id === 'sheet-modal') document.getElementById('sheet-modal').style.display = 'none'; }
+        window.closeRecommendModal = function(e) { if (!e || e.target.id === 'recommend-modal') document.getElementById('recommend-modal').style.display = 'none'; }
+        window.closeSettingsModal = function(e) { if (!e || e.target.id === 'settings-modal') document.getElementById('settings-modal').style.display = 'none'; }
+        
+        window.toggleIncomingSidebar = function(e) {
+            if(e) e.stopPropagation();
+            closeAllPopups();
+            const sidebar = document.getElementById('incoming-sidebar');
+            sidebar.classList.toggle('open');
+            if(sidebar.classList.contains('open') && typeof window.renderIncomingQueue === 'function') {
+                window.renderIncomingQueue();
+            }
+        }
+    </script>
 </body>
 </html>
