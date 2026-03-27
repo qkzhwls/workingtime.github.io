@@ -1263,19 +1263,8 @@ window.syncIncomingData = async () => {
             let rawFactoryDate = "";
             let rawArrivalDate = "";
             if (row.source === '제작') {
-                rawFactoryDate = row['공장출고예상일자'] || row['공장출고예상일'] || row['출고예상일'] || '';
+                rawFactoryDate = row['공장출고예상일'] || '';
                 rawDate = rawFactoryDate;
-                // 디버그: 첫 제작 상품만 로그
-                if (!window._debugIncomingLogged) {
-                    window._debugIncomingLogged = true;
-                    console.log('=== [DEBUG] 입고대기 날짜 확인 (제작 첫 행) ===');
-                    console.log('row keys:', Object.keys(row).filter(k => k.includes('출고') || k.includes('도착') || k.includes('공장')));
-                    console.log('공장출고예상일자:', row['공장출고예상일자']);
-                    console.log('공장출고예상일:', row['공장출고예상일']);
-                    console.log('출고예상일:', row['출고예상일']);
-                    console.log('도착예상일:', row['도착예상일']);
-                    console.log('→ rawFactoryDate:', rawFactoryDate);
-                }
             } else if (row.source === '사입') {
                 rawArrivalDate = row['검수창고도착일'] || '';
                 rawDate = rawArrivalDate;
