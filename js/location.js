@@ -1274,8 +1274,8 @@ window.syncIncomingData = async () => {
                 '옵션': row['옵션'] || '',
                 '입고대기수량': qty,
                 '공장출고예상일': date,
-                'source': row.source || '기타',
-                ...row
+                '도착예상일': formatExcelDate(row['도착예상일'] || ''),
+                'source': row.source || '기타'
             };
         }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['공장출고예상일'] && row['공장출고예상일'].toString().trim() !== '');
 
@@ -2041,7 +2041,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
         }
 
         let batch = writeBatch(db); 
-        const CHUNK_SIZE = 500;
+        const CHUNK_SIZE = 200;
         let chunkCount = 0;
 
         for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
