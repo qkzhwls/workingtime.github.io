@@ -1436,38 +1436,44 @@ window.calculateAndRenderUsage = function() {
         let rate2F = ((sum2F / window.capacity2F) * 100).toFixed(1);
         let remaining2F = window.capacity2F - sum2F;
         
-        // ★ 만재 예측: 입고대기 데이터의 입고일자별 수량 누적
-        let incomingSchedule = []; // {date, qty}
+        // ★ 만재 예측: 현재 적재수량 + 도착예상일별 입고수량 누적
+        let incomingByDate = {}; // {날짜: 총수량}
+        let totalIncoming = 0;
         for (let code in incomingData) {
             const item = incomingData[code];
-            const date = item['공장출고예상일'] || '';
+            // 도착예상일 우선, 없으면 공장출고예상일 폴백
+            const rawDate = item['도착예상일'] || item['공장출고예상일'] || '';
+            const date = rawDate.toString().trim();
             const qty = Number(item['입고대기수량'] || 0);
             if (date && qty > 0) {
-                incomingSchedule.push({ date, qty });
+                incomingByDate[date] = (incomingByDate[date] || 0) + qty;
+                totalIncoming += qty;
             }
         }
-        incomingSchedule.sort((a, b) => a.date.localeCompare(b.date));
-        
-        let fullDate = '';
-        let cumQty = 0;
-        let totalIncoming = 0;
-        for (const entry of incomingSchedule) {
-            cumQty += entry.qty;
-            totalIncoming += entry.qty;
-            if (cumQty >= remaining2F && !fullDate) {
-                fullDate = entry.date;
-            }
-        }
+        const sortedDates = Object.keys(incomingByDate).sort();
         
         let predictionHtml = '';
-        if (remaining2F <= 0) {
-            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측</th><td style="font-weight:bold; color:#d32f2f; text-align:right;">이미 초과 상태입니다!</td></tr>`;
-        } else if (fullDate) {
-            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일</th><td style="font-weight:bold; color:#e65100; text-align:right;">${fullDate} (입고예정 ${totalIncoming.toLocaleString()}장 중 ${cumQty >= remaining2F ? remaining2F.toLocaleString() : cumQty.toLocaleString()}장 도달 시점)</td></tr>`;
-        } else if (incomingSchedule.length > 0) {
-            predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측</th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정(${totalIncoming.toLocaleString()}장) 전량 입고 후에도 여유 ${(remaining2F - totalIncoming).toLocaleString()}장</td></tr>`;
-        } else {
+        let fullDate = '';
+        let cumTotal = sum2F; // 현재 적재수량에서 시작
+        
+        for (const date of sortedDates) {
+            cumTotal += incomingByDate[date];
+            if (cumTotal >= window.capacity2F) {
+                fullDate = date;
+                break;
+            }
+        }
+        
+        if (sortedDates.length === 0) {
             predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측</th><td style="color:#888; text-align:right;">입고대기 데이터 없음 (시트 동기화 필요)</td></tr>`;
+        } else if (sum2F >= window.capacity2F) {
+            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측</th><td style="font-weight:bold; color:#d32f2f; text-align:right;">이미 초과 상태입니다! (${(sum2F - window.capacity2F).toLocaleString()}장 초과)</td></tr>`;
+        } else if (fullDate) {
+            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일</th><td style="font-weight:bold; color:#e65100; text-align:right;">${fullDate}<br><span style="font-size:11px; color:#888;">현재 ${sum2F.toLocaleString()}장 + 입고예정 누적 → ${cumTotal.toLocaleString()}장 도달</span></td></tr>`;
+        } else {
+            const afterAll = sum2F + totalIncoming;
+            const remainAfter = window.capacity2F - afterAll;
+            predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측</th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정 전량(${totalIncoming.toLocaleString()}장) 입고 후에도 여유 ${remainAfter.toLocaleString()}장<br><span style="font-size:11px; color:#888;">예상 적재: ${afterAll.toLocaleString()} / ${window.capacity2F.toLocaleString()}장</span></td></tr>`;
         }
         
         html += `<div style="font-size:15px; font-weight:bold; margin-bottom:15px; color:var(--primary); text-align:center;">🏢 2층 전체 창고 사용률: ${rate2F}%</div><table class="usage-table" style="width:100%;"><tr><th style="background:#eef1ff; width: 40%;">총 적재가능수량</th><td style="text-align: right;"><input type="number" id="input-cap-2f" value="${window.capacity2F}" style="width:80px; padding:3px; text-align:right; font-size:13px; font-weight:bold;"> 장 <button onclick="saveCapacity2F()" style="padding:4px 8px; margin-left:5px; font-size:11px; background:var(--primary); color:white; border:none; border-radius:3px; cursor:pointer;">기준변경</button></td></tr><tr><th style="background:#eef1ff;">현재 적재수량</th><td style="font-weight:bold; color:var(--primary); text-align: right;">${sum2F.toLocaleString()} 장</td></tr><tr><th style="background:#eef1ff;">남은 수량</th><td style="font-weight:bold; color:#ff5252; text-align: right;">${remaining2F.toLocaleString()} 장</td></tr>${predictionHtml}</table>`;
