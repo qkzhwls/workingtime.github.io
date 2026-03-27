@@ -2041,7 +2041,7 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
         }
 
         let batch = writeBatch(db); 
-        const CHUNK_SIZE = 1500;
+        const CHUNK_SIZE = 500;
         let chunkCount = 0;
 
         for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
