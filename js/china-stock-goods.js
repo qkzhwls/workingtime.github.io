@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.1
+// 중국제작 미발계산기 Ver 1.2
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -143,25 +143,67 @@ async function loadStockLogFromFirebase() {
     } catch (e) { console.error('미발재고로그 로드 실패:', e); }
 }
 
+// ★ Ver 1.2: 청크 사이즈 축소 + 배치 분할 (Firestore 10MB 제한 대응)
 async function saveChunkedData(rows, subCollection) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
     try {
+        // 1) 기존 데이터 삭제 (배치 단위로)
         const existing = await getDocs(collection(db, collName));
         if (existing.size > 0) {
-            let delBatch = writeBatch(db);
-            existing.docs.forEach(d => delBatch.delete(d.ref));
-            await delBatch.commit();
+            const delDocs = existing.docs;
+            for (let i = 0; i < delDocs.length; i += 400) {
+                let delBatch = writeBatch(db);
+                delDocs.slice(i, i + 400).forEach(d => delBatch.delete(d.ref));
+                await delBatch.commit();
+            }
         }
-        const CHUNK_SIZE = 200;
-        let batch = writeBatch(db);
+
+        // 2) 데이터를 필요한 컬럼만 추출하여 경량화
+        const lightRows = rows.map(row => {
+            const light = {};
+            // 핵심 컬럼만 유지
+            const keepKeys = ['어드민상품코드','상품코드','상품명','옵션','비고',
+                '1차패킹리스트출고일','1차패킹리스트출고수량',
+                '2차패킹리스트출고일','2차패킹리스트출고수량',
+                '3차패킹리스트출고일','3차패킹리스트출고수량',
+                '4차패킹리스트출고일','4차패킹리스트출고수량',
+                '5차패킹리스트출고일','5차패킹리스트출고수량',
+                '6차패킹리스트출고일','6차패킹리스트출고수량',
+                // 미발재고로그용
+                '정상재고','부족수량','로케이션'
+            ];
+            for (const key of Object.keys(row)) {
+                if (keepKeys.includes(key)) light[key] = row[key];
+            }
+            return light;
+        });
+
+        // 3) 청크 50행씩, 배치 400건씩 분할 커밋
+        const CHUNK_SIZE = 50;
+        const BATCH_LIMIT = 400;
         let chunkCount = 0;
-        for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-            batch.set(doc(db, collName, `CHUNK_${chunkCount}`), { dataStr: JSON.stringify(rows.slice(i, i + CHUNK_SIZE)), updatedAt: new Date() });
+        let batch = writeBatch(db);
+        let batchOps = 0;
+
+        for (let i = 0; i < lightRows.length; i += CHUNK_SIZE) {
+            const chunk = lightRows.slice(i, i + CHUNK_SIZE);
+            batch.set(doc(db, collName, `CHUNK_${chunkCount}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
             chunkCount++;
+            batchOps++;
+
+            if (batchOps >= BATCH_LIMIT) {
+                await batch.commit();
+                batch = writeBatch(db);
+                batchOps = 0;
+            }
         }
-        if (chunkCount > 0) await batch.commit();
+
+        if (batchOps > 0) await batch.commit();
         return chunkCount;
-    } catch (e) { console.error(`${subCollection} 저장 실패:`, e); throw e; }
+    } catch (e) {
+        console.error(`${subCollection} 저장 실패:`, e);
+        throw e;
+    }
 }
 
 // =========================================================
@@ -216,11 +258,29 @@ async function syncOrderData() {
     showLoading('🔄 오더리스트를 시트에서 가져오는 중...');
     try {
         let cO = 0, cB = 0;
-        if (csvUrlOrder) { const d = await fetchCSV(csvUrlOrder); orderDataOriginal = d; await saveChunkedData(d, 'Order'); cO = d.length; }
-        if (csvUrlBuy) { const d = await fetchCSV(csvUrlBuy); orderDataBuy = d; await saveChunkedData(d, 'Buy'); cB = d.length; }
+        if (csvUrlOrder) {
+            showLoading('🔄 오더리스트(원본) 다운로드 중...');
+            const d = await fetchCSV(csvUrlOrder);
+            orderDataOriginal = d;
+            showLoading(`💾 오더리스트(원본) ${d.length}건 저장 중...`);
+            await saveChunkedData(d, 'Order');
+            cO = d.length;
+        }
+        if (csvUrlBuy) {
+            showLoading('🔄 오더리스트(사입) 다운로드 중...');
+            const d = await fetchCSV(csvUrlBuy);
+            orderDataBuy = d;
+            showLoading(`💾 오더리스트(사입) ${d.length}건 저장 중...`);
+            await saveChunkedData(d, 'Buy');
+            cB = d.length;
+        }
         hideLoading();
         alert(`✅ 오더리스트 동기화 완료!\n원본: ${cO}건 / 사입: ${cB}건`);
-    } catch (e) { hideLoading(); alert('🚨 동기화 실패: ' + e.message); }
+    } catch (e) {
+        hideLoading();
+        alert('🚨 동기화 실패: ' + e.message);
+        console.error('동기화 에러 상세:', e);
+    }
 }
 
 // =========================================================
@@ -266,6 +326,7 @@ function handleStockLogUpload(e) {
                 if (code) stockLogData[code] = row;
             });
 
+            showLoading(`💾 미발재고로그 ${rows.length}건 저장 중...`);
             await saveChunkedData(rows, 'StockLog');
             hideLoading();
             showToast(`✅ 미발재고로그 ${rows.length}건 업로드 완료`);
@@ -480,7 +541,14 @@ async function clearAllData() {
     try {
         for (const sub of ['Order','Buy','StockLog']) {
             const snap = await getDocs(collection(db, CHINA_COLLECTION+'_'+sub));
-            if (snap.size > 0) { let b = writeBatch(db); snap.docs.forEach(d => b.delete(d.ref)); await b.commit(); }
+            if (snap.size > 0) {
+                const docs = snap.docs;
+                for (let i = 0; i < docs.length; i += 400) {
+                    let b = writeBatch(db);
+                    docs.slice(i, i + 400).forEach(d => b.delete(d.ref));
+                    await b.commit();
+                }
+            }
         }
         await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: {}, updatedAt: new Date() });
         orderDataOriginal=[]; orderDataBuy=[]; stockLogData={}; tableData=[]; filteredData=[]; editedCells={};
@@ -509,10 +577,9 @@ async function saveSheetSettings() {
 }
 
 // =========================================================
-// ★ 이벤트 바인딩 (모든 버튼을 여기서 연결)
+// ★ 이벤트 바인딩
 // =========================================================
 function setupEventListeners() {
-    // 작업 메뉴 토글
     document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
         e.stopPropagation();
         const menu = document.getElementById('main-tools-menu');
@@ -520,60 +587,33 @@ function setupEventListeners() {
         closeAllMenus();
         if (!isVisible) menu.style.display = 'block';
     });
-
-    // 메뉴 내부 클릭 시 닫히지 않도록
     document.getElementById('main-tools-menu')?.addEventListener('click', (e) => e.stopPropagation());
-
-    // 바깥 클릭 시 메뉴 닫기
     document.addEventListener('click', () => closeAllMenus());
-
-    // 오더리스트 동기화
     document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
-
-    // CSV 시트 링크 설정
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { closeAllMenus(); openSheetSettingsModal(); });
-
-    // 전체 초기화
     document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
-
-    // 미발재고로그 업로드
     document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
-
-    // 출고일 적용 / 초기화
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
     document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
-
-    // 엑셀 다운로드
     document.getElementById('btn-excel-download')?.addEventListener('click', downloadExcel);
-
-    // 검색
     document.getElementById('search-input')?.addEventListener('input', applySearch);
-
-    // 정렬 (th 클릭)
     document.querySelectorAll('.th-sortable').forEach(th => {
         th.addEventListener('click', () => sortTable(th.dataset.sort));
     });
-
-    // 셀 편집 (이벤트 위임)
     document.getElementById('table-body')?.addEventListener('focusout', (e) => {
         if (e.target.classList.contains('editable-cell')) onCellEdit(e.target);
     });
-
-    // 상품코드 복사 (이벤트 위임)
     document.getElementById('table-body')?.addEventListener('click', (e) => {
         if (e.target.classList.contains('code-cell')) {
             const code = e.target.dataset.code;
             if (code) navigator.clipboard.writeText(code).then(() => showToast(`📋 ${code} 복사됨`));
         }
     });
-
-    // 모달 닫기
     document.getElementById('btn-sheet-cancel')?.addEventListener('click', closeSheetSettingsModal);
     document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
     document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => {
         if (e.target.id === 'sheet-settings-modal') closeSheetSettingsModal();
     });
-    // 모달 내부 클릭 전파 방지
     document.querySelector('#sheet-settings-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 }
 
@@ -596,7 +636,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.1 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.2 초기화 완료');
 }
 
 init();
