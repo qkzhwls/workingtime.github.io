@@ -1,204 +1,602 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>중국제작 미발계산기</title>
-    <style>
-        :root { --primary: #e65100; --bg: #f8f9fa; --card: #ffffff; }
-        body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; }
+// === js/china-stock-goods.js ===
+// 중국제작 미발계산기 Ver 1.1
 
-        .controls-header { margin: 15px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-        .header-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+import { initializeFirebase } from './config.js';
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-        .version-badge { background: #fff3e0; color: #bf360c; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #ffcc80; }
+const { db } = initializeFirebase();
+const CHINA_COLLECTION = 'ChinaStockGoods';
+const CONFIG_DOC = 'CONFIG';
 
-        .upload-dropdown { position: relative; display: inline-block; }
-        .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
-        .btn-main-upload:hover { filter: brightness(1.2); }
-        .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
-        .upload-menu label, .upload-menu div.menu-item { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
-        .upload-menu label:hover, .upload-menu div.menu-item:hover { background: #fff3e0; color: var(--primary); }
-        .upload-menu input[type="file"] { display: none; }
+// =========================================================
+// 전역 상태
+// =========================================================
+let orderDataOriginal = [];
+let orderDataBuy = [];
+let stockLogData = {};
+let tableData = [];
+let filteredData = [];
+let editedCells = {};
+let sortConfig = { key: '', direction: 'asc' };
+let csvUrlOrder = '';
+let csvUrlBuy = '';
+let savedDates = [];
 
-        .btn-download { padding: 8px 15px; background: #1976d2; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 5px; font-size: 13px; }
-        .btn-download:hover { background: #1565c0; }
+// =========================================================
+// 유틸리티
+// =========================================================
+const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 
-        .date-bar { margin: 0 20px 10px 20px; background: white; border: 1px solid #ddd; border-radius: 10px; padding: 12px 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .date-bar label { font-size: 13px; font-weight: bold; color: #555; }
-        .date-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 120px; text-align: center; }
-        .date-input:focus { border-color: var(--primary); outline: none; }
-        .btn-date-apply { padding: 6px 14px; background: var(--primary); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; }
-        .btn-date-apply:hover { background: #bf360c; }
-        .btn-date-clear { padding: 6px 14px; background: #999; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; }
+function formatExcelDate(excelDate) {
+    if (!excelDate || excelDate.toString().trim() === '') return '';
+    if (typeof excelDate === 'string' && (excelDate.includes('-') || excelDate.includes('.'))) return excelDate;
+    const num = parseFloat(excelDate);
+    if (isNaN(num)) return excelDate;
+    const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
 
-        .summary-bar { margin: 0 20px 10px 20px; display: flex; gap: 15px; flex-wrap: wrap; }
-        .summary-card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px 18px; display: flex; flex-direction: column; align-items: center; min-width: 100px; }
-        .summary-card .label { font-size: 11px; color: #888; font-weight: bold; }
-        .summary-card .value { font-size: 22px; font-weight: 900; color: #333; }
-        .summary-card.highlight .value { color: var(--primary); }
+function normalizeDate(dateStr) {
+    if (!dateStr) return '';
+    let s = dateStr.toString().trim();
+    if (/^\d{4,5}(\.\d+)?$/.test(s)) s = formatExcelDate(parseFloat(s));
+    s = s.replace(/\./g, '-').replace(/\//g, '-');
+    const parts = s.split('-');
+    if (parts.length === 3) {
+        let [y, m, d] = parts;
+        if (y.length === 2) y = '20' + y;
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    return s;
+}
 
-        .list-container {
-            overflow: auto; background: white; margin: 0 20px 10px 20px; padding: 0;
-            border-radius: 12px; border: 1px solid #ccc; height: calc(100vh - 260px);
+function showLoading(text) {
+    document.getElementById('loading-text').innerText = text;
+    document.getElementById('loading-overlay').style.display = 'flex';
+}
+function hideLoading() { document.getElementById('loading-overlay').style.display = 'none'; }
+
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.innerText = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function getCapacityByLocation(locStr) {
+    if (!locStr) return 0;
+    const ch = locStr.toString().trim().toUpperCase().charAt(0);
+    const map = { 'A':20,'B':20,'C':20,'D':20,'E':40,'F':40,'G':40,'H':15,'I':15,'Z':15,'L':15,'O':15,'P':15,'Q':15,'R':15,'S':15,'T':15 };
+    if (locStr.includes('★')) return 90;
+    return map[ch] || 0;
+}
+
+function closeAllMenus() {
+    document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
+}
+
+// =========================================================
+// Firebase 로드/저장
+// =========================================================
+async function loadConfig() {
+    try {
+        const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC));
+        if (snap.exists()) {
+            const cfg = snap.data();
+            csvUrlOrder = cfg.csvUrlOrder || '';
+            csvUrlBuy = cfg.csvUrlBuy || '';
+            savedDates = cfg.savedDates || [];
+            savedDates.forEach((d, i) => {
+                const el = document.getElementById(`date-${i + 1}`);
+                if (el && d) el.value = d;
+            });
         }
-        .list-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
-        .list-table th, .list-table td {
-            padding: 10px 12px; text-align: center; border: 1px solid #ccc; font-size: 13px;
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    } catch (e) { console.error('설정 로드 실패:', e); }
+}
+
+async function saveConfig() {
+    try {
+        const dates = [];
+        for (let i = 1; i <= 8; i++) dates.push(document.getElementById(`date-${i}`)?.value || '');
+        await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates: dates, updatedAt: new Date() }, { merge: true });
+    } catch (e) { console.error('설정 저장 실패:', e); }
+}
+
+async function loadEditedCells() {
+    try {
+        const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'));
+        if (snap.exists()) editedCells = snap.data().cells || {};
+    } catch (e) { console.error('편집 데이터 로드 실패:', e); }
+}
+
+async function saveEditedCells() {
+    try {
+        await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells, updatedAt: new Date() });
+    } catch (e) { console.error('편집 데이터 저장 실패:', e); }
+}
+
+async function loadOrderDataFromFirebase() {
+    try {
+        orderDataOriginal = [];
+        const snapO = await getDocs(collection(db, CHINA_COLLECTION + '_Order'));
+        snapO.forEach(d => { const data = d.data(); if (data.dataStr) orderDataOriginal.push(...JSON.parse(data.dataStr)); });
+
+        orderDataBuy = [];
+        const snapB = await getDocs(collection(db, CHINA_COLLECTION + '_Buy'));
+        snapB.forEach(d => { const data = d.data(); if (data.dataStr) orderDataBuy.push(...JSON.parse(data.dataStr)); });
+    } catch (e) { console.error('오더 데이터 로드 실패:', e); }
+}
+
+async function loadStockLogFromFirebase() {
+    try {
+        stockLogData = {};
+        const snap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog'));
+        snap.forEach(d => {
+            const data = d.data();
+            if (data.dataStr) {
+                JSON.parse(data.dataStr).forEach(row => {
+                    const code = (row['상품코드'] || '').toString().trim();
+                    if (code) stockLogData[code] = row;
+                });
+            }
+        });
+    } catch (e) { console.error('미발재고로그 로드 실패:', e); }
+}
+
+async function saveChunkedData(rows, subCollection) {
+    const collName = CHINA_COLLECTION + '_' + subCollection;
+    try {
+        const existing = await getDocs(collection(db, collName));
+        if (existing.size > 0) {
+            let delBatch = writeBatch(db);
+            existing.docs.forEach(d => delBatch.delete(d.ref));
+            await delBatch.commit();
         }
-        .list-table tbody tr { transition: background 0.15s; }
-        .list-table tbody tr:hover { background: #fff8e1; }
-        .list-table tbody tr:nth-child(even) { background: #fafafa; }
-        .list-table tbody tr:nth-child(even):hover { background: #fff8e1; }
-        .list-table th {
-            background: #f4f4f4; position: sticky; top: -1px; z-index: 10; user-select: none;
-            box-shadow: inset 0 -1px 0 #ccc, inset 0 1px 0 #ccc; font-size: 13px; font-weight: 800; color: #222;
+        const CHUNK_SIZE = 200;
+        let batch = writeBatch(db);
+        let chunkCount = 0;
+        for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+            batch.set(doc(db, collName, `CHUNK_${chunkCount}`), { dataStr: JSON.stringify(rows.slice(i, i + CHUNK_SIZE)), updatedAt: new Date() });
+            chunkCount++;
         }
-        .th-sortable { cursor: pointer; }
-        .th-sortable:hover { background: #eee; }
-        .editable-cell { cursor: text; background: #fffde7; min-width: 50px; }
-        .editable-cell:hover { background: #fff9c4; }
-        .editable-cell:focus { outline: 2px solid var(--primary); background: #fff; }
-        .code-cell { font-weight: bold; color: #1565c0; cursor: copy; }
-        .code-cell:hover { text-decoration: underline; }
-        .capacity-auto { color: #888; font-size: 12px; }
-        .search-box { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 180px; }
-        .search-box:focus { border-color: var(--primary); outline: none; }
+        if (chunkCount > 0) await batch.commit();
+        return chunkCount;
+    } catch (e) { console.error(`${subCollection} 저장 실패:`, e); throw e; }
+}
 
-        .modal-overlay {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;
+// =========================================================
+// CSV fetch + 파싱
+// =========================================================
+async function fetchCSV(url) {
+    let textData = '';
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('직접 연결 실패');
+        textData = await res.text();
+    } catch (e1) {
+        try {
+            const res2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+            if (!res2.ok) throw new Error('프록시1 실패');
+            textData = await res2.text();
+        } catch (e2) {
+            const res3 = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+            if (!res3.ok) throw new Error('모든 프록시 실패');
+            textData = await res3.text();
         }
-        .modal-content {
-            background: white; padding: 25px; border-radius: 10px; width: 450px; max-height: 85vh; overflow-y: auto;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+    const wb = XLSX.read(textData, { type: 'string' });
+    const rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+
+    let headerIdx = -1, headers = [];
+    for (let i = 0; i < Math.min(20, rawData.length); i++) {
+        const cleaned = rawData[i].map(h => cleanKey(h));
+        if (cleaned.includes('어드민상품코드') || cleaned.includes('상품코드')) { headerIdx = i; headers = cleaned; break; }
+    }
+    if (headerIdx === -1) return [];
+
+    const result = [];
+    for (let i = headerIdx + 1; i < rawData.length; i++) {
+        let obj = {}, empty = true;
+        for (let j = 0; j < headers.length; j++) {
+            if (headers[j]) { obj[headers[j]] = rawData[i][j]; if (rawData[i][j] !== '' && rawData[i][j] !== undefined) empty = false; }
         }
-        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #333; }
-        .modal-body { display: flex; flex-direction: column; gap: 12px; }
-        .modal-body label { font-size: 13px; font-weight: bold; color: #555; margin-bottom: -5px; }
-        .modal-body input { padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
-        .modal-footer { margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px; }
-        .btn-modal-save { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .btn-modal-cancel { padding: 8px 16px; background: #888; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        if (!empty) result.push(obj);
+    }
+    return result;
+}
 
-        .loading-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); z-index: 999999; flex-direction: column; justify-content: center; align-items: center; color: white; backdrop-filter: blur(3px); }
-        .spinner { border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--primary); border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 20px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .loading-text { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
+// =========================================================
+// 오더리스트 시트 동기화
+// =========================================================
+async function syncOrderData() {
+    if (!csvUrlOrder && !csvUrlBuy) {
+        alert('CSV 시트 링크가 설정되지 않았습니다.\n[작업 메뉴 > CSV 시트 링크 설정]에서 링크를 먼저 저장하세요.');
+        return;
+    }
+    showLoading('🔄 오더리스트를 시트에서 가져오는 중...');
+    try {
+        let cO = 0, cB = 0;
+        if (csvUrlOrder) { const d = await fetchCSV(csvUrlOrder); orderDataOriginal = d; await saveChunkedData(d, 'Order'); cO = d.length; }
+        if (csvUrlBuy) { const d = await fetchCSV(csvUrlBuy); orderDataBuy = d; await saveChunkedData(d, 'Buy'); cB = d.length; }
+        hideLoading();
+        alert(`✅ 오더리스트 동기화 완료!\n원본: ${cO}건 / 사입: ${cB}건`);
+    } catch (e) { hideLoading(); alert('🚨 동기화 실패: ' + e.message); }
+}
 
-        #toast { visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center; border-radius: 8px; padding: 12px; position: fixed; z-index: 10001; left: 50%; bottom: 30px; transform: translateX(-50%); font-size: 14px; opacity: 0; transition: opacity 0.3s, bottom 0.3s; }
-        #toast.show { visibility: visible; opacity: 1; bottom: 50px; }
-    </style>
-</head>
-<body>
+// =========================================================
+// 미발재고로그 업로드
+// =========================================================
+function handleStockLogUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    showLoading('📂 미발재고로그 분석 중...');
 
-    <div id="loading-overlay" class="loading-overlay">
-        <div class="spinner"></div>
-        <div class="loading-text" id="loading-text">데이터 처리 중...</div>
-        <div style="font-size:13px; color:#ccc; margin-top:10px;">창을 닫거나 새로고침하지 마세요.</div>
-    </div>
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+        try {
+            const text = evt.target.result;
+            let rows = [];
 
-    <div class="controls-header">
-        <div class="header-left">
-            <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 1.1</div>
-            <input type="text" id="search-input" class="search-box" placeholder="🔍 상품코드/상품명 검색">
-        </div>
-        <div class="header-actions">
-            <button class="btn-download" id="btn-excel-download">📥 엑셀 다운로드</button>
-            <div class="upload-dropdown">
-                <button class="btn-main-upload" id="btn-toggle-menu">🛠️ 작업 메뉴 ▼</button>
-                <div class="upload-menu" id="main-tools-menu" style="width:300px;">
-                    <div style="padding:8px 15px; background:#eceff1; font-size:12px; color:#546e7a; font-weight:bold;">📊 데이터 소스 관리</div>
-                    <label>
-                        <span style="color:var(--primary);">📂 미발재고로그 업로드 (.xls)</span>
-                        <input type="file" id="upload-stock-log" accept=".xls,.xlsx,.csv,.html,.htm">
-                    </label>
-                    <div class="menu-item" id="btn-sync-order">
-                        <span style="color:#1976d2;">🔄 오더리스트 시트 동기화</span>
-                    </div>
-                    <div style="padding:8px 15px; background:#eceff1; font-size:12px; color:#546e7a; font-weight:bold; border-top:1px solid #ddd;">⚙️ 설정</div>
-                    <div class="menu-item" id="btn-open-sheet-settings">
-                        <span style="color:#607d8b;">📎 CSV 시트 링크 설정</span>
-                    </div>
-                    <div class="menu-item" id="btn-clear-all">
-                        <span style="color:#d32f2f;">🗑️ 전체 데이터 초기화</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+            if (text.trim().startsWith('<') || text.includes('<table') || text.includes('<html')) {
+                const parser = new DOMParser();
+                const htmlDoc = parser.parseFromString(text, 'text/html');
+                const table = htmlDoc.querySelector('table');
+                if (!table) throw new Error('HTML 내에서 테이블을 찾을 수 없습니다.');
+                const trs = table.querySelectorAll('tr');
+                let headers = [];
+                trs.forEach((tr, idx) => {
+                    const cells = tr.querySelectorAll('td, th');
+                    const vals = Array.from(cells).map(c => c.textContent.trim());
+                    if (idx === 0) headers = vals;
+                    else {
+                        let obj = {};
+                        vals.forEach((v, j) => { if (headers[j]) obj[headers[j]] = v; });
+                        if (obj['상품코드']) rows.push(obj);
+                    }
+                });
+            } else {
+                const ab = new Uint8Array(text.split('').map(c => c.charCodeAt(0))).buffer;
+                const wb = XLSX.read(ab, { type: 'array' });
+                rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
+            }
 
-    <div class="date-bar">
-        <label>📅 출고일:</label>
-        <input type="date" class="date-input" id="date-1">
-        <input type="date" class="date-input" id="date-2">
-        <input type="date" class="date-input" id="date-3">
-        <input type="date" class="date-input" id="date-4">
-        <input type="date" class="date-input" id="date-5">
-        <input type="date" class="date-input" id="date-6">
-        <input type="date" class="date-input" id="date-7">
-        <input type="date" class="date-input" id="date-8">
-        <button class="btn-date-apply" id="btn-date-apply">적용</button>
-        <button class="btn-date-clear" id="btn-date-clear">초기화</button>
-    </div>
+            stockLogData = {};
+            rows.forEach(row => {
+                const code = (row['상품코드'] || '').toString().trim();
+                if (code) stockLogData[code] = row;
+            });
 
-    <div class="summary-bar" id="summary-bar">
-        <div class="summary-card highlight"><span class="label">총 SKU</span><span class="value" id="sum-sku">0</span></div>
-        <div class="summary-card highlight"><span class="label">총 도착수량</span><span class="value" id="sum-arrival">0</span></div>
-        <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span></div>
-    </div>
+            await saveChunkedData(rows, 'StockLog');
+            hideLoading();
+            showToast(`✅ 미발재고로그 ${rows.length}건 업로드 완료`);
+            if (tableData.length > 0) buildTableFromData();
+        } catch (err) {
+            hideLoading();
+            alert('🚨 파일 파싱 실패: ' + err.message);
+            console.error(err);
+        }
+        e.target.value = '';
+    };
+    reader.readAsText(file, 'UTF-8');
+}
 
-    <div class="list-container" id="list-container">
-        <table class="list-table">
-            <thead>
-                <tr>
-                    <th style="width:40px;">No</th>
-                    <th class="th-sortable" data-sort="code" style="width:100px;">상품코드</th>
-                    <th class="th-sortable" data-sort="name" style="min-width:150px;">상품명</th>
-                    <th style="width:120px;">옵션명</th>
-                    <th class="th-sortable" data-sort="arrivalQty" style="width:80px;">도착수량<br>(패킹수량)</th>
-                    <th class="th-sortable" data-sort="mibalQty" style="width:80px;">미발수량</th>
-                    <th class="th-sortable" data-sort="totalStock" style="width:70px;">총재고</th>
-                    <th style="width:120px;">로케이션</th>
-                    <th style="width:60px;">적재량</th>
-                    <th style="width:70px;">입고확인</th>
-                    <th style="width:70px;">부족수량</th>
-                    <th style="width:80px;">직진배송수량</th>
-                    <th style="min-width:100px;">비고</th>
-                </tr>
-            </thead>
-            <tbody id="table-body">
-                <tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 입력하고 [적용]을 누르거나, 작업 메뉴에서 데이터를 불러오세요.</td></tr>
-            </tbody>
-        </table>
-    </div>
+// =========================================================
+// 출고일 적용 → 테이블 생성
+// =========================================================
+function applyDates() {
+    const inputDates = [];
+    for (let i = 1; i <= 8; i++) {
+        const val = document.getElementById(`date-${i}`)?.value;
+        if (val) inputDates.push(normalizeDate(val));
+    }
+    if (inputDates.length === 0) { alert('출고일을 1개 이상 입력해주세요.'); return; }
 
-    <div id="sheet-settings-modal" class="modal-overlay">
-        <div class="modal-content" style="width:500px;">
-            <div class="modal-header">📎 오더리스트 CSV 시트 링크 설정</div>
-            <div class="modal-body">
-                <label style="color:var(--primary);">① 오더리스트(원본) CSV 링크</label>
-                <input type="text" id="modal-csv-order" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
-                <label style="color:var(--primary); margin-top:15px;">② 오더리스트(사입) CSV 링크</label>
-                <input type="text" id="modal-csv-buy" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
-                <div style="font-size:11px; color:#666; margin-top:10px; line-height:1.4; background:#f9f9f9; padding:10px; border-radius:6px; border:1px solid #ddd;">
-                    ※ 구글 시트에서 각 탭 선택 후 <strong>[파일] > [공유] > [웹에 게시]</strong><br>
-                    ※ 형식을 <strong>'CSV'</strong>로 변경한 뒤 생성된 링크를 붙여넣으세요.
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-modal-cancel" id="btn-sheet-cancel">취소</button>
-                <button class="btn-modal-save" id="btn-sheet-save">저장</button>
-            </div>
-        </div>
-    </div>
+    saveConfig();
 
-    <div id="toast"></div>
+    const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
+    const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
+    const dateColsBuy = ['1차패킹리스트출고일','2차패킹리스트출고일'];
+    const qtyColsBuy  = ['1차패킹리스트출고수량','2차패킹리스트출고수량'];
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script type="module" src="js/china-stock-goods.js"></script>
-</body>
-</html>
+    let resultMap = {};
+
+    orderDataOriginal.forEach(row => {
+        const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
+        if (!code) return;
+        let matched = false, totalQty = 0;
+        dateColsOrig.forEach((dc, idx) => {
+            const rd = normalizeDate(row[dc] || '');
+            if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsOrig[idx]]) || 0); }
+        });
+        if (matched) {
+            if (!resultMap[code]) resultMap[code] = { code, name: row['상품명']||'', option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
+            resultMap[code].arrivalQty += totalQty;
+        }
+    });
+
+    orderDataBuy.forEach(row => {
+        const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
+        if (!code) return;
+        let matched = false, totalQty = 0;
+        dateColsBuy.forEach((dc, idx) => {
+            const rd = normalizeDate(row[dc] || '');
+            if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsBuy[idx]]) || 0); }
+        });
+        if (matched) {
+            if (!resultMap[code]) resultMap[code] = { code, name: row['상품명']||'', option: row['옵션']||'', arrivalQty: 0, bigoY: '' };
+            resultMap[code].arrivalQty += totalQty;
+        }
+    });
+
+    tableData = Object.values(resultMap).map(item => {
+        const log = stockLogData[item.code] || {};
+        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
+        const edited = editedCells[item.code] || {};
+        return {
+            code: item.code, name: item.name, option: item.option,
+            arrivalQty: item.arrivalQty,
+            mibalQty: parseInt(log['부족수량']) || 0,
+            totalStock: parseInt(log['정상재고']) || 0,
+            location: loc,
+            capacity: getCapacityByLocation(loc),
+            confirmed: edited.confirmed || '',
+            shortage: edited.shortage || '',
+            directShip: item.bigoY || edited.directShip || '',
+            memo: edited.memo || ''
+        };
+    }).filter(d => d.arrivalQty > 0);
+
+    filteredData = [...tableData];
+    renderTable();
+    updateSummary();
+    showToast(`✅ ${tableData.length}개 상품 매칭 완료`);
+}
+
+function clearDates() {
+    for (let i = 1; i <= 8; i++) { const el = document.getElementById(`date-${i}`); if (el) el.value = ''; }
+    tableData = []; filteredData = [];
+    renderTable(); updateSummary(); saveConfig();
+}
+
+// =========================================================
+// 테이블 렌더링
+// =========================================================
+function renderTable() {
+    const tbody = document.getElementById('table-body');
+    if (!filteredData || filteredData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">표시할 데이터가 없습니다.</td></tr>';
+        return;
+    }
+    let html = '';
+    filteredData.forEach((row, idx) => {
+        html += `<tr>
+            <td style="color:#888; font-size:12px;">${idx + 1}</td>
+            <td class="code-cell" data-code="${row.code}">${row.code}</td>
+            <td style="text-align:left; padding-left:10px;">${row.name}</td>
+            <td style="font-size:12px;">${row.option}</td>
+            <td style="font-weight:bold;">${row.arrivalQty.toLocaleString()}</td>
+            <td style="font-weight:bold; color:${row.mibalQty > 0 ? '#d32f2f' : '#333'};">${row.mibalQty.toLocaleString()}</td>
+            <td>${row.totalStock.toLocaleString()}</td>
+            <td style="font-size:12px;">${row.location}</td>
+            <td class="capacity-auto">${row.capacity || '-'}</td>
+            <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed">${row.confirmed}</td>
+            <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td>
+            <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="directShip">${row.directShip}</td>
+            <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="memo">${row.memo}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+}
+
+function buildTableFromData() {
+    tableData.forEach(item => {
+        const log = stockLogData[item.code] || {};
+        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
+        item.totalStock = parseInt(log['정상재고']) || 0;
+        item.mibalQty = parseInt(log['부족수량']) || 0;
+        item.location = loc;
+        item.capacity = getCapacityByLocation(loc);
+    });
+    filteredData = [...tableData];
+    applySearch();
+    renderTable();
+    updateSummary();
+}
+
+function updateSummary() {
+    document.getElementById('sum-sku').textContent = filteredData.length.toLocaleString();
+    document.getElementById('sum-arrival').textContent = filteredData.reduce((s, d) => s + (d.arrivalQty || 0), 0).toLocaleString();
+    document.getElementById('sum-mibal').textContent = filteredData.reduce((s, d) => s + (d.mibalQty || 0), 0).toLocaleString();
+}
+
+// =========================================================
+// 셀 편집 → 자동 저장
+// =========================================================
+let saveTimeout = null;
+function onCellEdit(el) {
+    const code = el.dataset.code;
+    const field = el.dataset.field;
+    const value = el.textContent.trim();
+    if (!editedCells[code]) editedCells[code] = {};
+    editedCells[code][field] = value;
+    const item = tableData.find(d => d.code === code);
+    if (item) item[field] = value;
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => { saveEditedCells(); showToast('💾 자동 저장됨'); }, 1000);
+}
+
+// =========================================================
+// 검색
+// =========================================================
+function applySearch() {
+    const keyword = (document.getElementById('search-input')?.value || '').trim().toUpperCase();
+    if (!keyword) { filteredData = [...tableData]; }
+    else { filteredData = tableData.filter(d => d.code.toUpperCase().includes(keyword) || d.name.toUpperCase().includes(keyword) || d.option.toUpperCase().includes(keyword)); }
+    renderTable();
+    updateSummary();
+}
+
+// =========================================================
+// 정렬
+// =========================================================
+function sortTable(key) {
+    if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
+    else { sortConfig.key = key; sortConfig.direction = 'asc'; }
+    filteredData.sort((a, b) => {
+        let va = a[key], vb = b[key];
+        if (typeof va === 'number' && typeof vb === 'number') return sortConfig.direction === 'asc' ? va - vb : vb - va;
+        va = (va || '').toString(); vb = (vb || '').toString();
+        return sortConfig.direction === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    renderTable();
+}
+
+// =========================================================
+// 엑셀 다운로드
+// =========================================================
+function downloadExcel() {
+    if (!filteredData || filteredData.length === 0) { alert('다운로드할 데이터가 없습니다.'); return; }
+    const headers = ['상품코드','상품명','옵션명','도착수량(패킹수량)','미발수량','총재고','로케이션','로케이션적재량','입고확인','부족수량','직진배송수량','비고'];
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style>td{mso-number-format:"\\@";}.header{font-weight:bold;background:#FFE0B2;text-align:center;border:1px solid #ccc;padding:6px;}.cell{border:1px solid #ddd;padding:4px 8px;text-align:center;}.cellL{border:1px solid #ddd;padding:4px 8px;text-align:left;}.num{mso-number-format:"0";text-align:right;}</style><table>`;
+    html += `<tr>${headers.map(h=>`<td class="header">${h}</td>`).join('')}</tr>`;
+    filteredData.forEach(r => {
+        html += `<tr><td class="cell">${r.code}</td><td class="cellL">${r.name}</td><td class="cell">${r.option}</td><td class="num">${r.arrivalQty}</td><td class="num">${r.mibalQty}</td><td class="num">${r.totalStock}</td><td class="cell">${r.location}</td><td class="num">${r.capacity||''}</td><td class="cell">${r.confirmed||''}</td><td class="cell">${r.shortage||''}</td><td class="cell">${r.directShip||''}</td><td class="cellL">${r.memo||''}</td></tr>`;
+    });
+    html += '</table></html>';
+    const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `미발계산기_${new Date().toISOString().slice(0,10)}.xls`;
+    a.click();
+    showToast('📥 엑셀 다운로드 완료');
+}
+
+// =========================================================
+// 전체 초기화
+// =========================================================
+async function clearAllData() {
+    if (!confirm('정말로 모든 데이터를 초기화하시겠습니까?\n(오더리스트, 미발재고로그, 편집 내용 모두 삭제)')) return;
+    showLoading('🗑️ 데이터 초기화 중...');
+    try {
+        for (const sub of ['Order','Buy','StockLog']) {
+            const snap = await getDocs(collection(db, CHINA_COLLECTION+'_'+sub));
+            if (snap.size > 0) { let b = writeBatch(db); snap.docs.forEach(d => b.delete(d.ref)); await b.commit(); }
+        }
+        await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: {}, updatedAt: new Date() });
+        orderDataOriginal=[]; orderDataBuy=[]; stockLogData={}; tableData=[]; filteredData=[]; editedCells={};
+        renderTable(); updateSummary(); hideLoading();
+        alert('✅ 전체 초기화 완료');
+    } catch (e) { hideLoading(); alert('🚨 초기화 실패: ' + e.message); }
+}
+
+// =========================================================
+// 모달
+// =========================================================
+function openSheetSettingsModal() {
+    document.getElementById('modal-csv-order').value = csvUrlOrder || '';
+    document.getElementById('modal-csv-buy').value = csvUrlBuy || '';
+    document.getElementById('sheet-settings-modal').style.display = 'flex';
+}
+function closeSheetSettingsModal() {
+    document.getElementById('sheet-settings-modal').style.display = 'none';
+}
+async function saveSheetSettings() {
+    csvUrlOrder = document.getElementById('modal-csv-order').value.trim();
+    csvUrlBuy = document.getElementById('modal-csv-buy').value.trim();
+    await saveConfig();
+    closeSheetSettingsModal();
+    showToast('✅ CSV 링크 저장 완료');
+}
+
+// =========================================================
+// ★ 이벤트 바인딩 (모든 버튼을 여기서 연결)
+// =========================================================
+function setupEventListeners() {
+    // 작업 메뉴 토글
+    document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById('main-tools-menu');
+        const isVisible = menu.style.display === 'block';
+        closeAllMenus();
+        if (!isVisible) menu.style.display = 'block';
+    });
+
+    // 메뉴 내부 클릭 시 닫히지 않도록
+    document.getElementById('main-tools-menu')?.addEventListener('click', (e) => e.stopPropagation());
+
+    // 바깥 클릭 시 메뉴 닫기
+    document.addEventListener('click', () => closeAllMenus());
+
+    // 오더리스트 동기화
+    document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
+
+    // CSV 시트 링크 설정
+    document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { closeAllMenus(); openSheetSettingsModal(); });
+
+    // 전체 초기화
+    document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
+
+    // 미발재고로그 업로드
+    document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
+
+    // 출고일 적용 / 초기화
+    document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
+    document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
+
+    // 엑셀 다운로드
+    document.getElementById('btn-excel-download')?.addEventListener('click', downloadExcel);
+
+    // 검색
+    document.getElementById('search-input')?.addEventListener('input', applySearch);
+
+    // 정렬 (th 클릭)
+    document.querySelectorAll('.th-sortable').forEach(th => {
+        th.addEventListener('click', () => sortTable(th.dataset.sort));
+    });
+
+    // 셀 편집 (이벤트 위임)
+    document.getElementById('table-body')?.addEventListener('focusout', (e) => {
+        if (e.target.classList.contains('editable-cell')) onCellEdit(e.target);
+    });
+
+    // 상품코드 복사 (이벤트 위임)
+    document.getElementById('table-body')?.addEventListener('click', (e) => {
+        if (e.target.classList.contains('code-cell')) {
+            const code = e.target.dataset.code;
+            if (code) navigator.clipboard.writeText(code).then(() => showToast(`📋 ${code} 복사됨`));
+        }
+    });
+
+    // 모달 닫기
+    document.getElementById('btn-sheet-cancel')?.addEventListener('click', closeSheetSettingsModal);
+    document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
+    document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'sheet-settings-modal') closeSheetSettingsModal();
+    });
+    // 모달 내부 클릭 전파 방지
+    document.querySelector('#sheet-settings-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+}
+
+// =========================================================
+// 초기화
+// =========================================================
+async function init() {
+    setupEventListeners();
+    showLoading('📦 데이터 불러오는 중...');
+
+    await loadConfig();
+    await loadEditedCells();
+    await loadOrderDataFromFirebase();
+    await loadStockLogFromFirebase();
+
+    hideLoading();
+
+    const hasDate = savedDates.some(d => d && d.trim());
+    if (hasDate && (orderDataOriginal.length > 0 || orderDataBuy.length > 0)) {
+        applyDates();
+    }
+
+    console.log('🏭 중국제작 미발계산기 Ver 1.1 초기화 완료');
+}
+
+init();
