@@ -82,6 +82,9 @@
                                 <button id="btn-location-management" class="w-full text-left flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-100">
                                     <span>📦</span> <span class="font-medium">3층 로케이션 관리</span>
                                 </button>
+                                <button id="btn-china-production" class="w-full text-left flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-100">
+                                    <span>🏭</span> <span class="font-medium">중국제작</span>
+                                </button>
                                 <button id="open-history-btn" class="w-full text-left flex items-center gap-2 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 border-b border-gray-100" style="display: none;">
                                     <span>📜</span> <span class="font-medium">데이터 관리</span>
                                 </button>
@@ -135,6 +138,9 @@
                         <button id="open-cost-simulation-btn-mobile" class="flex items-center gap-2 bg-indigo-100 text-indigo-800 font-semibold text-sm py-1.5 px-3 rounded-md shadow-sm">
                             <span>💰 운영 시뮬레이션</span>
                         </button>
+                        <button id="btn-china-production-mobile" class="flex items-center gap-2 bg-yellow-100 text-yellow-800 font-semibold text-sm py-1.5 px-3 rounded-md shadow-sm">
+                            <span>🏭 중국제작</span>
+                        </button>
                         <button id="open-history-btn-mobile" class="flex items-center gap-2 bg-gray-100 text-gray-800 font-semibold text-sm py-1.5 px-3 rounded-md shadow-sm" style="display: none;">
                             <span>📜 데이터 관리</span>
                         </button>
@@ -175,20 +181,17 @@
                 </div>
         </div>
 
-        <div id="main-content-area" class="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200 flex-grow flex flex-col hidden">
-            <h2 class="text-xl font-bold text-gray-900 mb-4">업무 진행</h2>
-            <div id="loading-spinner" class="text-center py-10">
-                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
-                <p class="mt-4 text-gray-600">데이터를 불러오는 중입니다...</p>
+        <div class="p-4 md:p-6 bg-blue-50 rounded-lg border border-blue-200 shadow-md">
+            <h2 class="text-xl font-bold text-blue-800 mb-4">업무 진행</h2>
+            <div id="task-board" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                 <p class="text-gray-500 italic col-span-full text-center py-8">데이터를 불러오는 중입니다...</p>
             </div>
-            <div id="team-status-board" class="space-y-8 flex-grow">
-                </div>
         </div>
 
-        <div class="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200 hidden">
-            <div id="toggle-completed-log" class="flex justify-between items-center cursor-pointer md:cursor-auto">
+        <div class="mt-8 p-4 md:p-6 bg-white rounded-lg border border-gray-200 shadow-md">
+            <div id="toggle-completed" class="flex justify-between items-center cursor-pointer md:cursor-auto">
                 <h2 class="text-xl font-bold text-gray-900">오늘 완료된 업무</h2>
-                <svg id="completed-log-arrow" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 md:hidden transition-transform transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg id="completed-arrow" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 md:hidden transition-transform transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
             </div>
@@ -301,6 +304,3 @@
 </body>
 
 </html>
-
-
-
