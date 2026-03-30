@@ -23,6 +23,12 @@ export function initializeAppListeners() {
     document.getElementById('btn-location-management')?.addEventListener('click', () => {
         window.open('location.html', '_blank');
     }); // ✅ [신규] 로케이션 관리 버튼
+
+    // ✅ [신규] 중국제작 버튼 (PC + 모바일)
+    document.getElementById('btn-china-production')?.addEventListener('click', () => {
+        window.open('china.html', '_blank');
+    });
+    document.getElementById('btn-china-production-mobile')?.addEventListener('click', () => {
+        window.open('china.html', '_blank');
+    });
 }
-
-
