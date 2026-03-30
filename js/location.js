@@ -1479,7 +1479,28 @@ window.calculateAndRenderUsage = function() {
         } else {
             const afterAll = sum2F + totalIncoming;
             const remainAfter = window.capacity2F - afterAll;
-            predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측</th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정 전량(${totalIncoming.toLocaleString()}장) 입고 후에도 여유 ${remainAfter.toLocaleString()}장<br><span style="font-size:11px; color:#888;">예상 적재: ${afterAll.toLocaleString()} / ${window.capacity2F.toLocaleString()}장</span></td></tr>`;
+            
+            // 일평균 입고량 기반 만재 예측 날짜 계산
+            const firstDate = sortedDates[0];
+            const lastDate = sortedDates[sortedDates.length - 1];
+            const d1 = new Date(firstDate);
+            const d2 = new Date(lastDate);
+            const daySpan = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
+            const dailyAvg = totalIncoming / daySpan;
+            
+            let estimatedDate = '';
+            if (dailyAvg > 0) {
+                const extraDays = Math.ceil(remainAfter / dailyAvg);
+                const estDate = new Date(d2);
+                estDate.setDate(estDate.getDate() + extraDays);
+                estimatedDate = estDate.toISOString().slice(0, 10);
+            }
+            
+            if (estimatedDate && dailyAvg > 0) {
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일</th><td style="font-weight:bold; color:#2e7d32; text-align:right;">${estimatedDate} (추정)<br><span style="font-size:11px; color:#888;">일평균 입고 ${Math.round(dailyAvg).toLocaleString()}장 기준, 입고예정 후 여유 ${remainAfter.toLocaleString()}장</span></td></tr>`;
+            } else {
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측</th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정 전량 입고 후에도 여유 ${remainAfter.toLocaleString()}장<br><span style="font-size:11px; color:#888;">예상 적재: ${afterAll.toLocaleString()} / ${window.capacity2F.toLocaleString()}장</span></td></tr>`;
+            }
         }
         
         html += `<div style="font-size:15px; font-weight:bold; margin-bottom:15px; color:var(--primary); text-align:center;">🏢 2층 전체 창고 사용률: ${rate2F}%</div><table class="usage-table" style="width:100%;"><tr><th style="background:#eef1ff; width: 40%;">총 적재가능수량</th><td style="text-align: right;"><input type="number" id="input-cap-2f" value="${window.capacity2F}" style="width:80px; padding:3px; text-align:right; font-size:13px; font-weight:bold;"> 장 <button onclick="saveCapacity2F()" style="padding:4px 8px; margin-left:5px; font-size:11px; background:var(--primary); color:white; border:none; border-radius:3px; cursor:pointer;">기준변경</button></td></tr><tr><th style="background:#eef1ff;">현재 적재수량</th><td style="font-weight:bold; color:var(--primary); text-align: right;">${sum2F.toLocaleString()} 장</td></tr><tr><th style="background:#eef1ff;">남은 수량</th><td style="font-weight:bold; color:#ff5252; text-align: right;">${remaining2F.toLocaleString()} 장</td></tr>${predictionHtml}</table>`;
