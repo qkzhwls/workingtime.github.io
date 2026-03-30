@@ -26,9 +26,9 @@ export function initializeAppListeners() {
 
     // ✅ [신규] 중국제작 버튼 (PC + 모바일)
     document.getElementById('btn-china-production')?.addEventListener('click', () => {
-        window.open('china.html', '_blank');
+        window.open('china-stock-goods.html', '_blank');
     });
     document.getElementById('btn-china-production-mobile')?.addEventListener('click', () => {
-        window.open('china.html', '_blank');
+        window.open('china-stock-goods.html', '_blank');
     });
 }
