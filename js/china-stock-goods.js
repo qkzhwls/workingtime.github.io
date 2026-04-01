@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.2
+// 중국제작 미발계산기 Ver 1.3
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -143,7 +143,7 @@ async function loadStockLogFromFirebase() {
     } catch (e) { console.error('미발재고로그 로드 실패:', e); }
 }
 
-// ★ Ver 1.2: 청크 사이즈 축소 + 배치 분할 (Firestore 10MB 제한 대응)
+// ★ Ver 1.3: 경량화 제거, 전체 데이터 저장, 청크 30행 + 배치 분할
 async function saveChunkedData(rows, subCollection) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
     try {
@@ -158,40 +158,21 @@ async function saveChunkedData(rows, subCollection) {
             }
         }
 
-        // 2) 데이터를 필요한 컬럼만 추출하여 경량화
-        const lightRows = rows.map(row => {
-            const light = {};
-            // 핵심 컬럼만 유지
-            const keepKeys = ['어드민상품코드','상품코드','상품명','옵션','비고',
-                '1차패킹리스트출고일','1차패킹리스트출고수량',
-                '2차패킹리스트출고일','2차패킹리스트출고수량',
-                '3차패킹리스트출고일','3차패킹리스트출고수량',
-                '4차패킹리스트출고일','4차패킹리스트출고수량',
-                '5차패킹리스트출고일','5차패킹리스트출고수량',
-                '6차패킹리스트출고일','6차패킹리스트출고수량',
-                // 미발재고로그용
-                '정상재고','부족수량','로케이션'
-            ];
-            for (const key of Object.keys(row)) {
-                if (keepKeys.includes(key)) light[key] = row[key];
-            }
-            return light;
-        });
-
-        // 3) 청크 50행씩, 배치 400건씩 분할 커밋
-        const CHUNK_SIZE = 50;
+        // 2) 청크 30행씩, 배치 400건씩 분할 커밋 (경량화 없이 전체 저장)
+        const CHUNK_SIZE = 30;
         const BATCH_LIMIT = 400;
         let chunkCount = 0;
         let batch = writeBatch(db);
         let batchOps = 0;
 
-        for (let i = 0; i < lightRows.length; i += CHUNK_SIZE) {
-            const chunk = lightRows.slice(i, i + CHUNK_SIZE);
+        for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+            const chunk = rows.slice(i, i + CHUNK_SIZE);
             batch.set(doc(db, collName, `CHUNK_${chunkCount}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
             chunkCount++;
             batchOps++;
 
             if (batchOps >= BATCH_LIMIT) {
+                showLoading(`💾 저장 중... (${i + CHUNK_SIZE}/${rows.length})`);
                 await batch.commit();
                 batch = writeBatch(db);
                 batchOps = 0;
@@ -636,7 +617,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.2 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.3 초기화 완료');
 }
 
 init();
