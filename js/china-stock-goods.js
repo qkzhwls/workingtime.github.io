@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.1
+// 중국제작 미발계산기 Ver 1.5
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -27,7 +27,6 @@ let savedDates = [];
 // =========================================================
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 
-// ★ Ver 1.4.1: 상품명 추출 헬퍼 (상품명 || 공급처상품명 fallback)
 function getProductName(row) {
     return row['상품명'] || row['공급처상품명'] || '';
 }
@@ -148,36 +147,53 @@ async function loadStockLogFromFirebase() {
     } catch (e) { console.error('미발재고로그 로드 실패:', e); }
 }
 
-// ★ Ver 1.4: setDoc 개별 저장
+// ★ Ver 1.5: 소배치 writeBatch (20청크씩 커밋, 10MB 안전)
 async function saveChunkedData(rows, subCollection) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
     try {
+        // 1) 기존 데이터 삭제 (소배치)
         const existing = await getDocs(collection(db, collName));
         if (existing.size > 0) {
-            showLoading(`🗑️ 기존 ${subCollection} 데이터 삭제 중... (${existing.size}건)`);
-            let delCount = 0;
-            for (const docSnap of existing.docs) {
-                await deleteDoc(docSnap.ref);
-                delCount++;
-                if (delCount % 50 === 0) showLoading(`🗑️ 기존 데이터 삭제 중... (${delCount}/${existing.size})`);
+            showLoading(`🗑️ 기존 ${subCollection} 삭제 중...`);
+            const delDocs = existing.docs;
+            for (let i = 0; i < delDocs.length; i += 20) {
+                let delBatch = writeBatch(db);
+                delDocs.slice(i, i + 20).forEach(d => delBatch.delete(d.ref));
+                await delBatch.commit();
             }
         }
 
+        // 2) 30행씩 청크, 20청크씩 소배치 커밋
         const CHUNK_SIZE = 30;
-        let chunkCount = 0;
+        const BATCH_LIMIT = 20;
         const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
+        let chunkCount = 0;
+        let batch = writeBatch(db);
+        let batchOps = 0;
+        let commitCount = 0;
 
         for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
             const chunk = rows.slice(i, i + CHUNK_SIZE);
-            await setDoc(doc(db, collName, `CHUNK_${chunkCount}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            batch.set(doc(db, collName, `CHUNK_${chunkCount}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
             chunkCount++;
-            if (chunkCount % 10 === 0 || chunkCount === totalChunks) {
+            batchOps++;
+
+            if (batchOps >= BATCH_LIMIT || chunkCount === totalChunks) {
+                await batch.commit();
+                commitCount++;
+                batch = writeBatch(db);
+                batchOps = 0;
                 const pct = Math.round((chunkCount / totalChunks) * 100);
                 showLoading(`💾 ${subCollection} 저장 중... ${chunkCount}/${totalChunks} (${pct}%)`);
             }
         }
+
+        console.log(`✅ ${subCollection}: ${rows.length}행 → ${chunkCount}청크 → ${commitCount}회 커밋 완료`);
         return chunkCount;
-    } catch (e) { console.error(`${subCollection} 저장 실패:`, e); throw e; }
+    } catch (e) {
+        console.error(`${subCollection} 저장 실패:`, e);
+        throw e;
+    }
 }
 
 // =========================================================
@@ -236,7 +252,6 @@ async function syncOrderData() {
             showLoading('🔄 오더리스트(원본) 다운로드 중...');
             const d = await fetchCSV(csvUrlOrder);
             orderDataOriginal = d;
-            showLoading(`💾 오더리스트(원본) ${d.length}건 저장 시작...`);
             await saveChunkedData(d, 'Order');
             cO = d.length;
         }
@@ -244,7 +259,6 @@ async function syncOrderData() {
             showLoading('🔄 오더리스트(사입) 다운로드 중...');
             const d = await fetchCSV(csvUrlBuy);
             orderDataBuy = d;
-            showLoading(`💾 오더리스트(사입) ${d.length}건 저장 시작...`);
             await saveChunkedData(d, 'Buy');
             cB = d.length;
         }
@@ -300,7 +314,6 @@ function handleStockLogUpload(e) {
                 if (code) stockLogData[code] = row;
             });
 
-            showLoading(`💾 미발재고로그 ${rows.length}건 저장 시작...`);
             await saveChunkedData(rows, 'StockLog');
             hideLoading();
             showToast(`✅ 미발재고로그 ${rows.length}건 업로드 완료`);
@@ -335,7 +348,6 @@ function applyDates() {
 
     let resultMap = {};
 
-    // ★ 원본 스캔
     orderDataOriginal.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
@@ -350,7 +362,6 @@ function applyDates() {
         }
     });
 
-    // ★ 사입 스캔 (Ver 1.4.1: getProductName으로 공급처상품명 fallback)
     orderDataBuy.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
@@ -518,11 +529,11 @@ async function clearAllData() {
         for (const sub of ['Order','Buy','StockLog']) {
             const snap = await getDocs(collection(db, CHINA_COLLECTION+'_'+sub));
             if (snap.size > 0) {
-                let count = 0;
-                for (const docSnap of snap.docs) {
-                    await deleteDoc(docSnap.ref);
-                    count++;
-                    if (count % 50 === 0) showLoading(`🗑️ ${sub} 삭제 중... (${count}/${snap.size})`);
+                const docs = snap.docs;
+                for (let i = 0; i < docs.length; i += 20) {
+                    let b = writeBatch(db);
+                    docs.slice(i, i + 20).forEach(d => b.delete(d.ref));
+                    await b.commit();
                 }
             }
         }
@@ -612,7 +623,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.1 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.5 초기화 완료');
 }
 
 init();
