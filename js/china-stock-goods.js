@@ -26,7 +26,6 @@ let savedDates = [];
 // 유틸리티 & 헬퍼
 // =========================================================
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
-
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
 function getProductName(row) {
@@ -57,13 +56,19 @@ function normalizeDate(dateStr) {
 }
 
 function showLoading(text) {
-    document.getElementById('loading-text').innerText = text;
-    document.getElementById('loading-overlay').style.display = 'flex';
+    const el = document.getElementById('loading-text');
+    if (el) el.innerText = text;
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) overlay.style.display = 'flex';
 }
-function hideLoading() { document.getElementById('loading-overlay').style.display = 'none'; }
+function hideLoading() { 
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) overlay.style.display = 'none'; 
+}
 
 function showToast(msg) {
     const t = document.getElementById('toast');
+    if (!t) return;
     t.innerText = msg;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2500);
@@ -81,7 +86,6 @@ function closeAllMenus() {
     document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
 }
 
-// 동시 실행 제어 및 지연 추가 (할당량 초과 방지)
 async function runConcurrent(tasks, concurrency = 2) {
     const results = [];
     let idx = 0;
@@ -89,7 +93,7 @@ async function runConcurrent(tasks, concurrency = 2) {
         while (idx < tasks.length) {
             const i = idx++;
             results[i] = await tasks[i]();
-            await sleep(150); // 배치 사이의 미세 지연
+            await sleep(150); 
         }
     }
     const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker());
@@ -98,7 +102,7 @@ async function runConcurrent(tasks, concurrency = 2) {
 }
 
 // =========================================================
-// Firebase 로드/저장 (Order/Buy 저장 코드 삭제됨)
+// Firebase 로드/저장
 // =========================================================
 async function loadConfig() {
     try {
@@ -153,22 +157,18 @@ async function loadStockLogFromFirebase() {
     } catch (e) { console.error('미발재고로그 로드 실패:', e); }
 }
 
-// ★ Ver 1.7: StockLog 전용 고성능 저장 (Retry 로직 포함)
 async function saveChunkedData(rows, subCollection, onProgress) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
     try {
         const existing = await getDocs(collection(db, collName));
         if (existing.size > 0) {
             if (onProgress) onProgress(`🗑️ 기존 ${subCollection} 삭제 중...`);
-            const delDocs = existing.docs;
-            // 삭제는 안정성을 위해 순차적으로 처리
-            for (const d of delDocs) {
+            for (const d of existing.docs) {
                 await deleteDoc(d.ref);
             }
         }
 
-        const CHUNK_SIZE = 500; // 청크 크기 대폭 상향
-        const BATCH_LIMIT = 1;  // Quota 안전을 위해 1배치당 1청크
+        const CHUNK_SIZE = 500; 
         const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
         const batchTasks = [];
 
@@ -181,22 +181,19 @@ async function saveChunkedData(rows, subCollection, onProgress) {
                 while (retryCount < 3) {
                     try {
                         let b = writeBatch(db);
-                        b.set(doc(db, collName, `CHUNK_${chunkIdx}`), { 
-                            dataStr: JSON.stringify(chunk), 
-                            updatedAt: new Date() 
-                        });
+                        b.set(doc(db, collName, `CHUNK_${chunkIdx}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
                         await b.commit();
                         if (onProgress) onProgress(`💾 ${subCollection} 저장 중... ${chunkIdx + 1}/${totalChunks}`);
                         return;
                     } catch (err) {
                         retryCount++;
                         if (retryCount >= 3) throw err;
-                        await sleep(1000 * retryCount); // 지수 백오프
+                        await sleep(1000 * retryCount);
                     }
                 }
             });
         }
-        await runConcurrent(batchTasks, 2); // 동시성 2로 제한
+        await runConcurrent(batchTasks, 2);
         return totalChunks;
     } catch (e) { throw e; }
 }
@@ -243,7 +240,7 @@ async function fetchCSV(url) {
 }
 
 // =========================================================
-// ★ Ver 1.7: 오더리스트 시트 동기화 (Firebase 저장 없이 메모리 로드만)
+// 동기화 로직 (메모리 로드)
 // =========================================================
 async function syncOrderData(silent = false) {
     if (!csvUrlOrder && !csvUrlBuy) {
@@ -273,7 +270,6 @@ async function syncOrderData(silent = false) {
             hideLoading();
             alert('🚨 동기화 실패: ' + e.message);
         }
-        console.error('동기화 에러:', e);
     }
 }
 
@@ -290,29 +286,9 @@ function handleStockLogUpload(e) {
         try {
             const text = evt.target.result;
             let rows = [];
-
-            if (text.trim().startsWith('<') || text.includes('<table') || text.includes('<html')) {
-                const parser = new DOMParser();
-                const htmlDoc = parser.parseFromString(text, 'text/html');
-                const table = htmlDoc.querySelector('table');
-                if (!table) throw new Error('HTML 테이블 오류');
-                const trs = table.querySelectorAll('tr');
-                let headers = [];
-                trs.forEach((tr, idx) => {
-                    const cells = tr.querySelectorAll('td, th');
-                    const vals = Array.from(cells).map(c => c.textContent.trim());
-                    if (idx === 0) headers = vals;
-                    else {
-                        let obj = {};
-                        vals.forEach((v, j) => { if (headers[j]) obj[headers[j]] = v; });
-                        if (obj['상품코드']) rows.push(obj);
-                    }
-                });
-            } else {
-                const ab = new Uint8Array(text.split('').map(c => c.charCodeAt(0))).buffer;
-                const wb = XLSX.read(ab, { type: 'array' });
-                rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
-            }
+            const ab = new Uint8Array(text.split('').map(c => c.charCodeAt(0))).buffer;
+            const wb = XLSX.read(ab, { type: 'array' });
+            rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
 
             stockLogData = {};
             rows.forEach(row => {
@@ -323,7 +299,7 @@ function handleStockLogUpload(e) {
             await saveChunkedData(rows, 'StockLog', (msg) => showLoading(msg));
             hideLoading();
             showToast(`✅ 미발재고로그 ${rows.length}건 저장 완료`);
-            if (tableData.length > 0) buildTableFromData();
+            if (tableData.length > 0) applyDates();
         } catch (err) {
             hideLoading();
             alert('🚨 실패: ' + err.message);
@@ -334,7 +310,7 @@ function handleStockLogUpload(e) {
 }
 
 // =========================================================
-// 출고일 적용 → 테이블 생성 (기존 유지)
+// 출고일 적용 및 테이블 렌더링
 // =========================================================
 function applyDates() {
     const inputDates = [];
@@ -405,15 +381,6 @@ function applyDates() {
     showToast(`✅ ${tableData.length}개 상품 매칭 완료`);
 }
 
-function clearDates() {
-    for (let i = 1; i <= 8; i++) { const el = document.getElementById(`date-${i}`); if (el) el.value = ''; }
-    tableData = []; filteredData = [];
-    renderTable(); updateSummary(); saveConfig();
-}
-
-// =========================================================
-// 테이블 렌더링 & 검색/정렬 (기존 유지)
-// =========================================================
 function renderTable() {
     const tbody = document.getElementById('table-body');
     if (!filteredData || filteredData.length === 0) {
@@ -423,14 +390,14 @@ function renderTable() {
     let html = '';
     filteredData.forEach((row, idx) => {
         html += `<tr>
-            <td style="color:#888; font-size:12px;">${idx + 1}</td>
+            <td>${idx + 1}</td>
             <td class="code-cell" data-code="${row.code}">${row.code}</td>
-            <td style="text-align:left; padding-left:10px;">${row.name}</td>
-            <td style="font-size:12px;">${row.option}</td>
+            <td style="text-align:left;">${row.name}</td>
+            <td>${row.option}</td>
             <td style="font-weight:bold;">${row.arrivalQty.toLocaleString()}</td>
-            <td style="font-weight:bold; color:${row.mibalQty > 0 ? '#d32f2f' : '#333'};">${row.mibalQty.toLocaleString()}</td>
+            <td style="color:${row.mibalQty > 0 ? '#d32f2f' : '#333'}; font-weight:bold;">${row.mibalQty.toLocaleString()}</td>
             <td>${row.totalStock.toLocaleString()}</td>
-            <td style="font-size:12px;">${row.location}</td>
+            <td>${row.location}</td>
             <td class="capacity-auto">${row.capacity || '-'}</td>
             <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed">${row.confirmed}</td>
             <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td>
@@ -441,38 +408,10 @@ function renderTable() {
     tbody.innerHTML = html;
 }
 
-function buildTableFromData() {
-    tableData.forEach(item => {
-        const log = stockLogData[item.code] || {};
-        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
-        item.totalStock = parseInt(log['정상재고']) || 0;
-        item.mibalQty = parseInt(log['부족수량']) || 0;
-        item.location = loc;
-        item.capacity = getCapacityByLocation(loc);
-    });
-    filteredData = [...tableData];
-    applySearch();
-    renderTable();
-    updateSummary();
-}
-
 function updateSummary() {
     document.getElementById('sum-sku').textContent = filteredData.length.toLocaleString();
     document.getElementById('sum-arrival').textContent = filteredData.reduce((s, d) => s + (d.arrivalQty || 0), 0).toLocaleString();
     document.getElementById('sum-mibal').textContent = filteredData.reduce((s, d) => s + (d.mibalQty || 0), 0).toLocaleString();
-}
-
-let saveTimeout = null;
-function onCellEdit(el) {
-    const code = el.dataset.code;
-    const field = el.dataset.field;
-    const value = el.textContent.trim();
-    if (!editedCells[code]) editedCells[code] = {};
-    editedCells[code][field] = value;
-    const item = tableData.find(d => d.code === code);
-    if (item) item[field] = value;
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => { saveEditedCells(); showToast('💾 자동 저장됨'); }, 1000);
 }
 
 function applySearch() {
@@ -495,68 +434,27 @@ function sortTable(key) {
     renderTable();
 }
 
-function downloadExcel() {
-    if (!filteredData || filteredData.length === 0) { alert('데이터가 없습니다.'); return; }
-    const headers = ['상품코드','상품명','옵션명','도착수량','미발수량','총재고','로케이션','적재량','입고확인','부족수량','직진배송','비고'];
-    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style>td{mso-number-format:"\\@";}.header{font-weight:bold;background:#FFE0B2;text-align:center;border:1px solid #ccc;padding:6px;}.cell{border:1px solid #ddd;padding:4px 8px;text-align:center;}.num{mso-number-format:"0";text-align:right;}</style><table>`;
-    html += `<tr>${headers.map(h=>`<td class="header">${h}</td>`).join('')}</tr>`;
-    filteredData.forEach(r => {
-        html += `<tr><td class="cell">${r.code}</td><td>${r.name}</td><td>${r.option}</td><td class="num">${r.arrivalQty}</td><td class="num">${r.mibalQty}</td><td class="num">${r.totalStock}</td><td>${r.location}</td><td class="num">${r.capacity||''}</td><td>${r.confirmed||''}</td><td>${r.shortage||''}</td><td>${r.directShip||''}</td><td>${r.memo||''}</td></tr>`;
-    });
-    html += '</table></html>';
-    const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `미발계산기_${new Date().toISOString().slice(0,10)}.xls`;
-    a.click();
-}
-
-async function clearAllData() {
-    if (!confirm('미발재고로그와 모든 편집 내용을 초기화하시겠습니까?')) return;
-    showLoading('🗑️ 초기화 중...');
-    try {
-        const snap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog'));
-        for (const docSnap of snap.docs) { await deleteDoc(docSnap.ref); }
-        await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: {}, updatedAt: new Date() });
-        stockLogData={}; tableData=[]; filteredData=[]; editedCells={};
-        renderTable(); updateSummary(); hideLoading();
-        alert('✅ 초기화 완료');
-    } catch (e) { hideLoading(); alert('🚨 실패: ' + e.message); }
-}
-
-function openSheetSettingsModal() {
-    document.getElementById('modal-csv-order').value = csvUrlOrder || '';
-    document.getElementById('modal-csv-buy').value = csvUrlBuy || '';
-    document.getElementById('sheet-settings-modal').style.display = 'flex';
-}
-function closeSheetSettingsModal() {
-    document.getElementById('sheet-settings-modal').style.display = 'none';
-}
-async function saveSheetSettings() {
-    csvUrlOrder = document.getElementById('modal-csv-order').value.trim();
-    csvUrlBuy = document.getElementById('modal-csv-buy').value.trim();
-    await saveConfig();
-    closeSheetSettingsModal();
-    showToast('✅ 저장 완료. 데이터를 동기화합니다.');
-    syncOrderData();
+function onCellEdit(el) {
+    const code = el.dataset.code;
+    const field = el.dataset.field;
+    const value = el.textContent.trim();
+    if (!editedCells[code]) editedCells[code] = {};
+    editedCells[code][field] = value;
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => { saveEditedCells(); showToast('💾 자동 저장됨'); }, 1000);
 }
 
 function setupEventListeners() {
     document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
         e.stopPropagation();
         const menu = document.getElementById('main-tools-menu');
-        const isVisible = menu.style.display === 'block';
-        closeAllMenus();
-        if (!isVisible) menu.style.display = 'block';
+        if (menu) menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
     });
     document.addEventListener('click', () => closeAllMenus());
     document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { closeAllMenus(); openSheetSettingsModal(); });
-    document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
     document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
-    document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
-    document.getElementById('btn-excel-download')?.addEventListener('click', downloadExcel);
     document.getElementById('search-input')?.addEventListener('input', applySearch);
     document.querySelectorAll('.th-sortable').forEach(th => {
         th.addEventListener('click', () => sortTable(th.dataset.sort));
@@ -564,14 +462,17 @@ function setupEventListeners() {
     document.getElementById('table-body')?.addEventListener('focusout', (e) => {
         if (e.target.classList.contains('editable-cell')) onCellEdit(e.target);
     });
-    document.getElementById('btn-sheet-cancel')?.addEventListener('click', closeSheetSettingsModal);
     document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
 }
 
 // =========================================================
-// 초기화 (★ Ver 1.7: 로드 시 시트 자동 동기화)
+// 초기화 (★ HTML 수정 없이 1.7 표시 적용)
 // =========================================================
 async function init() {
+    // [강제 버전 표시 로직]
+    const badge = document.querySelector('.version-badge');
+    if (badge) badge.innerHTML = '🚀 Ver 1.7';
+    
     setupEventListeners();
     showLoading('📦 최신 데이터 동기화 및 로드 중...');
 
@@ -579,17 +480,13 @@ async function init() {
     await Promise.all([
         loadEditedCells(),
         loadStockLogFromFirebase(),
-        syncOrderData(true) // 로드 시 자동으로 CSV 동기화 (알림 없이)
+        syncOrderData(true)
     ]);
 
     hideLoading();
-
-    const hasDate = savedDates.some(d => d && d.trim());
-    if (hasDate && (orderDataOriginal.length > 0 || orderDataBuy.length > 0)) {
+    if (savedDates.some(d => d && d.trim()) && (orderDataOriginal.length > 0 || orderDataBuy.length > 0)) {
         applyDates();
     }
-
-    console.log('🏭 중국제작 미발계산기 Ver 1.7 초기화 완료');
 }
 
 init();
