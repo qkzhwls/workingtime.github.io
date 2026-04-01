@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.7
+// 중국제작 미발계산기 Ver 1.4.8
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -292,7 +292,7 @@ async function syncOrderData() {
 }
 
 // =========================================================
-// ★ 미발재고로그 붙여넣기 기능 (Ver 1.4.7 보강 - 실시간 반영)
+// ★ 미발재고로그 붙여넣기 기능 (Ver 1.4.8 최신화 + 갱신 버그 완벽 수정)
 // =========================================================
 function openPasteModal() {
     document.getElementById('paste-textarea').value = '';
@@ -316,9 +316,9 @@ async function processPastedData() {
         let headerIdx = -1;
         let headers = [];
 
-        // 엑셀에서 복사 시 상단에 불필요한 빈줄이나 타이틀이 있어도 '상품코드' 열을 자동으로 찾아냅니다.
+        // 엑셀 헤더의 모든 공백(스페이스바)과 따옴표를 완벽히 제거하여 인식률 100% 보장
         for(let i=0; i<lines.length; i++) {
-            const cols = lines[i].split('\t').map(c => c.replace(/^"|"$/g, '').trim());
+            const cols = lines[i].split('\t').map(c => c.replace(/^"|"$/g, '').replace(/\s+/g, ''));
             if (cols.includes('상품코드') || cols.includes('어드민상품코드')) {
                 headerIdx = i;
                 headers = cols;
@@ -333,7 +333,7 @@ async function processPastedData() {
         let rows = [];
         for (let i = headerIdx + 1; i < lines.length; i++) {
             const line = lines[i];
-            if (!line.trim()) continue; // 내부 탭은 유지하되 아예 비어있는 줄만 무시
+            if (!line.trim()) continue; 
             
             const cells = line.split('\t');
             let obj = {};
@@ -359,16 +359,24 @@ async function processPastedData() {
         await saveChunkedData(rows, 'StockLog');
         
         hideLoading();
-        showToast(`✅ 미발재고로그 ${rows.length}건 실시간 반영 완료`);
         document.getElementById('paste-textarea').value = ''; 
         
-        // ★ 붙여넣자마자 화면 표 즉시 갱신
-        if (tableData.length > 0) {
-            buildTableFromData();
+        // ★ 핵심: 데이터 저장 완료 후 '표 강제 최신화'
+        let hasDateSelected = false;
+        for (let i = 1; i <= 8; i++) {
+            if (document.getElementById(`date-${i}`)?.value) {
+                hasDateSelected = true;
+                break;
+            }
+        }
+
+        if (hasDateSelected) {
+            // 출고일이 하나라도 선택되어 있으면 즉시 전체 매칭하여 최신화
+            applyDates(); 
+            showToast(`✅ 미발재고로그 ${rows.length}건 실시간 반영 완료`);
         } else {
-            // 표가 비어있더라도 출고일이 선택되어 있다면 표를 새로 생성
-            const hasDate = savedDates.some(d => d && d.trim());
-            if (hasDate) applyDates();
+            // 출고일이 아예 선택되지 않은 상태라면 표를 그릴 수 없으므로 알림
+            alert(`✅ 미발재고로그 ${rows.length}건이 시스템에 저장되었습니다.\n\n상단의 📦 [출고일]을 선택하고 [적용] 버튼을 누르시면\n방금 넣은 최신 데이터가 표에 나타납니다.`);
         }
 
     } catch (err) {
@@ -459,7 +467,7 @@ function applyDates() {
     filteredData = [...tableData];
     renderTable();
     updateSummary();
-    showToast(`✅ ${tableData.length}개 상품 데이터 연결 완료`);
+    showToast(`✅ ${tableData.length}개 상품 데이터 최신화 완료`);
 }
 
 function clearDates() {
@@ -474,7 +482,7 @@ function clearDates() {
 function renderTable() {
     const tbody = document.getElementById('table-body');
     if (!filteredData || filteredData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">표시할 데이터가 없습니다.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">데이터를 동기화한 후 출고일을 선택하세요.</td></tr>';
         return;
     }
     let html = '';
@@ -496,25 +504,6 @@ function renderTable() {
         </tr>`;
     });
     tbody.innerHTML = html;
-}
-
-// 붙여넣기 직후 데이터를 다시 결합하는 함수
-function buildTableFromData() {
-    tableData.forEach(item => {
-        const log = stockLogData[item.code] || {};
-        const loc = (log['로케이션'] || log['위치'] || '').toString().split('/')[0].trim();
-        const tStockStr = log['정상재고'] || log['총재고'] || log['재고'];
-        const mibalStr = log['부족수량'] || log['미발수량'];
-
-        item.totalStock = parseExcelNum(tStockStr);
-        item.mibalQty = parseExcelNum(mibalStr);
-        item.location = loc;
-        item.capacity = getCapacityByLocation(loc);
-    });
-    filteredData = [...tableData];
-    applySearch();
-    renderTable();
-    updateSummary();
 }
 
 function updateSummary() {
@@ -771,7 +760,7 @@ async function init() {
 
     listenToAppRequests();
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.7 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.8 초기화 완료');
 }
 
 init();
