@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4
+// 중국제작 미발계산기 Ver 1.4.1
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -26,6 +26,11 @@ let savedDates = [];
 // 유틸리티
 // =========================================================
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
+
+// ★ Ver 1.4.1: 상품명 추출 헬퍼 (상품명 || 공급처상품명 fallback)
+function getProductName(row) {
+    return row['상품명'] || row['공급처상품명'] || '';
+}
 
 function formatExcelDate(excelDate) {
     if (!excelDate || excelDate.toString().trim() === '') return '';
@@ -143,11 +148,10 @@ async function loadStockLogFromFirebase() {
     } catch (e) { console.error('미발재고로그 로드 실패:', e); }
 }
 
-// ★ Ver 1.4: setDoc 개별 저장 (10MB 배치 제한 완전 해결)
+// ★ Ver 1.4: setDoc 개별 저장
 async function saveChunkedData(rows, subCollection) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
     try {
-        // 1) 기존 데이터 삭제 (개별 deleteDoc)
         const existing = await getDocs(collection(db, collName));
         if (existing.size > 0) {
             showLoading(`🗑️ 기존 ${subCollection} 데이터 삭제 중... (${existing.size}건)`);
@@ -155,37 +159,25 @@ async function saveChunkedData(rows, subCollection) {
             for (const docSnap of existing.docs) {
                 await deleteDoc(docSnap.ref);
                 delCount++;
-                if (delCount % 50 === 0) {
-                    showLoading(`🗑️ 기존 데이터 삭제 중... (${delCount}/${existing.size})`);
-                }
+                if (delCount % 50 === 0) showLoading(`🗑️ 기존 데이터 삭제 중... (${delCount}/${existing.size})`);
             }
         }
 
-        // 2) 청크 30행씩 나눠서 setDoc 개별 저장
         const CHUNK_SIZE = 30;
         let chunkCount = 0;
         const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
 
         for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
             const chunk = rows.slice(i, i + CHUNK_SIZE);
-            await setDoc(doc(db, collName, `CHUNK_${chunkCount}`), {
-                dataStr: JSON.stringify(chunk),
-                updatedAt: new Date()
-            });
+            await setDoc(doc(db, collName, `CHUNK_${chunkCount}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
             chunkCount++;
-
-            // 10건마다 진행률 업데이트
             if (chunkCount % 10 === 0 || chunkCount === totalChunks) {
                 const pct = Math.round((chunkCount / totalChunks) * 100);
                 showLoading(`💾 ${subCollection} 저장 중... ${chunkCount}/${totalChunks} (${pct}%)`);
             }
         }
-
         return chunkCount;
-    } catch (e) {
-        console.error(`${subCollection} 저장 실패:`, e);
-        throw e;
-    }
+    } catch (e) { console.error(`${subCollection} 저장 실패:`, e); throw e; }
 }
 
 // =========================================================
@@ -343,6 +335,7 @@ function applyDates() {
 
     let resultMap = {};
 
+    // ★ 원본 스캔
     orderDataOriginal.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
@@ -352,11 +345,12 @@ function applyDates() {
             if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsOrig[idx]]) || 0); }
         });
         if (matched) {
-            if (!resultMap[code]) resultMap[code] = { code, name: row['상품명']||'', option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
+            if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
             resultMap[code].arrivalQty += totalQty;
         }
     });
 
+    // ★ 사입 스캔 (Ver 1.4.1: getProductName으로 공급처상품명 fallback)
     orderDataBuy.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
@@ -366,7 +360,7 @@ function applyDates() {
             if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsBuy[idx]]) || 0); }
         });
         if (matched) {
-            if (!resultMap[code]) resultMap[code] = { code, name: row['상품명']||'', option: row['옵션']||'', arrivalQty: 0, bigoY: '' };
+            if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: '' };
             resultMap[code].arrivalQty += totalQty;
         }
     });
@@ -618,7 +612,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.1 초기화 완료');
 }
 
 init();
