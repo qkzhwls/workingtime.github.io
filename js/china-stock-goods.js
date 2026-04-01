@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.3
+// 중국제작 미발계산기 Ver 1.4.4
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -56,8 +56,38 @@ function closeAllMenus() {
     document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
 }
 
+// 엑셀 날짜를 "O월 O일출고" 형태로 변환
+function formatToKoreanDate(raw) {
+    if (!raw) return '';
+    let d = String(raw).trim();
+    
+    // 엑셀 일련번호(숫자형) 처리 (예: 45383)
+    if (!isNaN(d) && Number(d) > 30000) {
+        const date = new Date((Number(d) - 25569) * 86400 * 1000);
+        return `${date.getMonth() + 1}월${date.getDate()}일출고`;
+    }
+
+    // 문자열 날짜 처리 (YYYY-MM-DD, YYYY/MM/DD, MM.DD 등)
+    let parts = d.split(/[-./]/);
+    let m, day;
+    if (parts.length === 3) {
+        m = parseInt(parts[1], 10);
+        day = parseInt(parts[2], 10);
+    } else if (parts.length === 2) {
+        m = parseInt(parts[0], 10);
+        day = parseInt(parts[1], 10);
+    }
+    
+    if (m && day && !isNaN(m) && !isNaN(day)) {
+        return `${m}월${day}일출고`;
+    }
+    
+    // 파싱 불가 시 원본 텍스트에 출고 붙임
+    return `${d}출고`;
+}
+
 // =========================================================
-// 드롭다운 날짜/수량 동적 생성 (Ver 1.4.3 추가)
+// 드롭다운 날짜/수량 동적 생성
 // =========================================================
 function populateDynamicDates() {
     const dateMap = {};
@@ -85,10 +115,11 @@ function populateDynamicDates() {
     for(let i = 1; i <= 8; i++) {
         const selectEl = document.getElementById(`date-${i}`);
         if(selectEl) {
-            const currentVal = savedDates[i-1] || selectEl.value; // 기존에 선택했던 값 유지
+            const currentVal = savedDates[i-1] || selectEl.value;
             let html = '<option value="">선택</option>';
             sortedDates.forEach(d => {
-                html += `<option value="${d}">${d} (${dateMap[d].toLocaleString()})</option>`;
+                // value는 엑셀 원본 값 유지, 텍스트는 보기 좋은 형식으로 표시
+                html += `<option value="${d}">${formatToKoreanDate(d)} (${dateMap[d].toLocaleString()})</option>`;
             });
             selectEl.innerHTML = html;
             
@@ -265,7 +296,7 @@ async function syncOrderData() {
             cB = d.length;
         }
         
-        populateDynamicDates(); // 데이터 갱신 후 드롭다운 재구성
+        populateDynamicDates();
         
         hideLoading();
         alert(`✅ 오더리스트 동기화 완료!\n원본: ${cO}건 / 사입: ${cB}건`);
@@ -326,7 +357,7 @@ function handleStockLogUpload(e) {
             if (tableData.length > 0) buildTableFromData();
         } catch (err) {
             hideLoading();
-            alert('🚨 파일 파싱 실패: ' + err.message);
+            alert('🚨 파일 파 파싱 실패: ' + err.message);
             console.error(err);
         }
         e.target.value = '';
@@ -335,7 +366,7 @@ function handleStockLogUpload(e) {
 }
 
 // =========================================================
-// 패킹단위 적용 → 테이블 생성
+// 출고일 적용 → 테이블 생성
 // =========================================================
 function applyDates() {
     const inputUnits = [];
@@ -343,7 +374,7 @@ function applyDates() {
         const val = document.getElementById(`date-${i}`)?.value;
         if (val) inputUnits.push(val.toString().trim());
     }
-    if (inputUnits.length === 0) { alert('출고일(패킹단위)을 1개 이상 선택해주세요.'); return; }
+    if (inputUnits.length === 0) { alert('출고일을 1개 이상 선택해주세요.'); return; }
 
     saveConfig();
 
@@ -546,7 +577,7 @@ async function clearAllData() {
         await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: {}, updatedAt: new Date() });
         orderDataOriginal=[]; orderDataBuy=[]; stockLogData={}; tableData=[]; filteredData=[]; editedCells={};
         
-        populateDynamicDates(); // 데이터가 비워졌으므로 드롭다운도 초기화됨
+        populateDynamicDates();
         renderTable(); updateSummary(); hideLoading();
         alert('✅ 전체 초기화 완료');
     } catch (e) { hideLoading(); alert('🚨 초기화 실패: ' + e.message); }
@@ -624,7 +655,6 @@ async function init() {
     await loadOrderDataFromFirebase();
     await loadStockLogFromFirebase();
 
-    // 데이터 로드 직후 엑셀의 날짜/수량을 분석하여 드롭다운 자동 생성
     populateDynamicDates();
 
     hideLoading();
@@ -634,7 +664,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.3 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.4 초기화 완료');
 }
 
 init();
