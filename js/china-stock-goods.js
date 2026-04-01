@@ -1,8 +1,9 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.5
+// 중국제작 미발계산기 Ver 1.4.6
 
 import { initializeFirebase } from './config.js';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+// 플러터 앱 실시간 통신을 위한 onSnapshot 추가
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
 const CHINA_COLLECTION = 'ChinaStockGoods';
@@ -306,62 +307,75 @@ async function syncOrderData() {
 }
 
 // =========================================================
-// 미발재고로그 업로드
+// ★ 미발재고로그 붙여넣기 기능 (Ver 1.4.6 신규)
 // =========================================================
-function handleStockLogUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+function openPasteModal() {
+    document.getElementById('paste-textarea').value = '';
+    document.getElementById('paste-modal').style.display = 'flex';
+}
+function closePasteModal() {
+    document.getElementById('paste-modal').style.display = 'none';
+}
+async function processPastedData() {
+    const text = document.getElementById('paste-textarea').value.trim();
+    if (!text) {
+        alert('붙여넣은 데이터가 없습니다.');
+        return;
+    }
+
+    closePasteModal();
     showLoading('📂 미발재고로그 분석 중...');
 
-    const reader = new FileReader();
-    reader.onload = async function(evt) {
-        try {
-            const text = evt.target.result;
-            let rows = [];
+    try {
+        // 엔터(\n)를 기준으로 줄(행)을 분리합니다.
+        const lines = text.split(/\r?\n/);
+        if (lines.length < 2) throw new Error('데이터가 부족합니다. (헤더 포함 2줄 이상 필요)');
 
-            if (text.trim().startsWith('<') || text.includes('<table') || text.includes('<html')) {
-                const parser = new DOMParser();
-                const htmlDoc = parser.parseFromString(text, 'text/html');
-                const table = htmlDoc.querySelector('table');
-                if (!table) throw new Error('HTML 내에서 테이블을 찾을 수 없습니다.');
-                const trs = table.querySelectorAll('tr');
-                let headers = [];
-                trs.forEach((tr, idx) => {
-                    const cells = tr.querySelectorAll('td, th');
-                    const vals = Array.from(cells).map(c => c.textContent.trim());
-                    if (idx === 0) headers = vals;
-                    else {
-                        let obj = {};
-                        vals.forEach((v, j) => { if (headers[j]) obj[headers[j]] = v; });
-                        if (obj['상품코드']) rows.push(obj);
-                    }
-                });
-            } else {
-                const ab = new Uint8Array(text.split('').map(c => c.charCodeAt(0))).buffer;
-                const wb = XLSX.read(ab, { type: 'array' });
-                rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
-            }
+        // 첫 번째 줄은 탭(\t)을 기준으로 열(헤더 이름)을 분리합니다.
+        const headers = lines[0].split('\t').map(h => h.trim());
+        let rows = [];
 
-            stockLogData = {};
-            rows.forEach(row => {
-                const code = (row['상품코드'] || '').toString().trim();
-                if (code) stockLogData[code] = row;
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            const cells = line.split('\t');
+            let obj = {};
+            
+            cells.forEach((cell, idx) => {
+                if (headers[idx]) {
+                    obj[headers[idx]] = cell.trim();
+                }
             });
 
-            showLoading(`💾 미발재고로그 ${rows.length}건 저장 시작...`);
-            await saveChunkedData(rows, 'StockLog');
-            hideLoading();
-            showToast(`✅ 미발재고로그 ${rows.length}건 업로드 완료`);
-            if (tableData.length > 0) buildTableFromData();
-        } catch (err) {
-            hideLoading();
-            alert('🚨 파일 파싱 실패: ' + err.message);
-            console.error(err);
+            if (obj['상품코드']) {
+                rows.push(obj);
+            }
         }
-        e.target.value = '';
-    };
-    reader.readAsText(file, 'UTF-8');
+
+        stockLogData = {};
+        rows.forEach(row => {
+            const code = (row['상품코드'] || '').toString().trim();
+            if (code) stockLogData[code] = row;
+        });
+
+        showLoading(`💾 미발재고로그 ${rows.length}건 저장 시작...`);
+        await saveChunkedData(rows, 'StockLog');
+        
+        hideLoading();
+        showToast(`✅ 미발재고로그 ${rows.length}건 반영 완료`);
+        document.getElementById('paste-textarea').value = ''; 
+        
+        // 현재 표가 로드되어 있는 상태라면 바로 화면을 갱신합니다.
+        if (tableData.length > 0) buildTableFromData();
+
+    } catch (err) {
+        hideLoading();
+        alert('🚨 데이터 파싱 실패: ' + err.message + '\n\n엑셀에서 표 형태(헤더 포함)로 정상 복사했는지 확인해주세요.');
+        console.error(err);
+    }
 }
+
 
 // =========================================================
 // 출고일 적용 → 테이블 생성
@@ -538,18 +552,17 @@ function sortTable(key) {
 }
 
 // =========================================================
-// 엑셀 다운로드 (Ver 1.4.5: 상품코드, 수량 항목만 다운로드) & 전체 초기화
+// 엑셀 다운로드 & 전체 초기화
 // =========================================================
 function downloadExcel() {
     if (!filteredData || filteredData.length === 0) { alert('다운로드할 데이터가 없습니다.'); return; }
     
-    // 다운로드할 헤더 지정
+    // 다운로드할 헤더 지정 (상품코드, 수량만)
     const headers = ['상품코드', '수량'];
     
     let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style>td{mso-number-format:"\\@";}.header{font-weight:bold;background:#FFE0B2;text-align:center;border:1px solid #ccc;padding:6px;}.cell{border:1px solid #ddd;padding:4px 8px;text-align:center;}.num{mso-number-format:"0";text-align:right;}</style><table>`;
     html += `<tr>${headers.map(h=>`<td class="header">${h}</td>`).join('')}</tr>`;
     
-    // 선택된 두 개의 데이터(code, arrivalQty)만 테이블에 추가
     filteredData.forEach(r => {
         html += `<tr><td class="cell">${r.code}</td><td class="num">${r.arrivalQty}</td></tr>`;
     });
@@ -588,7 +601,7 @@ async function clearAllData() {
 }
 
 // =========================================================
-// 모달
+// 시트 설정 모달
 // =========================================================
 function openSheetSettingsModal() {
     document.getElementById('modal-csv-order').value = csvUrlOrder || '';
@@ -607,6 +620,72 @@ async function saveSheetSettings() {
 }
 
 // =========================================================
+// ★ 모바일 앱 연동 (Firebase 실시간 통신 브릿지)
+// =========================================================
+function listenToAppRequests() {
+    onSnapshot(doc(db, 'ChinaStockGoods', 'APP_REQUEST'), async (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        
+        if (!data.reqId || data.status === 'PROCESSED') return;
+
+        // 1. 바코드 스캔 요청
+        if (data.action === 'SCAN') {
+            const item = tableData.find(d => d.code === data.barcode);
+            let responseObj = { found: false };
+
+            if (item) {
+                responseObj = {
+                    found: true,
+                    product_name: item.name || '',
+                    location: item.location || '미지정',
+                    remain: item.mibalQty || 0,
+                    options: [{ qty: item.arrivalQty || 0, dest: "도착(패킹)수량" }]
+                };
+            }
+
+            await setDoc(doc(db, 'ChinaStockGoods', 'APP_RESPONSE'), {
+                reqId: data.reqId,
+                jsonData: JSON.stringify(responseObj)
+            });
+            await setDoc(doc(db, 'ChinaStockGoods', 'APP_REQUEST'), { status: 'PROCESSED' }, { merge: true });
+        }
+
+        // 2. 입고 데이터 일괄 저장 요청
+        else if (data.action === 'SAVE_BATCH') {
+            const items = JSON.parse(data.payload || '[]');
+            let successCount = 0;
+
+            items.forEach(reqItem => {
+                const target = tableData.find(d => d.code === reqItem.barcode);
+                if (target) {
+                    if (!editedCells[target.code]) editedCells[target.code] = {};
+                    
+                    let currentQty = parseInt(editedCells[target.code]['confirmed'] || 0);
+                    let newQty = currentQty + parseInt(reqItem.qty);
+                    
+                    editedCells[target.code]['confirmed'] = newQty.toString();
+                    target.confirmed = newQty.toString();
+                    successCount++;
+                }
+            });
+
+            if (successCount > 0) {
+                await saveEditedCells(); 
+                renderTable(); 
+                showToast(`📱 앱에서 ${successCount}건 입고 데이터 처리 완료!`);
+            }
+
+            await setDoc(doc(db, 'ChinaStockGoods', 'APP_RESPONSE'), {
+                reqId: data.reqId,
+                jsonData: JSON.stringify({ processed: successCount })
+            });
+            await setDoc(doc(db, 'ChinaStockGoods', 'APP_REQUEST'), { status: 'PROCESSED' }, { merge: true });
+        }
+    });
+}
+
+// =========================================================
 // ★ 이벤트 바인딩
 // =========================================================
 function setupEventListeners() {
@@ -617,19 +696,29 @@ function setupEventListeners() {
         closeAllMenus();
         if (!isVisible) menu.style.display = 'block';
     });
+    
     document.getElementById('main-tools-menu')?.addEventListener('click', (e) => e.stopPropagation());
     document.addEventListener('click', () => closeAllMenus());
     document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { closeAllMenus(); openSheetSettingsModal(); });
     document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
-    document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
+    
+    // 신규: 붙여넣기 모달 관련 이벤트
+    document.getElementById('btn-open-paste-modal')?.addEventListener('click', () => { closeAllMenus(); openPasteModal(); });
+    document.getElementById('btn-paste-cancel')?.addEventListener('click', closePasteModal);
+    document.getElementById('btn-paste-apply')?.addEventListener('click', processPastedData);
+    document.getElementById('paste-modal')?.addEventListener('click', (e) => { if (e.target.id === 'paste-modal') closePasteModal(); });
+    document.querySelector('#paste-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
     document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
     document.getElementById('btn-excel-download')?.addEventListener('click', downloadExcel);
     document.getElementById('search-input')?.addEventListener('input', applySearch);
+    
     document.querySelectorAll('.th-sortable').forEach(th => {
         th.addEventListener('click', () => sortTable(th.dataset.sort));
     });
+    
     document.getElementById('table-body')?.addEventListener('focusout', (e) => {
         if (e.target.classList.contains('editable-cell')) onCellEdit(e.target);
     });
@@ -639,6 +728,7 @@ function setupEventListeners() {
             if (code) navigator.clipboard.writeText(code).then(() => showToast(`📋 ${code} 복사됨`));
         }
     });
+    
     document.getElementById('btn-sheet-cancel')?.addEventListener('click', closeSheetSettingsModal);
     document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
     document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => {
@@ -668,7 +758,10 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.5 초기화 완료');
+    // 플러터 앱 연동을 위한 백그라운드 리스너 실행
+    listenToAppRequests();
+
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.6 초기화 완료');
 }
 
 init();
