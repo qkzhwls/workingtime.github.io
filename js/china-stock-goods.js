@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.1
+// 중국제작 미발계산기 Ver 1.4.2
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -27,32 +27,9 @@ let savedDates = [];
 // =========================================================
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 
-// ★ Ver 1.4.1: 상품명 추출 헬퍼 (상품명 || 공급처상품명 fallback)
+// 상품명 추출 헬퍼 (상품명 || 공급처상품명 fallback)
 function getProductName(row) {
     return row['상품명'] || row['공급처상품명'] || '';
-}
-
-function formatExcelDate(excelDate) {
-    if (!excelDate || excelDate.toString().trim() === '') return '';
-    if (typeof excelDate === 'string' && (excelDate.includes('-') || excelDate.includes('.'))) return excelDate;
-    const num = parseFloat(excelDate);
-    if (isNaN(num)) return excelDate;
-    const date = new Date(Math.round((num - 25569) * 86400 * 1000));
-    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
-}
-
-function normalizeDate(dateStr) {
-    if (!dateStr) return '';
-    let s = dateStr.toString().trim();
-    if (/^\d{4,5}(\.\d+)?$/.test(s)) s = formatExcelDate(parseFloat(s));
-    s = s.replace(/\./g, '-').replace(/\//g, '-');
-    const parts = s.split('-');
-    if (parts.length === 3) {
-        let [y, m, d] = parts;
-        if (y.length === 2) y = '20' + y;
-        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-    }
-    return s;
 }
 
 function showLoading(text) {
@@ -148,7 +125,6 @@ async function loadStockLogFromFirebase() {
     } catch (e) { console.error('미발재고로그 로드 실패:', e); }
 }
 
-// ★ Ver 1.4: setDoc 개별 저장
 async function saveChunkedData(rows, subCollection) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
     try {
@@ -316,18 +292,19 @@ function handleStockLogUpload(e) {
 }
 
 // =========================================================
-// 출고일 적용 → 테이블 생성
+// 패킹단위 적용 → 테이블 생성 (Ver 1.4.2 수정)
 // =========================================================
 function applyDates() {
-    const inputDates = [];
+    const inputUnits = [];
     for (let i = 1; i <= 8; i++) {
         const val = document.getElementById(`date-${i}`)?.value;
-        if (val) inputDates.push(normalizeDate(val));
+        if (val) inputUnits.push(val.toString().trim());
     }
-    if (inputDates.length === 0) { alert('출고일을 1개 이상 입력해주세요.'); return; }
+    if (inputUnits.length === 0) { alert('패킹단위를 1개 이상 선택해주세요.'); return; }
 
     saveConfig();
 
+    // 엑셀 내의 기존 컬럼명을 그대로 사용하되 데이터 값(패킹단위)을 비교합니다.
     const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
     const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
     const dateColsBuy = ['1차패킹리스트출고일','2차패킹리스트출고일'];
@@ -341,8 +318,12 @@ function applyDates() {
         if (!code) return;
         let matched = false, totalQty = 0;
         dateColsOrig.forEach((dc, idx) => {
-            const rd = normalizeDate(row[dc] || '');
-            if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsOrig[idx]]) || 0); }
+            const cellValue = (row[dc] || '').toString().trim();
+            // 입력된 패킹단위(숫자)와 엑셀의 값이 일치하는지 확인
+            if (cellValue && inputUnits.includes(cellValue)) { 
+                matched = true; 
+                totalQty += (parseInt(row[qtyColsOrig[idx]]) || 0); 
+            }
         });
         if (matched) {
             if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
@@ -350,14 +331,17 @@ function applyDates() {
         }
     });
 
-    // ★ 사입 스캔 (Ver 1.4.1: getProductName으로 공급처상품명 fallback)
+    // ★ 사입 스캔 
     orderDataBuy.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
         let matched = false, totalQty = 0;
         dateColsBuy.forEach((dc, idx) => {
-            const rd = normalizeDate(row[dc] || '');
-            if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsBuy[idx]]) || 0); }
+            const cellValue = (row[dc] || '').toString().trim();
+            if (cellValue && inputUnits.includes(cellValue)) { 
+                matched = true; 
+                totalQty += (parseInt(row[qtyColsBuy[idx]]) || 0); 
+            }
         });
         if (matched) {
             if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: '' };
@@ -612,7 +596,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.1 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.2 초기화 완료');
 }
 
 init();
