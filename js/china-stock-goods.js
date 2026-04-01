@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.2
+// 중국제작 미발계산기 Ver 1.4.3
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -27,7 +27,6 @@ let savedDates = [];
 // =========================================================
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 
-// 상품명 추출 헬퍼 (상품명 || 공급처상품명 fallback)
 function getProductName(row) {
     return row['상품명'] || row['공급처상품명'] || '';
 }
@@ -58,6 +57,51 @@ function closeAllMenus() {
 }
 
 // =========================================================
+// 드롭다운 날짜/수량 동적 생성 (Ver 1.4.3 추가)
+// =========================================================
+function populateDynamicDates() {
+    const dateMap = {};
+    const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
+    const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
+    const dateColsBuy = ['1차패킹리스트출고일','2차패킹리스트출고일'];
+    const qtyColsBuy  = ['1차패킹리스트출고수량','2차패킹리스트출고수량'];
+
+    const processRow = (row, dCols, qCols) => {
+        dCols.forEach((dc, idx) => {
+            const rawDate = (row[dc] || '').toString().trim();
+            if(rawDate) {
+                const qty = parseInt(row[qCols[idx]]) || 0;
+                if(!dateMap[rawDate]) dateMap[rawDate] = 0;
+                dateMap[rawDate] += qty;
+            }
+        });
+    };
+
+    orderDataOriginal.forEach(row => processRow(row, dateColsOrig, qtyColsOrig));
+    orderDataBuy.forEach(row => processRow(row, dateColsBuy, qtyColsBuy));
+
+    const sortedDates = Object.keys(dateMap).sort();
+
+    for(let i = 1; i <= 8; i++) {
+        const selectEl = document.getElementById(`date-${i}`);
+        if(selectEl) {
+            const currentVal = savedDates[i-1] || selectEl.value; // 기존에 선택했던 값 유지
+            let html = '<option value="">선택</option>';
+            sortedDates.forEach(d => {
+                html += `<option value="${d}">${d} (${dateMap[d].toLocaleString()})</option>`;
+            });
+            selectEl.innerHTML = html;
+            
+            if(sortedDates.includes(currentVal)) {
+                selectEl.value = currentVal;
+            } else {
+                selectEl.value = '';
+            }
+        }
+    }
+}
+
+// =========================================================
 // Firebase 로드/저장
 // =========================================================
 async function loadConfig() {
@@ -68,10 +112,6 @@ async function loadConfig() {
             csvUrlOrder = cfg.csvUrlOrder || '';
             csvUrlBuy = cfg.csvUrlBuy || '';
             savedDates = cfg.savedDates || [];
-            savedDates.forEach((d, i) => {
-                const el = document.getElementById(`date-${i + 1}`);
-                if (el && d) el.value = d;
-            });
         }
     } catch (e) { console.error('설정 로드 실패:', e); }
 }
@@ -224,6 +264,9 @@ async function syncOrderData() {
             await saveChunkedData(d, 'Buy');
             cB = d.length;
         }
+        
+        populateDynamicDates(); // 데이터 갱신 후 드롭다운 재구성
+        
         hideLoading();
         alert(`✅ 오더리스트 동기화 완료!\n원본: ${cO}건 / 사입: ${cB}건`);
     } catch (e) {
@@ -292,7 +335,7 @@ function handleStockLogUpload(e) {
 }
 
 // =========================================================
-// 패킹단위 적용 → 테이블 생성 (Ver 1.4.2 수정)
+// 패킹단위 적용 → 테이블 생성
 // =========================================================
 function applyDates() {
     const inputUnits = [];
@@ -300,11 +343,10 @@ function applyDates() {
         const val = document.getElementById(`date-${i}`)?.value;
         if (val) inputUnits.push(val.toString().trim());
     }
-    if (inputUnits.length === 0) { alert('패킹단위를 1개 이상 선택해주세요.'); return; }
+    if (inputUnits.length === 0) { alert('출고일(패킹단위)을 1개 이상 선택해주세요.'); return; }
 
     saveConfig();
 
-    // 엑셀 내의 기존 컬럼명을 그대로 사용하되 데이터 값(패킹단위)을 비교합니다.
     const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
     const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
     const dateColsBuy = ['1차패킹리스트출고일','2차패킹리스트출고일'];
@@ -312,14 +354,12 @@ function applyDates() {
 
     let resultMap = {};
 
-    // ★ 원본 스캔
     orderDataOriginal.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
         let matched = false, totalQty = 0;
         dateColsOrig.forEach((dc, idx) => {
             const cellValue = (row[dc] || '').toString().trim();
-            // 입력된 패킹단위(숫자)와 엑셀의 값이 일치하는지 확인
             if (cellValue && inputUnits.includes(cellValue)) { 
                 matched = true; 
                 totalQty += (parseInt(row[qtyColsOrig[idx]]) || 0); 
@@ -331,7 +371,6 @@ function applyDates() {
         }
     });
 
-    // ★ 사입 스캔 
     orderDataBuy.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
@@ -447,7 +486,7 @@ function onCellEdit(el) {
 }
 
 // =========================================================
-// 검색
+// 검색 & 정렬
 // =========================================================
 function applySearch() {
     const keyword = (document.getElementById('search-input')?.value || '').trim().toUpperCase();
@@ -457,9 +496,6 @@ function applySearch() {
     updateSummary();
 }
 
-// =========================================================
-// 정렬
-// =========================================================
 function sortTable(key) {
     if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
     else { sortConfig.key = key; sortConfig.direction = 'asc'; }
@@ -473,7 +509,7 @@ function sortTable(key) {
 }
 
 // =========================================================
-// 엑셀 다운로드
+// 엑셀 다운로드 & 전체 초기화
 // =========================================================
 function downloadExcel() {
     if (!filteredData || filteredData.length === 0) { alert('다운로드할 데이터가 없습니다.'); return; }
@@ -492,9 +528,6 @@ function downloadExcel() {
     showToast('📥 엑셀 다운로드 완료');
 }
 
-// =========================================================
-// 전체 초기화
-// =========================================================
 async function clearAllData() {
     if (!confirm('정말로 모든 데이터를 초기화하시겠습니까?\n(오더리스트, 미발재고로그, 편집 내용 모두 삭제)')) return;
     showLoading('🗑️ 데이터 초기화 중...');
@@ -512,6 +545,8 @@ async function clearAllData() {
         }
         await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: {}, updatedAt: new Date() });
         orderDataOriginal=[]; orderDataBuy=[]; stockLogData={}; tableData=[]; filteredData=[]; editedCells={};
+        
+        populateDynamicDates(); // 데이터가 비워졌으므로 드롭다운도 초기화됨
         renderTable(); updateSummary(); hideLoading();
         alert('✅ 전체 초기화 완료');
     } catch (e) { hideLoading(); alert('🚨 초기화 실패: ' + e.message); }
@@ -589,6 +624,9 @@ async function init() {
     await loadOrderDataFromFirebase();
     await loadStockLogFromFirebase();
 
+    // 데이터 로드 직후 엑셀의 날짜/수량을 분석하여 드롭다운 자동 생성
+    populateDynamicDates();
+
     hideLoading();
 
     const hasDate = savedDates.some(d => d && d.trim());
@@ -596,7 +634,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.2 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.3 초기화 완료');
 }
 
 init();
