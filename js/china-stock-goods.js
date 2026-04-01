@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.6
+// 중국제작 미발계산기 Ver 1.6.1
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -79,14 +79,33 @@ function closeAllMenus() {
     document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
 }
 
-// ★ Ver 1.6: Promise 동시 실행 헬퍼 (최대 N개씩 병렬)
-async function runConcurrent(tasks, concurrency = 3) {
+// ★ Ver 1.6.1: 딜레이 헬퍼
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// ★ Ver 1.6.1: 동시 2개 + 실패 시 재시도(최대 3회, 지수 백오프)
+async function runConcurrent(tasks, concurrency = 2) {
     const results = [];
     let idx = 0;
     async function worker() {
         while (idx < tasks.length) {
             const i = idx++;
-            results[i] = await tasks[i]();
+            let lastErr;
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    results[i] = await tasks[i]();
+                    lastErr = null;
+                    break;
+                } catch (e) {
+                    lastErr = e;
+                    const waitMs = 1000 * Math.pow(2, attempt); // 1초, 2초, 4초
+                    console.warn(`⚠️ 배치 ${i} 실패 (시도 ${attempt + 1}/3), ${waitMs}ms 후 재시도...`, e.message);
+                    await delay(waitMs);
+                }
+            }
+            if (lastErr) {
+                console.error(`❌ 배치 ${i} 최종 실패:`, lastErr);
+                throw lastErr;
+            }
         }
     }
     const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker());
@@ -163,33 +182,32 @@ async function loadStockLogFromFirebase() {
     } catch (e) { console.error('미발재고로그 로드 실패:', e); }
 }
 
-// ★ Ver 1.6: 청크 200행 + 배치 20청크 + 동시 3배치 커밋
+// ★ Ver 1.6.1: 삭제는 순차(10건 배치 + 500ms 딜레이), 저장은 병렬 2개 + 재시도
 async function saveChunkedData(rows, subCollection, onProgress) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
     try {
-        // 1) 기존 데이터 삭제 (동시 3배치)
+        // 1) 기존 데이터 삭제 — 순차 처리 (Quota 방지)
         const existing = await getDocs(collection(db, collName));
         if (existing.size > 0) {
-            if (onProgress) onProgress(`🗑️ 기존 ${subCollection} 삭제 중...`);
-            const delTasks = [];
+            if (onProgress) onProgress(`🗑️ 기존 ${subCollection} 삭제 중... (${existing.size}건)`);
             const delDocs = existing.docs;
-            for (let i = 0; i < delDocs.length; i += 20) {
-                const slice = delDocs.slice(i, i + 20);
-                delTasks.push(() => {
-                    let b = writeBatch(db);
-                    slice.forEach(d => b.delete(d.ref));
-                    return b.commit();
-                });
+            for (let i = 0; i < delDocs.length; i += 10) {
+                let b = writeBatch(db);
+                delDocs.slice(i, i + 10).forEach(d => b.delete(d.ref));
+                await b.commit();
+                // 10건 삭제 후 500ms 대기 (Quota 여유 확보)
+                if (i + 10 < delDocs.length) await delay(500);
+                if (onProgress && i % 50 === 0) {
+                    onProgress(`🗑️ ${subCollection} 삭제 중... (${Math.min(i + 10, delDocs.length)}/${delDocs.length})`);
+                }
             }
-            await runConcurrent(delTasks, 3);
         }
 
-        // 2) 청크 200행, 배치 20청크, 동시 3배치 커밋
+        // 2) 청크 200행, 배치 10청크씩 묶어서, 동시 2배치 + 배치간 300ms 딜레이
         const CHUNK_SIZE = 200;
-        const BATCH_LIMIT = 20;
+        const BATCH_LIMIT = 10;
         const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
 
-        // 모든 배치를 미리 생성
         const batchTasks = [];
         let batch = writeBatch(db);
         let batchOps = 0;
@@ -209,15 +227,15 @@ async function saveChunkedData(rows, subCollection, onProgress) {
                         const pct = Math.round((currentChunk / totalChunks) * 100);
                         onProgress(`💾 ${subCollection} 저장 중... ${currentChunk}/${totalChunks} (${pct}%)`);
                     }
-                    return currentBatch.commit();
+                    return currentBatch.commit().then(() => delay(300)); // 커밋 후 300ms 쿨다운
                 });
                 batch = writeBatch(db);
                 batchOps = 0;
             }
         }
 
-        // 동시 3배치씩 커밋
-        await runConcurrent(batchTasks, 3);
+        // 동시 2배치씩 커밋 (재시도 포함)
+        await runConcurrent(batchTasks, 2);
 
         console.log(`✅ ${subCollection}: ${rows.length}행 → ${totalChunks}청크 → ${batchTasks.length}배치 완료`);
         return totalChunks;
@@ -269,7 +287,7 @@ async function fetchCSV(url) {
 }
 
 // =========================================================
-// ★ Ver 1.6: 오더리스트 시트 동기화 (병렬 다운로드 + 병렬 저장)
+// 오더리스트 시트 동기화 (병렬 다운로드 → 순차 저장)
 // =========================================================
 async function syncOrderData() {
     if (!csvUrlOrder && !csvUrlBuy) {
@@ -280,7 +298,7 @@ async function syncOrderData() {
     const startTime = performance.now();
 
     try {
-        // 1단계: 병렬 다운로드
+        // 1단계: 병렬 다운로드 (네트워크는 동시에 해도 Quota 안 걸림)
         const downloadTasks = [];
         if (csvUrlOrder) downloadTasks.push(fetchCSV(csvUrlOrder));
         else downloadTasks.push(Promise.resolve([]));
@@ -293,15 +311,14 @@ async function syncOrderData() {
 
         showLoading(`📦 다운로드 완료 (원본:${dataOrder.length} / 사입:${dataBuy.length})\n💾 Firebase 저장 중...`);
 
-        // 2단계: 병렬 저장
-        const saveTasks = [];
+        // 2단계: 순차 저장 (Quota 방지 — 두 컬렉션을 동시에 쓰면 Quota 초과 위험)
         if (dataOrder.length > 0) {
-            saveTasks.push(saveChunkedData(dataOrder, 'Order', (msg) => showLoading(msg)));
+            await saveChunkedData(dataOrder, 'Order', (msg) => showLoading(msg));
         }
+        await delay(1000); // 컬렉션 전환 시 1초 쿨다운
         if (dataBuy.length > 0) {
-            saveTasks.push(saveChunkedData(dataBuy, 'Buy', (msg) => showLoading(msg)));
+            await saveChunkedData(dataBuy, 'Buy', (msg) => showLoading(msg));
         }
-        await Promise.all(saveTasks);
 
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
         hideLoading();
@@ -571,17 +588,13 @@ async function clearAllData() {
         for (const sub of ['Order','Buy','StockLog']) {
             const snap = await getDocs(collection(db, CHINA_COLLECTION+'_'+sub));
             if (snap.size > 0) {
-                const delTasks = [];
                 const docs = snap.docs;
-                for (let i = 0; i < docs.length; i += 20) {
-                    const slice = docs.slice(i, i + 20);
-                    delTasks.push(() => {
-                        let b = writeBatch(db);
-                        slice.forEach(d => b.delete(d.ref));
-                        return b.commit();
-                    });
+                for (let i = 0; i < docs.length; i += 10) {
+                    let b = writeBatch(db);
+                    docs.slice(i, i + 10).forEach(d => b.delete(d.ref));
+                    await b.commit();
+                    if (i + 10 < docs.length) await delay(500);
                 }
-                await runConcurrent(delTasks, 3);
             }
         }
         await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: {}, updatedAt: new Date() });
@@ -668,7 +681,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.6 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.6.1 초기화 완료');
 }
 
 init();
