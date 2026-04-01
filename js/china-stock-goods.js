@@ -1,8 +1,8 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.8
+// 중국제작 미발계산기 Ver 1.4.1
 
 import { initializeFirebase } from './config.js';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
 const CHINA_COLLECTION = 'ChinaStockGoods';
@@ -27,11 +27,32 @@ let savedDates = [];
 // =========================================================
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 
-// 엑셀에서 복사된 '1,000' 형태의 콤마를 제거하고 완벽하게 숫자로 변환하는 함수
-const parseExcelNum = (val) => parseInt((val || '0').toString().replace(/,/g, '').trim()) || 0;
-
+// ★ Ver 1.4.1: 상품명 추출 헬퍼 (상품명 || 공급처상품명 fallback)
 function getProductName(row) {
     return row['상품명'] || row['공급처상품명'] || '';
+}
+
+function formatExcelDate(excelDate) {
+    if (!excelDate || excelDate.toString().trim() === '') return '';
+    if (typeof excelDate === 'string' && (excelDate.includes('-') || excelDate.includes('.'))) return excelDate;
+    const num = parseFloat(excelDate);
+    if (isNaN(num)) return excelDate;
+    const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
+function normalizeDate(dateStr) {
+    if (!dateStr) return '';
+    let s = dateStr.toString().trim();
+    if (/^\d{4,5}(\.\d+)?$/.test(s)) s = formatExcelDate(parseFloat(s));
+    s = s.replace(/\./g, '-').replace(/\//g, '-');
+    const parts = s.split('-');
+    if (parts.length === 3) {
+        let [y, m, d] = parts;
+        if (y.length === 2) y = '20' + y;
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    return s;
 }
 
 function showLoading(text) {
@@ -59,63 +80,6 @@ function closeAllMenus() {
     document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
 }
 
-// 엑셀 날짜를 "O월 O일출고" 형태로 변환
-function formatToKoreanDate(raw) {
-    if (!raw) return '';
-    let d = String(raw).trim();
-    if (!isNaN(d) && Number(d) > 30000) {
-        const date = new Date((Number(d) - 25569) * 86400 * 1000);
-        return `${date.getMonth() + 1}월${date.getDate()}일출고`;
-    }
-    let parts = d.split(/[-./]/);
-    let m, day;
-    if (parts.length === 3) { m = parseInt(parts[1], 10); day = parseInt(parts[2], 10); } 
-    else if (parts.length === 2) { m = parseInt(parts[0], 10); day = parseInt(parts[1], 10); }
-    if (m && day && !isNaN(m) && !isNaN(day)) return `${m}월${day}일출고`;
-    return `${d}출고`;
-}
-
-// =========================================================
-// 드롭다운 날짜/수량 동적 생성
-// =========================================================
-function populateDynamicDates() {
-    const dateMap = {};
-    const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
-    const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
-    const dateColsBuy = ['1차패킹리스트출고일','2차패킹리스트출고일'];
-    const qtyColsBuy  = ['1차패킹리스트출고수량','2차패킹리스트출고수량'];
-
-    const processRow = (row, dCols, qCols) => {
-        dCols.forEach((dc, idx) => {
-            const rawDate = (row[dc] || '').toString().trim();
-            if(rawDate) {
-                const qty = parseInt(row[qCols[idx]]) || 0;
-                if(!dateMap[rawDate]) dateMap[rawDate] = 0;
-                dateMap[rawDate] += qty;
-            }
-        });
-    };
-
-    orderDataOriginal.forEach(row => processRow(row, dateColsOrig, qtyColsOrig));
-    orderDataBuy.forEach(row => processRow(row, dateColsBuy, qtyColsBuy));
-
-    const sortedDates = Object.keys(dateMap).sort();
-
-    for(let i = 1; i <= 8; i++) {
-        const selectEl = document.getElementById(`date-${i}`);
-        if(selectEl) {
-            const currentVal = savedDates[i-1] || selectEl.value;
-            let html = '<option value="">선택</option>';
-            sortedDates.forEach(d => {
-                html += `<option value="${d}">${formatToKoreanDate(d)} (${dateMap[d].toLocaleString()})</option>`;
-            });
-            selectEl.innerHTML = html;
-            if(sortedDates.includes(currentVal)) selectEl.value = currentVal;
-            else selectEl.value = '';
-        }
-    }
-}
-
 // =========================================================
 // Firebase 로드/저장
 // =========================================================
@@ -127,6 +91,10 @@ async function loadConfig() {
             csvUrlOrder = cfg.csvUrlOrder || '';
             csvUrlBuy = cfg.csvUrlBuy || '';
             savedDates = cfg.savedDates || [];
+            savedDates.forEach((d, i) => {
+                const el = document.getElementById(`date-${i + 1}`);
+                if (el && d) el.value = d;
+            });
         }
     } catch (e) { console.error('설정 로드 실패:', e); }
 }
@@ -172,7 +140,7 @@ async function loadStockLogFromFirebase() {
             const data = d.data();
             if (data.dataStr) {
                 JSON.parse(data.dataStr).forEach(row => {
-                    const code = (row['상품코드'] || row['어드민상품코드'] || '').toString().trim();
+                    const code = (row['상품코드'] || '').toString().trim();
                     if (code) stockLogData[code] = row;
                 });
             }
@@ -180,6 +148,7 @@ async function loadStockLogFromFirebase() {
     } catch (e) { console.error('미발재고로그 로드 실패:', e); }
 }
 
+// ★ Ver 1.4: setDoc 개별 저장
 async function saveChunkedData(rows, subCollection) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
     try {
@@ -279,9 +248,6 @@ async function syncOrderData() {
             await saveChunkedData(d, 'Buy');
             cB = d.length;
         }
-        
-        populateDynamicDates();
-        
         hideLoading();
         alert(`✅ 오더리스트 동기화 완료!\n원본: ${cO}건 / 사입: ${cB}건`);
     } catch (e) {
@@ -292,110 +258,73 @@ async function syncOrderData() {
 }
 
 // =========================================================
-// ★ 미발재고로그 붙여넣기 기능 (Ver 1.4.8 최신화 + 갱신 버그 완벽 수정)
+// 미발재고로그 업로드
 // =========================================================
-function openPasteModal() {
-    document.getElementById('paste-textarea').value = '';
-    document.getElementById('paste-modal').style.display = 'flex';
-}
-function closePasteModal() {
-    document.getElementById('paste-modal').style.display = 'none';
-}
-async function processPastedData() {
-    const text = document.getElementById('paste-textarea').value.trim();
-    if (!text) {
-        alert('붙여넣은 데이터가 없습니다.');
-        return;
-    }
-
-    closePasteModal();
+function handleStockLogUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
     showLoading('📂 미발재고로그 분석 중...');
 
-    try {
-        const lines = text.split(/\r?\n/);
-        let headerIdx = -1;
-        let headers = [];
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+        try {
+            const text = evt.target.result;
+            let rows = [];
 
-        // 엑셀 헤더의 모든 공백(스페이스바)과 따옴표를 완벽히 제거하여 인식률 100% 보장
-        for(let i=0; i<lines.length; i++) {
-            const cols = lines[i].split('\t').map(c => c.replace(/^"|"$/g, '').replace(/\s+/g, ''));
-            if (cols.includes('상품코드') || cols.includes('어드민상품코드')) {
-                headerIdx = i;
-                headers = cols;
-                break;
+            if (text.trim().startsWith('<') || text.includes('<table') || text.includes('<html')) {
+                const parser = new DOMParser();
+                const htmlDoc = parser.parseFromString(text, 'text/html');
+                const table = htmlDoc.querySelector('table');
+                if (!table) throw new Error('HTML 내에서 테이블을 찾을 수 없습니다.');
+                const trs = table.querySelectorAll('tr');
+                let headers = [];
+                trs.forEach((tr, idx) => {
+                    const cells = tr.querySelectorAll('td, th');
+                    const vals = Array.from(cells).map(c => c.textContent.trim());
+                    if (idx === 0) headers = vals;
+                    else {
+                        let obj = {};
+                        vals.forEach((v, j) => { if (headers[j]) obj[headers[j]] = v; });
+                        if (obj['상품코드']) rows.push(obj);
+                    }
+                });
+            } else {
+                const ab = new Uint8Array(text.split('').map(c => c.charCodeAt(0))).buffer;
+                const wb = XLSX.read(ab, { type: 'array' });
+                rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
             }
-        }
 
-        if (headerIdx === -1) {
-            throw new Error('데이터에서 "상품코드" 열을 찾을 수 없습니다.\n엑셀에서 표 형태(제목줄 포함)로 드래그하여 복사했는지 확인해주세요.');
-        }
-
-        let rows = [];
-        for (let i = headerIdx + 1; i < lines.length; i++) {
-            const line = lines[i];
-            if (!line.trim()) continue; 
-            
-            const cells = line.split('\t');
-            let obj = {};
-            
-            cells.forEach((cell, idx) => {
-                if (headers[idx]) {
-                    obj[headers[idx]] = cell.replace(/^"|"$/g, '').trim();
-                }
+            stockLogData = {};
+            rows.forEach(row => {
+                const code = (row['상품코드'] || '').toString().trim();
+                if (code) stockLogData[code] = row;
             });
 
-            if (obj['상품코드'] || obj['어드민상품코드']) {
-                rows.push(obj);
-            }
+            showLoading(`💾 미발재고로그 ${rows.length}건 저장 시작...`);
+            await saveChunkedData(rows, 'StockLog');
+            hideLoading();
+            showToast(`✅ 미발재고로그 ${rows.length}건 업로드 완료`);
+            if (tableData.length > 0) buildTableFromData();
+        } catch (err) {
+            hideLoading();
+            alert('🚨 파일 파싱 실패: ' + err.message);
+            console.error(err);
         }
-
-        stockLogData = {};
-        rows.forEach(row => {
-            const code = (row['상품코드'] || row['어드민상품코드'] || '').toString().trim();
-            if (code) stockLogData[code] = row;
-        });
-
-        showLoading(`💾 미발재고로그 ${rows.length}건 저장 시작...`);
-        await saveChunkedData(rows, 'StockLog');
-        
-        hideLoading();
-        document.getElementById('paste-textarea').value = ''; 
-        
-        // ★ 핵심: 데이터 저장 완료 후 '표 강제 최신화'
-        let hasDateSelected = false;
-        for (let i = 1; i <= 8; i++) {
-            if (document.getElementById(`date-${i}`)?.value) {
-                hasDateSelected = true;
-                break;
-            }
-        }
-
-        if (hasDateSelected) {
-            // 출고일이 하나라도 선택되어 있으면 즉시 전체 매칭하여 최신화
-            applyDates(); 
-            showToast(`✅ 미발재고로그 ${rows.length}건 실시간 반영 완료`);
-        } else {
-            // 출고일이 아예 선택되지 않은 상태라면 표를 그릴 수 없으므로 알림
-            alert(`✅ 미발재고로그 ${rows.length}건이 시스템에 저장되었습니다.\n\n상단의 📦 [출고일]을 선택하고 [적용] 버튼을 누르시면\n방금 넣은 최신 데이터가 표에 나타납니다.`);
-        }
-
-    } catch (err) {
-        hideLoading();
-        alert('🚨 데이터 파싱 실패: ' + err.message);
-        console.error(err);
-    }
+        e.target.value = '';
+    };
+    reader.readAsText(file, 'UTF-8');
 }
 
 // =========================================================
 // 출고일 적용 → 테이블 생성
 // =========================================================
 function applyDates() {
-    const inputUnits = [];
+    const inputDates = [];
     for (let i = 1; i <= 8; i++) {
         const val = document.getElementById(`date-${i}`)?.value;
-        if (val) inputUnits.push(val.toString().trim());
+        if (val) inputDates.push(normalizeDate(val));
     }
-    if (inputUnits.length === 0) { alert('출고일을 1개 이상 선택해주세요.'); return; }
+    if (inputDates.length === 0) { alert('출고일을 1개 이상 입력해주세요.'); return; }
 
     saveConfig();
 
@@ -406,16 +335,14 @@ function applyDates() {
 
     let resultMap = {};
 
+    // ★ 원본 스캔
     orderDataOriginal.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
         let matched = false, totalQty = 0;
         dateColsOrig.forEach((dc, idx) => {
-            const cellValue = (row[dc] || '').toString().trim();
-            if (cellValue && inputUnits.includes(cellValue)) { 
-                matched = true; 
-                totalQty += (parseInt(row[qtyColsOrig[idx]]) || 0); 
-            }
+            const rd = normalizeDate(row[dc] || '');
+            if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsOrig[idx]]) || 0); }
         });
         if (matched) {
             if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
@@ -423,16 +350,14 @@ function applyDates() {
         }
     });
 
+    // ★ 사입 스캔 (Ver 1.4.1: getProductName으로 공급처상품명 fallback)
     orderDataBuy.forEach(row => {
         const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
         if (!code) return;
         let matched = false, totalQty = 0;
         dateColsBuy.forEach((dc, idx) => {
-            const cellValue = (row[dc] || '').toString().trim();
-            if (cellValue && inputUnits.includes(cellValue)) { 
-                matched = true; 
-                totalQty += (parseInt(row[qtyColsBuy[idx]]) || 0); 
-            }
+            const rd = normalizeDate(row[dc] || '');
+            if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsBuy[idx]]) || 0); }
         });
         if (matched) {
             if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: '' };
@@ -442,19 +367,13 @@ function applyDates() {
 
     tableData = Object.values(resultMap).map(item => {
         const log = stockLogData[item.code] || {};
-        
-        // 헤더명이 조금씩 달라도 유연하게 찾고 콤마 제거
-        const loc = (log['로케이션'] || log['위치'] || '').toString().split('/')[0].trim();
-        const tStockStr = log['정상재고'] || log['총재고'] || log['재고'];
-        const mibalStr = log['부족수량'] || log['미발수량'];
-        
+        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
         const edited = editedCells[item.code] || {};
-        
         return {
             code: item.code, name: item.name, option: item.option,
             arrivalQty: item.arrivalQty,
-            mibalQty: parseExcelNum(mibalStr),
-            totalStock: parseExcelNum(tStockStr),
+            mibalQty: parseInt(log['부족수량']) || 0,
+            totalStock: parseInt(log['정상재고']) || 0,
             location: loc,
             capacity: getCapacityByLocation(loc),
             confirmed: edited.confirmed || '',
@@ -467,7 +386,7 @@ function applyDates() {
     filteredData = [...tableData];
     renderTable();
     updateSummary();
-    showToast(`✅ ${tableData.length}개 상품 데이터 최신화 완료`);
+    showToast(`✅ ${tableData.length}개 상품 매칭 완료`);
 }
 
 function clearDates() {
@@ -482,7 +401,7 @@ function clearDates() {
 function renderTable() {
     const tbody = document.getElementById('table-body');
     if (!filteredData || filteredData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">데이터를 동기화한 후 출고일을 선택하세요.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">표시할 데이터가 없습니다.</td></tr>';
         return;
     }
     let html = '';
@@ -504,6 +423,21 @@ function renderTable() {
         </tr>`;
     });
     tbody.innerHTML = html;
+}
+
+function buildTableFromData() {
+    tableData.forEach(item => {
+        const log = stockLogData[item.code] || {};
+        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
+        item.totalStock = parseInt(log['정상재고']) || 0;
+        item.mibalQty = parseInt(log['부족수량']) || 0;
+        item.location = loc;
+        item.capacity = getCapacityByLocation(loc);
+    });
+    filteredData = [...tableData];
+    applySearch();
+    renderTable();
+    updateSummary();
 }
 
 function updateSummary() {
@@ -529,7 +463,7 @@ function onCellEdit(el) {
 }
 
 // =========================================================
-// 검색 & 정렬
+// 검색
 // =========================================================
 function applySearch() {
     const keyword = (document.getElementById('search-input')?.value || '').trim().toUpperCase();
@@ -539,6 +473,9 @@ function applySearch() {
     updateSummary();
 }
 
+// =========================================================
+// 정렬
+// =========================================================
 function sortTable(key) {
     if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
     else { sortConfig.key = key; sortConfig.direction = 'asc'; }
@@ -552,21 +489,16 @@ function sortTable(key) {
 }
 
 // =========================================================
-// 엑셀 다운로드 & 전체 초기화
+// 엑셀 다운로드
 // =========================================================
 function downloadExcel() {
     if (!filteredData || filteredData.length === 0) { alert('다운로드할 데이터가 없습니다.'); return; }
-    
-    // 다운로드할 헤더 지정 (상품코드, 수량만)
-    const headers = ['상품코드', '수량'];
-    
-    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style>td{mso-number-format:"\\@";}.header{font-weight:bold;background:#FFE0B2;text-align:center;border:1px solid #ccc;padding:6px;}.cell{border:1px solid #ddd;padding:4px 8px;text-align:center;}.num{mso-number-format:"0";text-align:right;}</style><table>`;
+    const headers = ['상품코드','상품명','옵션명','도착수량(패킹수량)','미발수량','총재고','로케이션','로케이션적재량','입고확인','부족수량','직진배송수량','비고'];
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style>td{mso-number-format:"\\@";}.header{font-weight:bold;background:#FFE0B2;text-align:center;border:1px solid #ccc;padding:6px;}.cell{border:1px solid #ddd;padding:4px 8px;text-align:center;}.cellL{border:1px solid #ddd;padding:4px 8px;text-align:left;}.num{mso-number-format:"0";text-align:right;}</style><table>`;
     html += `<tr>${headers.map(h=>`<td class="header">${h}</td>`).join('')}</tr>`;
-    
     filteredData.forEach(r => {
-        html += `<tr><td class="cell">${r.code}</td><td class="num">${r.arrivalQty}</td></tr>`;
+        html += `<tr><td class="cell">${r.code}</td><td class="cellL">${r.name}</td><td class="cell">${r.option}</td><td class="num">${r.arrivalQty}</td><td class="num">${r.mibalQty}</td><td class="num">${r.totalStock}</td><td class="cell">${r.location}</td><td class="num">${r.capacity||''}</td><td class="cell">${r.confirmed||''}</td><td class="cell">${r.shortage||''}</td><td class="cell">${r.directShip||''}</td><td class="cellL">${r.memo||''}</td></tr>`;
     });
-    
     html += '</table></html>';
     const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
     const a = document.createElement('a');
@@ -576,6 +508,9 @@ function downloadExcel() {
     showToast('📥 엑셀 다운로드 완료');
 }
 
+// =========================================================
+// 전체 초기화
+// =========================================================
 async function clearAllData() {
     if (!confirm('정말로 모든 데이터를 초기화하시겠습니까?\n(오더리스트, 미발재고로그, 편집 내용 모두 삭제)')) return;
     showLoading('🗑️ 데이터 초기화 중...');
@@ -593,15 +528,13 @@ async function clearAllData() {
         }
         await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: {}, updatedAt: new Date() });
         orderDataOriginal=[]; orderDataBuy=[]; stockLogData={}; tableData=[]; filteredData=[]; editedCells={};
-        
-        populateDynamicDates();
         renderTable(); updateSummary(); hideLoading();
         alert('✅ 전체 초기화 완료');
     } catch (e) { hideLoading(); alert('🚨 초기화 실패: ' + e.message); }
 }
 
 // =========================================================
-// 시트 설정 모달
+// 모달
 // =========================================================
 function openSheetSettingsModal() {
     document.getElementById('modal-csv-order').value = csvUrlOrder || '';
@@ -620,72 +553,6 @@ async function saveSheetSettings() {
 }
 
 // =========================================================
-// ★ 모바일 앱 연동 (Firebase 실시간 통신 브릿지)
-// =========================================================
-function listenToAppRequests() {
-    onSnapshot(doc(db, 'ChinaStockGoods', 'APP_REQUEST'), async (snap) => {
-        if (!snap.exists()) return;
-        const data = snap.data();
-        
-        if (!data.reqId || data.status === 'PROCESSED') return;
-
-        // 1. 바코드 스캔 요청
-        if (data.action === 'SCAN') {
-            const item = tableData.find(d => d.code === data.barcode);
-            let responseObj = { found: false };
-
-            if (item) {
-                responseObj = {
-                    found: true,
-                    product_name: item.name || '',
-                    location: item.location || '미지정',
-                    remain: item.mibalQty || 0,
-                    options: [{ qty: item.arrivalQty || 0, dest: "도착(패킹)수량" }]
-                };
-            }
-
-            await setDoc(doc(db, 'ChinaStockGoods', 'APP_RESPONSE'), {
-                reqId: data.reqId,
-                jsonData: JSON.stringify(responseObj)
-            });
-            await setDoc(doc(db, 'ChinaStockGoods', 'APP_REQUEST'), { status: 'PROCESSED' }, { merge: true });
-        }
-
-        // 2. 입고 데이터 일괄 저장 요청
-        else if (data.action === 'SAVE_BATCH') {
-            const items = JSON.parse(data.payload || '[]');
-            let successCount = 0;
-
-            items.forEach(reqItem => {
-                const target = tableData.find(d => d.code === reqItem.barcode);
-                if (target) {
-                    if (!editedCells[target.code]) editedCells[target.code] = {};
-                    
-                    let currentQty = parseInt(editedCells[target.code]['confirmed'] || 0);
-                    let newQty = currentQty + parseInt(reqItem.qty);
-                    
-                    editedCells[target.code]['confirmed'] = newQty.toString();
-                    target.confirmed = newQty.toString();
-                    successCount++;
-                }
-            });
-
-            if (successCount > 0) {
-                await saveEditedCells(); 
-                renderTable(); 
-                showToast(`📱 앱에서 ${successCount}건 입고 데이터 처리 완료!`);
-            }
-
-            await setDoc(doc(db, 'ChinaStockGoods', 'APP_RESPONSE'), {
-                reqId: data.reqId,
-                jsonData: JSON.stringify({ processed: successCount })
-            });
-            await setDoc(doc(db, 'ChinaStockGoods', 'APP_REQUEST'), { status: 'PROCESSED' }, { merge: true });
-        }
-    });
-}
-
-// =========================================================
 // ★ 이벤트 바인딩
 // =========================================================
 function setupEventListeners() {
@@ -696,29 +563,19 @@ function setupEventListeners() {
         closeAllMenus();
         if (!isVisible) menu.style.display = 'block';
     });
-    
     document.getElementById('main-tools-menu')?.addEventListener('click', (e) => e.stopPropagation());
     document.addEventListener('click', () => closeAllMenus());
     document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { closeAllMenus(); openSheetSettingsModal(); });
     document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
-    
-    // 붙여넣기 모달 관련 이벤트
-    document.getElementById('btn-open-paste-modal')?.addEventListener('click', () => { closeAllMenus(); openPasteModal(); });
-    document.getElementById('btn-paste-cancel')?.addEventListener('click', closePasteModal);
-    document.getElementById('btn-paste-apply')?.addEventListener('click', processPastedData);
-    document.getElementById('paste-modal')?.addEventListener('click', (e) => { if (e.target.id === 'paste-modal') closePasteModal(); });
-    document.querySelector('#paste-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
-
+    document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
     document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
     document.getElementById('btn-excel-download')?.addEventListener('click', downloadExcel);
     document.getElementById('search-input')?.addEventListener('input', applySearch);
-    
     document.querySelectorAll('.th-sortable').forEach(th => {
         th.addEventListener('click', () => sortTable(th.dataset.sort));
     });
-    
     document.getElementById('table-body')?.addEventListener('focusout', (e) => {
         if (e.target.classList.contains('editable-cell')) onCellEdit(e.target);
     });
@@ -728,7 +585,6 @@ function setupEventListeners() {
             if (code) navigator.clipboard.writeText(code).then(() => showToast(`📋 ${code} 복사됨`));
         }
     });
-    
     document.getElementById('btn-sheet-cancel')?.addEventListener('click', closeSheetSettingsModal);
     document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
     document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => {
@@ -749,8 +605,6 @@ async function init() {
     await loadOrderDataFromFirebase();
     await loadStockLogFromFirebase();
 
-    populateDynamicDates();
-
     hideLoading();
 
     const hasDate = savedDates.some(d => d && d.trim());
@@ -758,9 +612,7 @@ async function init() {
         applyDates();
     }
 
-    listenToAppRequests();
-
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.8 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.1 초기화 완료');
 }
 
 init();
