@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>중국제작 미발계산기 v1.4.8</title>
+    <title>중국제작 미발계산기</title>
     <style>
         :root { --primary: #e65100; --bg: #f8f9fa; --card: #ffffff; }
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; }
@@ -17,11 +17,12 @@
         .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
         .upload-menu label, .upload-menu div.menu-item { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
         .upload-menu label:hover, .upload-menu div.menu-item:hover { background: #fff3e0; color: var(--primary); }
+        .upload-menu input[type="file"] { display: none; }
         .btn-download { padding: 8px 15px; background: #1976d2; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 5px; font-size: 13px; }
         .btn-download:hover { background: #1565c0; }
         .date-bar { margin: 0 20px 10px 20px; background: white; border: 1px solid #ddd; border-radius: 10px; padding: 12px 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .date-bar label { font-size: 13px; font-weight: bold; color: #555; }
-        .date-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 140px; }
+        .date-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 120px; text-align: center; }
         .date-input:focus { border-color: var(--primary); outline: none; }
         .btn-date-apply { padding: 6px 14px; background: var(--primary); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; }
         .btn-date-apply:hover { background: #bf360c; }
@@ -72,11 +73,10 @@
         <div class="loading-text" id="loading-text">데이터 처리 중...</div>
         <div style="font-size:13px; color:#ccc; margin-top:10px;">창을 닫거나 새로고침하지 마세요.</div>
     </div>
-    
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 1.4.8</div>
+            <div class="version-badge">🚀 Ver 1.4.1</div>
             <input type="text" id="search-input" class="search-box" placeholder="🔍 상품코드/상품명 검색">
         </div>
         <div class="header-actions">
@@ -85,7 +85,7 @@
                 <button class="btn-main-upload" id="btn-toggle-menu">🛠️ 작업 메뉴 ▼</button>
                 <div class="upload-menu" id="main-tools-menu" style="width:300px;">
                     <div style="padding:8px 15px; background:#eceff1; font-size:12px; color:#546e7a; font-weight:bold;">📊 데이터 소스 관리</div>
-                    <div class="menu-item" id="btn-open-paste-modal"><span style="color:var(--primary);">📋 미발재고로그 붙여넣기</span></div>
+                    <label><span style="color:var(--primary);">📂 미발재고로그 업로드 (.xls)</span><input type="file" id="upload-stock-log" accept=".xls,.xlsx,.csv,.html,.htm"></label>
                     <div class="menu-item" id="btn-sync-order"><span style="color:#1976d2;">🔄 오더리스트 시트 동기화</span></div>
                     <div style="padding:8px 15px; background:#eceff1; font-size:12px; color:#546e7a; font-weight:bold; border-top:1px solid #ddd;">⚙️ 설정</div>
                     <div class="menu-item" id="btn-open-sheet-settings"><span style="color:#607d8b;">📎 CSV 시트 링크 설정</span></div>
@@ -94,17 +94,10 @@
             </div>
         </div>
     </div>
-
     <div class="date-bar">
-        <label>📦 출고일:</label>
-        <select class="date-input" id="date-1"><option value="">선택</option></select>
-        <select class="date-input" id="date-2"><option value="">선택</option></select>
-        <select class="date-input" id="date-3"><option value="">선택</option></select>
-        <select class="date-input" id="date-4"><option value="">선택</option></select>
-        <select class="date-input" id="date-5"><option value="">선택</option></select>
-        <select class="date-input" id="date-6"><option value="">선택</option></select>
-        <select class="date-input" id="date-7"><option value="">선택</option></select>
-        <select class="date-input" id="date-8"><option value="">선택</option></select>
+        <label>📅 출고일:</label>
+        <input type="date" class="date-input" id="date-1"><input type="date" class="date-input" id="date-2"><input type="date" class="date-input" id="date-3"><input type="date" class="date-input" id="date-4">
+        <input type="date" class="date-input" id="date-5"><input type="date" class="date-input" id="date-6"><input type="date" class="date-input" id="date-7"><input type="date" class="date-input" id="date-8">
         <button class="btn-date-apply" id="btn-date-apply">적용</button>
         <button class="btn-date-clear" id="btn-date-clear">초기화</button>
     </div>
@@ -113,7 +106,6 @@
         <div class="summary-card highlight"><span class="label">총 도착수량</span><span class="value" id="sum-arrival">0</span></div>
         <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span></div>
     </div>
-    
     <div class="list-container" id="list-container">
         <table class="list-table">
             <thead><tr>
@@ -132,25 +124,10 @@
                 <th style="min-width:100px;">비고</th>
             </tr></thead>
             <tbody id="table-body">
-                <tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">데이터를 동기화한 후 출고일을 선택하세요.</td></tr>
+                <tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 입력하고 [적용]을 누르거나, 작업 메뉴에서 데이터를 불러오세요.</td></tr>
             </tbody>
         </table>
     </div>
-
-    <div id="paste-modal" class="modal-overlay">
-        <div class="modal-content" style="width:600px;">
-            <div class="modal-header">📋 미발재고로그 데이터 붙여넣기</div>
-            <div class="modal-body">
-                <label style="color:var(--primary); margin-bottom: 5px;">엑셀에서 표 전체(첫 줄의 헤더 항목 포함)를 복사하여 아래에 붙여넣으세요.</label>
-                <textarea id="paste-textarea" placeholder="이곳을 클릭하고 Ctrl + V 를 눌러 데이터를 붙여넣으세요..." style="width:100%; height:250px; padding:10px; border:1px solid #ccc; border-radius:5px; font-family:monospace; white-space:pre; overflow:auto; resize:vertical; box-sizing: border-box;"></textarea>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-modal-cancel" id="btn-paste-cancel">취소</button>
-                <button class="btn-modal-save" id="btn-paste-apply">적용하기</button>
-            </div>
-        </div>
-    </div>
-
     <div id="sheet-settings-modal" class="modal-overlay">
         <div class="modal-content" style="width:500px;">
             <div class="modal-header">📎 오더리스트 CSV 시트 링크 설정</div>
@@ -170,7 +147,6 @@
             </div>
         </div>
     </div>
-
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script type="module" src="js/china-stock-goods.js"></script>
