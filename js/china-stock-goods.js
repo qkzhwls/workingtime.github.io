@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.4
+// 중국제작 미발계산기 Ver 1.4.5
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -61,13 +61,13 @@ function formatToKoreanDate(raw) {
     if (!raw) return '';
     let d = String(raw).trim();
     
-    // 엑셀 일련번호(숫자형) 처리 (예: 45383)
+    // 엑셀 일련번호(숫자형) 처리
     if (!isNaN(d) && Number(d) > 30000) {
         const date = new Date((Number(d) - 25569) * 86400 * 1000);
         return `${date.getMonth() + 1}월${date.getDate()}일출고`;
     }
 
-    // 문자열 날짜 처리 (YYYY-MM-DD, YYYY/MM/DD, MM.DD 등)
+    // 문자열 날짜 처리
     let parts = d.split(/[-./]/);
     let m, day;
     if (parts.length === 3) {
@@ -82,7 +82,6 @@ function formatToKoreanDate(raw) {
         return `${m}월${day}일출고`;
     }
     
-    // 파싱 불가 시 원본 텍스트에 출고 붙임
     return `${d}출고`;
 }
 
@@ -118,7 +117,6 @@ function populateDynamicDates() {
             const currentVal = savedDates[i-1] || selectEl.value;
             let html = '<option value="">선택</option>';
             sortedDates.forEach(d => {
-                // value는 엑셀 원본 값 유지, 텍스트는 보기 좋은 형식으로 표시
                 html += `<option value="${d}">${formatToKoreanDate(d)} (${dateMap[d].toLocaleString()})</option>`;
             });
             selectEl.innerHTML = html;
@@ -357,7 +355,7 @@ function handleStockLogUpload(e) {
             if (tableData.length > 0) buildTableFromData();
         } catch (err) {
             hideLoading();
-            alert('🚨 파일 파 파싱 실패: ' + err.message);
+            alert('🚨 파일 파싱 실패: ' + err.message);
             console.error(err);
         }
         e.target.value = '';
@@ -540,16 +538,22 @@ function sortTable(key) {
 }
 
 // =========================================================
-// 엑셀 다운로드 & 전체 초기화
+// 엑셀 다운로드 (Ver 1.4.5: 상품코드, 수량 항목만 다운로드) & 전체 초기화
 // =========================================================
 function downloadExcel() {
     if (!filteredData || filteredData.length === 0) { alert('다운로드할 데이터가 없습니다.'); return; }
-    const headers = ['상품코드','상품명','옵션명','도착수량(패킹수량)','미발수량','총재고','로케이션','로케이션적재량','입고확인','부족수량','직진배송수량','비고'];
-    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style>td{mso-number-format:"\\@";}.header{font-weight:bold;background:#FFE0B2;text-align:center;border:1px solid #ccc;padding:6px;}.cell{border:1px solid #ddd;padding:4px 8px;text-align:center;}.cellL{border:1px solid #ddd;padding:4px 8px;text-align:left;}.num{mso-number-format:"0";text-align:right;}</style><table>`;
+    
+    // 다운로드할 헤더 지정
+    const headers = ['상품코드', '수량'];
+    
+    let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><meta http-equiv="Content-Type" content="text/html; charset=utf-8"><style>td{mso-number-format:"\\@";}.header{font-weight:bold;background:#FFE0B2;text-align:center;border:1px solid #ccc;padding:6px;}.cell{border:1px solid #ddd;padding:4px 8px;text-align:center;}.num{mso-number-format:"0";text-align:right;}</style><table>`;
     html += `<tr>${headers.map(h=>`<td class="header">${h}</td>`).join('')}</tr>`;
+    
+    // 선택된 두 개의 데이터(code, arrivalQty)만 테이블에 추가
     filteredData.forEach(r => {
-        html += `<tr><td class="cell">${r.code}</td><td class="cellL">${r.name}</td><td class="cell">${r.option}</td><td class="num">${r.arrivalQty}</td><td class="num">${r.mibalQty}</td><td class="num">${r.totalStock}</td><td class="cell">${r.location}</td><td class="num">${r.capacity||''}</td><td class="cell">${r.confirmed||''}</td><td class="cell">${r.shortage||''}</td><td class="cell">${r.directShip||''}</td><td class="cellL">${r.memo||''}</td></tr>`;
+        html += `<tr><td class="cell">${r.code}</td><td class="num">${r.arrivalQty}</td></tr>`;
     });
+    
     html += '</table></html>';
     const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8' });
     const a = document.createElement('a');
@@ -664,7 +668,7 @@ async function init() {
         applyDates();
     }
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.4 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.5 초기화 완료');
 }
 
 init();
