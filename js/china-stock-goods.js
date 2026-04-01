@@ -1,8 +1,7 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.4.6
+// 중국제작 미발계산기 Ver 1.4.7
 
 import { initializeFirebase } from './config.js';
-// 플러터 앱 실시간 통신을 위한 onSnapshot 추가
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
@@ -27,6 +26,9 @@ let savedDates = [];
 // 유틸리티
 // =========================================================
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
+
+// 엑셀에서 복사된 '1,000' 형태의 콤마를 제거하고 완벽하게 숫자로 변환하는 함수
+const parseExcelNum = (val) => parseInt((val || '0').toString().replace(/,/g, '').trim()) || 0;
 
 function getProductName(row) {
     return row['상품명'] || row['공급처상품명'] || '';
@@ -61,28 +63,15 @@ function closeAllMenus() {
 function formatToKoreanDate(raw) {
     if (!raw) return '';
     let d = String(raw).trim();
-    
-    // 엑셀 일련번호(숫자형) 처리
     if (!isNaN(d) && Number(d) > 30000) {
         const date = new Date((Number(d) - 25569) * 86400 * 1000);
         return `${date.getMonth() + 1}월${date.getDate()}일출고`;
     }
-
-    // 문자열 날짜 처리
     let parts = d.split(/[-./]/);
     let m, day;
-    if (parts.length === 3) {
-        m = parseInt(parts[1], 10);
-        day = parseInt(parts[2], 10);
-    } else if (parts.length === 2) {
-        m = parseInt(parts[0], 10);
-        day = parseInt(parts[1], 10);
-    }
-    
-    if (m && day && !isNaN(m) && !isNaN(day)) {
-        return `${m}월${day}일출고`;
-    }
-    
+    if (parts.length === 3) { m = parseInt(parts[1], 10); day = parseInt(parts[2], 10); } 
+    else if (parts.length === 2) { m = parseInt(parts[0], 10); day = parseInt(parts[1], 10); }
+    if (m && day && !isNaN(m) && !isNaN(day)) return `${m}월${day}일출고`;
     return `${d}출고`;
 }
 
@@ -121,12 +110,8 @@ function populateDynamicDates() {
                 html += `<option value="${d}">${formatToKoreanDate(d)} (${dateMap[d].toLocaleString()})</option>`;
             });
             selectEl.innerHTML = html;
-            
-            if(sortedDates.includes(currentVal)) {
-                selectEl.value = currentVal;
-            } else {
-                selectEl.value = '';
-            }
+            if(sortedDates.includes(currentVal)) selectEl.value = currentVal;
+            else selectEl.value = '';
         }
     }
 }
@@ -187,7 +172,7 @@ async function loadStockLogFromFirebase() {
             const data = d.data();
             if (data.dataStr) {
                 JSON.parse(data.dataStr).forEach(row => {
-                    const code = (row['상품코드'] || '').toString().trim();
+                    const code = (row['상품코드'] || row['어드민상품코드'] || '').toString().trim();
                     if (code) stockLogData[code] = row;
                 });
             }
@@ -307,7 +292,7 @@ async function syncOrderData() {
 }
 
 // =========================================================
-// ★ 미발재고로그 붙여넣기 기능 (Ver 1.4.6 신규)
+// ★ 미발재고로그 붙여넣기 기능 (Ver 1.4.7 보강 - 실시간 반영)
 // =========================================================
 function openPasteModal() {
     document.getElementById('paste-textarea').value = '';
@@ -327,35 +312,46 @@ async function processPastedData() {
     showLoading('📂 미발재고로그 분석 중...');
 
     try {
-        // 엔터(\n)를 기준으로 줄(행)을 분리합니다.
         const lines = text.split(/\r?\n/);
-        if (lines.length < 2) throw new Error('데이터가 부족합니다. (헤더 포함 2줄 이상 필요)');
+        let headerIdx = -1;
+        let headers = [];
 
-        // 첫 번째 줄은 탭(\t)을 기준으로 열(헤더 이름)을 분리합니다.
-        const headers = lines[0].split('\t').map(h => h.trim());
+        // 엑셀에서 복사 시 상단에 불필요한 빈줄이나 타이틀이 있어도 '상품코드' 열을 자동으로 찾아냅니다.
+        for(let i=0; i<lines.length; i++) {
+            const cols = lines[i].split('\t').map(c => c.replace(/^"|"$/g, '').trim());
+            if (cols.includes('상품코드') || cols.includes('어드민상품코드')) {
+                headerIdx = i;
+                headers = cols;
+                break;
+            }
+        }
+
+        if (headerIdx === -1) {
+            throw new Error('데이터에서 "상품코드" 열을 찾을 수 없습니다.\n엑셀에서 표 형태(제목줄 포함)로 드래그하여 복사했는지 확인해주세요.');
+        }
+
         let rows = [];
-
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
+        for (let i = headerIdx + 1; i < lines.length; i++) {
+            const line = lines[i];
+            if (!line.trim()) continue; // 내부 탭은 유지하되 아예 비어있는 줄만 무시
             
             const cells = line.split('\t');
             let obj = {};
             
             cells.forEach((cell, idx) => {
                 if (headers[idx]) {
-                    obj[headers[idx]] = cell.trim();
+                    obj[headers[idx]] = cell.replace(/^"|"$/g, '').trim();
                 }
             });
 
-            if (obj['상품코드']) {
+            if (obj['상품코드'] || obj['어드민상품코드']) {
                 rows.push(obj);
             }
         }
 
         stockLogData = {};
         rows.forEach(row => {
-            const code = (row['상품코드'] || '').toString().trim();
+            const code = (row['상품코드'] || row['어드민상품코드'] || '').toString().trim();
             if (code) stockLogData[code] = row;
         });
 
@@ -363,19 +359,24 @@ async function processPastedData() {
         await saveChunkedData(rows, 'StockLog');
         
         hideLoading();
-        showToast(`✅ 미발재고로그 ${rows.length}건 반영 완료`);
+        showToast(`✅ 미발재고로그 ${rows.length}건 실시간 반영 완료`);
         document.getElementById('paste-textarea').value = ''; 
         
-        // 현재 표가 로드되어 있는 상태라면 바로 화면을 갱신합니다.
-        if (tableData.length > 0) buildTableFromData();
+        // ★ 붙여넣자마자 화면 표 즉시 갱신
+        if (tableData.length > 0) {
+            buildTableFromData();
+        } else {
+            // 표가 비어있더라도 출고일이 선택되어 있다면 표를 새로 생성
+            const hasDate = savedDates.some(d => d && d.trim());
+            if (hasDate) applyDates();
+        }
 
     } catch (err) {
         hideLoading();
-        alert('🚨 데이터 파싱 실패: ' + err.message + '\n\n엑셀에서 표 형태(헤더 포함)로 정상 복사했는지 확인해주세요.');
+        alert('🚨 데이터 파싱 실패: ' + err.message);
         console.error(err);
     }
 }
-
 
 // =========================================================
 // 출고일 적용 → 테이블 생성
@@ -433,13 +434,19 @@ function applyDates() {
 
     tableData = Object.values(resultMap).map(item => {
         const log = stockLogData[item.code] || {};
-        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
+        
+        // 헤더명이 조금씩 달라도 유연하게 찾고 콤마 제거
+        const loc = (log['로케이션'] || log['위치'] || '').toString().split('/')[0].trim();
+        const tStockStr = log['정상재고'] || log['총재고'] || log['재고'];
+        const mibalStr = log['부족수량'] || log['미발수량'];
+        
         const edited = editedCells[item.code] || {};
+        
         return {
             code: item.code, name: item.name, option: item.option,
             arrivalQty: item.arrivalQty,
-            mibalQty: parseInt(log['부족수량']) || 0,
-            totalStock: parseInt(log['정상재고']) || 0,
+            mibalQty: parseExcelNum(mibalStr),
+            totalStock: parseExcelNum(tStockStr),
             location: loc,
             capacity: getCapacityByLocation(loc),
             confirmed: edited.confirmed || '',
@@ -452,7 +459,7 @@ function applyDates() {
     filteredData = [...tableData];
     renderTable();
     updateSummary();
-    showToast(`✅ ${tableData.length}개 상품 매칭 완료`);
+    showToast(`✅ ${tableData.length}개 상품 데이터 연결 완료`);
 }
 
 function clearDates() {
@@ -491,12 +498,16 @@ function renderTable() {
     tbody.innerHTML = html;
 }
 
+// 붙여넣기 직후 데이터를 다시 결합하는 함수
 function buildTableFromData() {
     tableData.forEach(item => {
         const log = stockLogData[item.code] || {};
-        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
-        item.totalStock = parseInt(log['정상재고']) || 0;
-        item.mibalQty = parseInt(log['부족수량']) || 0;
+        const loc = (log['로케이션'] || log['위치'] || '').toString().split('/')[0].trim();
+        const tStockStr = log['정상재고'] || log['총재고'] || log['재고'];
+        const mibalStr = log['부족수량'] || log['미발수량'];
+
+        item.totalStock = parseExcelNum(tStockStr);
+        item.mibalQty = parseExcelNum(mibalStr);
         item.location = loc;
         item.capacity = getCapacityByLocation(loc);
     });
@@ -703,7 +714,7 @@ function setupEventListeners() {
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { closeAllMenus(); openSheetSettingsModal(); });
     document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
     
-    // 신규: 붙여넣기 모달 관련 이벤트
+    // 붙여넣기 모달 관련 이벤트
     document.getElementById('btn-open-paste-modal')?.addEventListener('click', () => { closeAllMenus(); openPasteModal(); });
     document.getElementById('btn-paste-cancel')?.addEventListener('click', closePasteModal);
     document.getElementById('btn-paste-apply')?.addEventListener('click', processPastedData);
@@ -758,10 +769,9 @@ async function init() {
         applyDates();
     }
 
-    // 플러터 앱 연동을 위한 백그라운드 리스너 실행
     listenToAppRequests();
 
-    console.log('🏭 중국제작 미발계산기 Ver 1.4.6 초기화 완료');
+    console.log('🏭 중국제작 미발계산기 Ver 1.4.7 초기화 완료');
 }
 
 init();
