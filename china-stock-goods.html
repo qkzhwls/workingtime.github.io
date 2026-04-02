@@ -1,154 +1,30 @@
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>중국제작 미발계산기</title>
-    <style>
-        :root { --primary: #e65100; --bg: #f8f9fa; --card: #ffffff; }
-        body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; }
-        .controls-header { margin: 15px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-        .header-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        .version-badge { background: #fff3e0; color: #bf360c; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #ffcc80; }
-        .upload-dropdown { position: relative; display: inline-block; }
-        .btn-main-upload { padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; display: flex; align-items: center; gap: 5px; }
-        .btn-main-upload:hover { filter: brightness(1.2); }
-        .upload-menu { display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); margin-top: 5px; z-index: 10001; overflow: hidden; white-space: nowrap; }
-        .upload-menu label, .upload-menu div.menu-item { display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; transition: background 0.2s; color: #333; font-weight: bold; }
-        .upload-menu label:hover, .upload-menu div.menu-item:hover { background: #fff3e0; color: var(--primary); }
-        .upload-menu input[type="file"] { display: none; }
-        .btn-download { padding: 8px 15px; background: #1976d2; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 5px; font-size: 13px; }
-        .btn-download:hover { background: #1565c0; }
-        .date-bar { margin: 0 20px 10px 20px; background: white; border: 1px solid #ddd; border-radius: 10px; padding: 12px 15px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-        .date-bar label { font-size: 13px; font-weight: bold; color: #555; }
-        .date-input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 120px; text-align: center; }
-        .date-input:focus { border-color: var(--primary); outline: none; }
-        .btn-date-apply { padding: 6px 14px; background: var(--primary); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; }
-        .btn-date-apply:hover { background: #bf360c; }
-        .btn-date-clear { padding: 6px 14px; background: #999; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; }
-        .summary-bar { margin: 0 20px 10px 20px; display: flex; gap: 15px; flex-wrap: wrap; }
-        .summary-card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px 18px; display: flex; flex-direction: column; align-items: center; min-width: 100px; }
-        .summary-card .label { font-size: 11px; color: #888; font-weight: bold; }
-        .summary-card .value { font-size: 22px; font-weight: 900; color: #333; }
-        .summary-card.highlight .value { color: var(--primary); }
-        .list-container { overflow: auto; background: white; margin: 0 20px 10px 20px; padding: 0; border-radius: 12px; border: 1px solid #ccc; height: calc(100vh - 260px); }
-        .list-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
-        .list-table th, .list-table td { padding: 10px 12px; text-align: center; border: 1px solid #ccc; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .list-table tbody tr { transition: background 0.15s; }
-        .list-table tbody tr:hover { background: #fff8e1; }
-        .list-table tbody tr:nth-child(even) { background: #fafafa; }
-        .list-table tbody tr:nth-child(even):hover { background: #fff8e1; }
-        .list-table th { background: #f4f4f4; position: sticky; top: -1px; z-index: 10; user-select: none; box-shadow: inset 0 -1px 0 #ccc, inset 0 1px 0 #ccc; font-size: 13px; font-weight: 800; color: #222; }
-        .th-sortable { cursor: pointer; }
-        .th-sortable:hover { background: #eee; }
-        .editable-cell { cursor: text; background: #fffde7; min-width: 50px; }
-        .editable-cell:hover { background: #fff9c4; }
-        .editable-cell:focus { outline: 2px solid var(--primary); background: #fff; }
-        .code-cell { font-weight: bold; color: #1565c0; cursor: copy; }
-        .code-cell:hover { text-decoration: underline; }
-        .capacity-auto { color: #888; font-size: 12px; }
-        .search-box { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 180px; }
-        .search-box:focus { border-color: var(--primary); outline: none; }
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center; }
-        .modal-content { background: white; padding: 25px; border-radius: 10px; width: 450px; max-height: 85vh; overflow-y: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
-        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #333; }
-        .modal-body { display: flex; flex-direction: column; gap: 12px; }
-        .modal-body label { font-size: 13px; font-weight: bold; color: #555; margin-bottom: -5px; }
-        .modal-body input { padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
-        .modal-footer { margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px; }
-        .btn-modal-save { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .btn-modal-cancel { padding: 8px 16px; background: #888; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .loading-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); z-index: 999999; flex-direction: column; justify-content: center; align-items: center; color: white; backdrop-filter: blur(3px); }
-        .spinner { border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--primary); border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 20px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .loading-text { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
-        #toast { visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center; border-radius: 8px; padding: 12px; position: fixed; z-index: 10001; left: 50%; bottom: 30px; transform: translateX(-50%); font-size: 14px; opacity: 0; transition: opacity 0.3s, bottom 0.3s; }
-        #toast.show { visibility: visible; opacity: 1; bottom: 50px; }
-    </style>
-</head>
-<body>
-    <div id="loading-overlay" class="loading-overlay">
-        <div class="spinner"></div>
-        <div class="loading-text" id="loading-text">데이터 처리 중...</div>
-        <div style="font-size:13px; color:#ccc; margin-top:10px;">창을 닫거나 새로고침하지 마세요.</div>
-    </div>
-    <div class="controls-header">
-        <div class="header-left">
-            <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 1.6.1</div>
-            <input type="text" id="search-input" class="search-box" placeholder="🔍 상품코드/상품명 검색">
+<style>
+    /* Ver 1.8 버튼 스타일 추가 */
+    .date-bar { margin: 0 20px 10px 20px; background: white; border: 1px solid #ddd; border-radius: 10px; padding: 12px 15px; display: flex; flex-direction: column; gap: 12px; }
+    .date-select-wrapper { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .date-list-container { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; min-height: 40px; align-items: center; }
+    
+    .date-toggle-btn { 
+        padding: 6px 12px; border: 1px solid #ddd; background: #fdfdfd; border-radius: 6px; cursor: pointer; 
+        font-size: 13px; font-weight: bold; line-height: 1.3; text-align: center; transition: 0.2s;
+    }
+    .date-toggle-btn small { display: block; font-size: 10px; color: #888; font-weight: normal; margin-top: 2px; }
+    .date-toggle-btn:hover { background: #fff3e0; border-color: var(--primary); }
+    .date-toggle-btn.selected { background: var(--primary); color: white; border-color: var(--primary); }
+    .date-toggle-btn.selected small { color: #ffe0b2; }
+
+    .date-actions { display: flex; gap: 8px; border-left: 1px solid #eee; padding-left: 15px; }
+</style>
+
+<div class="date-bar">
+    <div class="date-select-wrapper">
+        <label style="font-size: 13px; font-weight: bold; color: #555; white-space: nowrap;">📅 출고일 선택:</label>
+        <div class="date-list-container" id="date-list-container">
+            <span style="color:#888; font-size:13px;">데이터 로드 중...</span>
         </div>
-        <div class="header-actions">
-            <button class="btn-download" id="btn-excel-download">📥 엑셀 다운로드</button>
-            <div class="upload-dropdown">
-                <button class="btn-main-upload" id="btn-toggle-menu">🛠️ 작업 메뉴 ▼</button>
-                <div class="upload-menu" id="main-tools-menu" style="width:300px;">
-                    <div style="padding:8px 15px; background:#eceff1; font-size:12px; color:#546e7a; font-weight:bold;">📊 데이터 소스 관리</div>
-                    <label><span style="color:var(--primary);">📂 미발재고로그 업로드 (.xls)</span><input type="file" id="upload-stock-log" accept=".xls,.xlsx,.csv,.html,.htm"></label>
-                    <div class="menu-item" id="btn-sync-order"><span style="color:#1976d2;">🔄 오더리스트 시트 동기화</span></div>
-                    <div style="padding:8px 15px; background:#eceff1; font-size:12px; color:#546e7a; font-weight:bold; border-top:1px solid #ddd;">⚙️ 설정</div>
-                    <div class="menu-item" id="btn-open-sheet-settings"><span style="color:#607d8b;">📎 CSV 시트 링크 설정</span></div>
-                    <div class="menu-item" id="btn-clear-all"><span style="color:#d32f2f;">🗑️ 전체 데이터 초기화</span></div>
-                </div>
-            </div>
+        <div class="date-actions">
+            <button class="btn-date-apply" id="btn-date-apply">적용</button>
+            <button class="btn-date-clear" id="btn-date-clear">초기화</button>
         </div>
     </div>
-    <div class="date-bar">
-        <label>📅 출고일:</label>
-        <input type="date" class="date-input" id="date-1"><input type="date" class="date-input" id="date-2"><input type="date" class="date-input" id="date-3"><input type="date" class="date-input" id="date-4">
-        <input type="date" class="date-input" id="date-5"><input type="date" class="date-input" id="date-6"><input type="date" class="date-input" id="date-7"><input type="date" class="date-input" id="date-8">
-        <button class="btn-date-apply" id="btn-date-apply">적용</button>
-        <button class="btn-date-clear" id="btn-date-clear">초기화</button>
-    </div>
-    <div class="summary-bar">
-        <div class="summary-card highlight"><span class="label">총 SKU</span><span class="value" id="sum-sku">0</span></div>
-        <div class="summary-card highlight"><span class="label">총 도착수량</span><span class="value" id="sum-arrival">0</span></div>
-        <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span></div>
-    </div>
-    <div class="list-container">
-        <table class="list-table">
-            <thead><tr>
-                <th style="width:40px;">No</th>
-                <th class="th-sortable" data-sort="code" style="width:100px;">상품코드</th>
-                <th class="th-sortable" data-sort="name" style="min-width:150px;">상품명</th>
-                <th style="width:120px;">옵션명</th>
-                <th class="th-sortable" data-sort="arrivalQty" style="width:80px;">도착수량<br>(패킹수량)</th>
-                <th class="th-sortable" data-sort="mibalQty" style="width:80px;">미발수량</th>
-                <th class="th-sortable" data-sort="totalStock" style="width:70px;">총재고</th>
-                <th style="width:120px;">로케이션</th>
-                <th style="width:60px;">적재량</th>
-                <th style="width:70px;">입고확인</th>
-                <th style="width:70px;">부족수량</th>
-                <th style="width:80px;">직진배송수량</th>
-                <th style="min-width:100px;">비고</th>
-            </tr></thead>
-            <tbody id="table-body">
-                <tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 입력하고 [적용]을 누르거나, 작업 메뉴에서 데이터를 불러오세요.</td></tr>
-            </tbody>
-        </table>
-    </div>
-    <div id="sheet-settings-modal" class="modal-overlay">
-        <div class="modal-content" style="width:500px;">
-            <div class="modal-header">📎 오더리스트 CSV 시트 링크 설정</div>
-            <div class="modal-body">
-                <label style="color:var(--primary);">① 오더리스트(원본) CSV 링크</label>
-                <input type="text" id="modal-csv-order" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
-                <label style="color:var(--primary); margin-top:15px;">② 오더리스트(사입) CSV 링크</label>
-                <input type="text" id="modal-csv-buy" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
-                <div style="font-size:11px; color:#666; margin-top:10px; line-height:1.4; background:#f9f9f9; padding:10px; border-radius:6px; border:1px solid #ddd;">
-                    ※ 구글 시트에서 각 탭 선택 후 <strong>[파일] > [공유] > [웹에 게시]</strong><br>
-                    ※ 형식을 <strong>'CSV'</strong>로 변경한 뒤 생성된 링크를 붙여넣으세요.
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-modal-cancel" id="btn-sheet-cancel">취소</button>
-                <button class="btn-modal-save" id="btn-sheet-save">저장</button>
-            </div>
-        </div>
-    </div>
-    <div id="toast"></div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script type="module" src="js/china-stock-goods.js"></script>
-</body>
-</html>
+</div>
