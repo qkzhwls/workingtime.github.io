@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.2 (이벤트 바인딩 완전 복구 및 체크리스트 도입)
+// 중국제작 미발계산기 Ver 2.3 (누락 함수 복구 및 이벤트 바인딩 완전체)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -159,6 +159,173 @@ async function fetchCSV(url) {
 }
 
 // ---------------------------------------------------------
+// [복구] 1. 미발재고로그 업로드 (DOMParser 사용)
+// ---------------------------------------------------------
+function handleStockLogUpload(e) {
+    const file = e.target.files[0]; 
+    if (!file) return;
+    showLoading('📂 미발재고로그 처리 중...');
+    
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+        try {
+            const text = evt.target.result;
+            let rows = [];
+            
+            // HTML 테이블 형식인지 확인 (DOMParser 적용)
+            if (text.includes('<table') || text.includes('<TABLE')) {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(text, 'text/html');
+                const table = doc.querySelector('table');
+                
+                if (table) {
+                    const trs = table.querySelectorAll('tr');
+                    let headers = [];
+                    trs.forEach((tr, rowIndex) => {
+                        const tds = tr.querySelectorAll('th, td');
+                        if (rowIndex === 0) {
+                            tds.forEach(td => headers.push(cleanKey(td.innerText)));
+                        } else {
+                            let obj = {};
+                            let empty = true;
+                            tds.forEach((td, colIndex) => {
+                                if (headers[colIndex]) {
+                                    const val = td.innerText.trim();
+                                    obj[headers[colIndex]] = val;
+                                    if (val) empty = false;
+                                }
+                            });
+                            if (!empty && obj['상품코드']) rows.push(obj);
+                        }
+                    });
+                }
+            } else {
+                // 일반 Excel, CSV 처리
+                const wb = XLSX.read(text, { type: 'binary' });
+                rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
+            }
+
+            stockLogData = {}; 
+            rows.forEach(row => { 
+                const code = (row['상품코드'] || '').toString().trim(); 
+                if (code) stockLogData[code] = row; 
+            });
+            
+            await saveChunkedData(rows, 'StockLog', (msg) => showLoading(msg));
+            hideLoading(); 
+            showToast('✅ 미발재고 저장 완료');
+            if (tableData.length > 0) applyDates();
+            
+        } catch (err) { 
+            hideLoading(); 
+            alert('파일 처리 실패: ' + err.message); 
+        }
+        e.target.value = '';
+    };
+    reader.readAsText(file, 'UTF-8');
+}
+
+// ---------------------------------------------------------
+// [복구] 2. 스캔DB 업로드
+// ---------------------------------------------------------
+async function uploadScanDB() {
+    if (!tableData || tableData.length === 0) { alert('업로드할 데이터가 없습니다.'); return; }
+    if (!confirm(`현재 ${tableData.length}건의 데이터를 앱용 스캔DB로 업로드하시겠습니까?`)) return;
+    showLoading('🚀 앱용 스캔DB 업로드 중...');
+    const SCAN_DB_COLL = 'ChinaStockGoods_ScanDB';
+    try {
+        const existing = await getDocs(collection(db, SCAN_DB_COLL));
+        if (existing.size > 0) {
+            const delBatch = writeBatch(db);
+            existing.docs.forEach(d => delBatch.delete(d.ref));
+            await delBatch.commit();
+        }
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < tableData.length; i += CHUNK_SIZE) {
+            const batch = writeBatch(db);
+            const chunk = tableData.slice(i, i + CHUNK_SIZE);
+            chunk.forEach(item => {
+                const docRef = doc(db, SCAN_DB_COLL, item.code);
+                batch.set(docRef, {
+                    code: item.code, name: item.name, option: item.option,
+                    arrivalQty: item.arrivalQty, mibalQty: item.mibalQty,
+                    totalStock: item.totalStock, location: item.location,
+                    capacity: item.capacity, updatedAt: new Date()
+                });
+            });
+            await batch.commit();
+        }
+        hideLoading(); showToast(`✅ 스캔DB 업로드 완료 (${tableData.length}건)`);
+    } catch (e) { hideLoading(); alert('업로드 실패: ' + e.message); }
+}
+
+// ---------------------------------------------------------
+// [복구] 3. 전체 데이터 초기화 (#btn-clear-all)
+// ---------------------------------------------------------
+async function clearAllData() {
+    if (!confirm("모든 데이터를 초기화하시겠습니까?\n(수동편집, 미발재고로그, 앱 입고이력이 모두 삭제됩니다.)")) return;
+    showLoading('🗑️ 전체 데이터 초기화 중...');
+    try {
+        // 1. EDITED_CELLS 삭제
+        await deleteDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'));
+        
+        // 2. StockLog 청크 삭제
+        const stockSnap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog'));
+        if (stockSnap.size > 0) {
+            const b1 = writeBatch(db);
+            stockSnap.forEach(d => b1.delete(d.ref));
+            await b1.commit();
+        }
+        
+        // 3. InboundHistory 삭제
+        const inboundSnap = await getDocs(collection(db, 'ChinaStockGoods_InboundHistory'));
+        if (inboundSnap.size > 0) {
+            const b2 = writeBatch(db);
+            inboundSnap.forEach(d => b2.delete(d.ref));
+            await b2.commit();
+        }
+
+        // 변수 초기화
+        orderDataOriginal = [];
+        orderDataBuy = [];
+        stockLogData = {};
+        editedCells = {};
+        inboundMap = {};
+        tableData = [];
+        filteredData = [];
+        savedDates = [];
+        
+        updateSavedDatesFromCheckboxes();
+        renderSelectedTags();
+        renderTable();
+        updateSummary();
+        document.getElementById('date-checklist-container').innerHTML = '';
+        
+        hideLoading();
+        showToast('✅ 전체 초기화 완료');
+    } catch (e) {
+        hideLoading();
+        alert('초기화 실패: ' + e.message);
+    }
+}
+
+// ---------------------------------------------------------
+// [복구] 4. 출고일 초기화 (clearDates)
+// ---------------------------------------------------------
+function clearDates() {
+    savedDates = []; 
+    document.querySelectorAll('.date-check').forEach(btn => btn.checked = false);
+    updateSavedDatesFromCheckboxes(); 
+    renderSelectedTags();
+    tableData = []; 
+    filteredData = []; 
+    renderTable(); 
+    updateSummary(); 
+    saveConfig(); 
+    showToast('🔄 초기화 완료');
+}
+
+// ---------------------------------------------------------
 // 비즈니스 로직 (매칭 및 렌더링)
 // ---------------------------------------------------------
 function extractShipDates() {
@@ -272,6 +439,23 @@ function updateSummary() {
     document.getElementById('sum-arrival').textContent = filteredData.reduce((s,d)=>s+d.arrivalQty,0);
 }
 
+function applySearch() {
+    const k = document.getElementById('search-input')?.value.trim().toUpperCase();
+    filteredData = k ? tableData.filter(d => d.code.includes(k) || d.name.includes(k)) : [...tableData];
+    renderTable(); updateSummary();
+}
+
+function sortTable(key) {
+    if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
+    else { sortConfig.key = key; sortConfig.direction = 'asc'; }
+    filteredData.sort((a, b) => {
+        let va = a[key], vb = b[key];
+        if (typeof va === 'number' && typeof vb === 'number') return sortConfig.direction === 'asc' ? va - vb : vb - va;
+        return sortConfig.direction === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+    });
+    renderTable();
+}
+
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
@@ -282,36 +466,41 @@ async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITE
 async function loadStockLogFromFirebase() { const snap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog')); snap.forEach(d => { if(d.data().dataStr) JSON.parse(d.data().dataStr).forEach(r => { const c = (r['상품코드']||'').trim(); if(c) stockLogData[c] = r; }); }); }
 
 // ---------------------------------------------------------
-// 이벤트 바인딩 (핵심 수정 영역)
+// 이벤트 바인딩 (체크리스트 기반 완전 복원)
 // ---------------------------------------------------------
 function setupEventListeners() {
-    // 1. 작업 메뉴 토글
+    // 1. #btn-toggle-menu (작업 메뉴 토글)
     document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => { 
         e.stopPropagation(); 
         const m = document.getElementById('main-tools-menu'); 
         m.style.display = m.style.display === 'block' ? 'none' : 'block'; 
     });
 
-    // 2. 메뉴 내부 클릭 전파 방지
+    // 2. #main-tools-menu (메뉴 내부 클릭 전파 방지)
     document.getElementById('main-tools-menu')?.addEventListener('click', (e) => e.stopPropagation());
 
-    // 3. 문서 클릭 시 메뉴 닫기
+    // 3. document click (메뉴 닫기)
     document.addEventListener('click', () => closeAllMenus());
 
-    // 4. 오더리스트 동기화
+    // 4. #btn-sync-order (오더리스트 동기화)
     document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
 
-    // 5. CSV 링크 설정 모달 열기
+    // 5. #btn-open-sheet-settings (CSV 링크 설정 모달 열기)
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => openSheetSettingsModal());
 
-    // 7. 미발재고로그 업로드 (input file)
+    // 6. #btn-clear-all (전체 초기화) - [복구 완료]
+    document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
+
+    // 7. #upload-stock-log (미발재고로그 업로드)
     document.getElementById('upload-stock-log')?.addEventListener('change', (e) => handleStockLogUpload(e));
 
-    // 8, 9. 출고일 적용 및 초기화
+    // 8. #btn-date-apply (적용)
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
+
+    // 9. #btn-date-clear (초기화) - [복구 완료]
     document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
 
-    // 10. 엑셀 다운로드
+    // 10. #btn-excel-download (엑셀 다운로드)
     document.getElementById('btn-excel-download')?.addEventListener('click', () => {
         if (!filteredData.length) return;
         const headers = ['상품코드','수량']; let html = '<table><tr><th>상품코드</th><th>수량</th></tr>';
@@ -321,27 +510,13 @@ function setupEventListeners() {
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '미발계산기.xls'; a.click();
     });
 
-    // 11. 검색
-    document.getElementById('search-input')?.addEventListener('input', () => {
-        const k = document.getElementById('search-input').value.trim().toUpperCase();
-        filteredData = k ? tableData.filter(d => d.code.includes(k) || d.name.includes(k)) : [...tableData];
-        renderTable(); updateSummary();
-    });
+    // 11. #search-input (검색)
+    document.getElementById('search-input')?.addEventListener('input', applySearch);
 
-    // 12. 정렬
-    document.querySelectorAll('.th-sortable').forEach(th => th.addEventListener('click', () => {
-        const key = th.dataset.sort;
-        if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
-        else { sortConfig.key = key; sortConfig.direction = 'asc'; }
-        filteredData.sort((a, b) => {
-            let va = a[key], vb = b[key];
-            if (typeof va === 'number' && typeof vb === 'number') return sortConfig.direction === 'asc' ? va - vb : vb - va;
-            return sortConfig.direction === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-        });
-        renderTable();
-    }));
+    // 12. .th-sortable (정렬)
+    document.querySelectorAll('.th-sortable').forEach(th => th.addEventListener('click', () => sortTable(th.dataset.sort)));
 
-    // 13. 셀 편집 (focusout)
+    // 13. #table-body focusout (셀 편집)
     document.getElementById('table-body')?.addEventListener('focusout', (e) => { 
         if (e.target.classList.contains('editable-cell')) {
             const code = e.target.dataset.code; const field = e.target.dataset.field; const value = e.target.textContent.trim();
@@ -350,7 +525,7 @@ function setupEventListeners() {
         }
     });
 
-    // 14. 코드 복사 (click)
+    // 14. #table-body click (코드 복사)
     document.getElementById('table-body')?.addEventListener('click', (e) => { 
         if (e.target.classList.contains('code-cell')) {
             const code = e.target.dataset.code; 
@@ -358,27 +533,27 @@ function setupEventListeners() {
         }
     });
 
-    // 15, 16. 모달 취소 및 저장
+    // 15. #btn-sheet-cancel (모달 취소)
     document.getElementById('btn-sheet-cancel')?.addEventListener('click', () => closeSheetSettingsModal());
+
+    // 16. #btn-sheet-save (모달 저장)
     document.getElementById('btn-sheet-save')?.addEventListener('click', () => saveSheetSettings());
 
-    // 17. 모달 바깥 클릭 닫기
+    // 17. #sheet-settings-modal (모달 바깥 클릭 닫기)
     document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => {
         if (e.target.id === 'sheet-settings-modal') closeSheetSettingsModal();
     });
 
-    // 18. 모달 내부 전파 방지
+    // 18. #sheet-settings-modal .modal-content (전파 방지)
     document.querySelector('#sheet-settings-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
-    // 19. 스캔DB 업로드
-    document.getElementById('btn-upload-scandb')?.addEventListener('click', () => {
-        if (typeof uploadScanDB === 'function') uploadScanDB();
-    });
+    // 19. #btn-upload-scandb (스캔DB 업로드) - [복구 완료]
+    document.getElementById('btn-upload-scandb')?.addEventListener('click', () => uploadScanDB());
 
-    // 20. 입고 이력 초기화
+    // 20. #btn-clear-inbound (입고 이력 초기화)
     document.getElementById('btn-clear-inbound')?.addEventListener('click', () => clearInboundHistory());
 
-    // 21. 출고일 드롭다운 관련
+    // 21. 출고일 드롭다운 관련 바인딩
     document.getElementById('btn-date-dropdown')?.addEventListener('click', (e) => { 
         e.stopPropagation(); 
         const p = document.getElementById('date-dropdown-popup'); 
@@ -393,29 +568,29 @@ function setupEventListeners() {
         updateSavedDatesFromCheckboxes(); renderSelectedTags(); 
     });
 
-    // ========= 바인딩 체크리스트 (Ver 2.2 도입) =========
-    // 1. #btn-toggle-menu (작업 메뉴 토글) [OK]
-    // 2. #main-tools-menu (메뉴 내부 클릭 전파 방지) [OK]
-    // 3. document click (메뉴 닫기) [OK]
-    // 4. #btn-sync-order (오더리스트 동기화) [OK]
-    // 5. #btn-open-sheet-settings (CSV 링크 설정 모달 열기) [OK]
-    // 6. #btn-clear-all (전체 초기화 - 현재 기능 미구현/생략)
-    // 7. #upload-stock-log (미발재고로그 업로드) [OK]
-    // 8. #btn-date-apply (적용) [OK]
-    // 9. #btn-date-clear (초기화) [OK]
-    // 10. #btn-excel-download (엑셀 다운로드) [OK]
-    // 11. #search-input (검색) [OK]
-    // 12. .th-sortable (정렬) [OK]
-    // 13. #table-body focusout (셀 편집) [OK]
-    // 14. #table-body click (코드 복사) [OK]
-    // 15. #btn-sheet-cancel (모달 취소) [OK]
-    // 16. #btn-sheet-save (모달 저장) [OK]
-    // 17. #sheet-settings-modal (모달 바깥 클릭 닫기) [OK]
-    // 18. #sheet-settings-modal .modal-content (전파 방지) [OK]
-    // 19. #btn-upload-scandb (스캔DB 업로드) [OK]
-    // 20. #btn-clear-inbound (입고 이력 초기화) [OK]
-    // 21. 출고일 드롭다운 관련 바인딩 [OK]
-    // =====================================================
+    // ========= 바인딩 체크리스트 (Ver 2.3) =========
+    // 1. #btn-toggle-menu [OK]
+    // 2. #main-tools-menu [OK]
+    // 3. document click [OK]
+    // 4. #btn-sync-order [OK]
+    // 5. #btn-open-sheet-settings [OK]
+    // 6. #btn-clear-all [OK] (clearAllData 함수 복원)
+    // 7. #upload-stock-log [OK] (handleStockLogUpload 함수 복원)
+    // 8. #btn-date-apply [OK]
+    // 9. #btn-date-clear [OK] (clearDates 함수 복원)
+    // 10. #btn-excel-download [OK]
+    // 11. #search-input [OK]
+    // 12. .th-sortable [OK]
+    // 13. #table-body focusout [OK]
+    // 14. #table-body click [OK]
+    // 15. #btn-sheet-cancel [OK]
+    // 16. #btn-sheet-save [OK]
+    // 17. #sheet-settings-modal [OK]
+    // 18. #sheet-settings-modal .modal-content [OK]
+    // 19. #btn-upload-scandb [OK] (uploadScanDB 함수 복원)
+    // 20. #btn-clear-inbound [OK]
+    // 21. 출고일 드롭다운 관련 [OK]
+    // ===============================================
 }
 
 async function init() {
@@ -433,5 +608,5 @@ async function init() {
 }
 init();
 
-// 전역에서 호출해야 하는 함수 명시적 정의
+// module 스크립트 특성상 전역 스코프에 함수를 노출 (인라인 이벤트 호환용)
 window.handleStockLogUpload = handleStockLogUpload;
