@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.8.2 (입고 완료 필터 강화)
+// 중국제작 미발계산기 Ver 1.9 (App ScanDB 연동 지원)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -32,7 +32,6 @@ function formatExcelDate(excelDate) {
     if (!excelDate || excelDate.toString().trim() === '') return '';
     if (typeof excelDate === 'string' && (excelDate.includes('-') || excelDate.includes('.'))) return excelDate;
     const num = parseFloat(excelDate);
-    if (isNaN(num)) return excelDate;
     const date = new Date(Math.round((num - 25569) * 86400 * 1000));
     return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 }
@@ -52,18 +51,14 @@ function normalizeDate(dateStr) {
 }
 
 function showLoading(text) {
-    const el = document.getElementById('loading-text');
-    if (el) el.innerText = text;
-    const overlay = document.getElementById('loading-overlay');
-    if (overlay) overlay.style.display = 'flex';
+    const el = document.getElementById('loading-text'); if (el) el.innerText = text;
+    document.getElementById('loading-overlay').style.display = 'flex';
 }
-function hideLoading() { const overlay = document.getElementById('loading-overlay'); if (overlay) overlay.style.display = 'none'; }
+function hideLoading() { document.getElementById('loading-overlay').style.display = 'none'; }
 
 function showToast(msg) {
-    const t = document.getElementById('toast');
-    if (!t) return;
-    t.innerText = msg;
-    t.classList.add('show');
+    const t = document.getElementById('toast'); if (!t) return;
+    t.innerText = msg; t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2500);
 }
 
@@ -71,8 +66,7 @@ function getCapacityByLocation(locStr) {
     if (!locStr) return 0;
     const ch = locStr.toString().trim().toUpperCase().charAt(0);
     const map = { 'A':20,'B':20,'C':20,'D':20,'E':40,'F':40,'G':40,'H':15,'I':15,'Z':15,'L':15,'O':15,'P':15,'Q':15,'R':15,'S':15,'T':15 };
-    if (locStr.includes('★')) return 90;
-    return map[ch] || 0;
+    return locStr.includes('★') ? 90 : (map[ch] || 0);
 }
 
 function closeAllMenus() {
@@ -80,30 +74,19 @@ function closeAllMenus() {
     const popup = document.getElementById('date-dropdown-popup'); if (popup) popup.style.display = 'none';
 }
 
-// ---------------------------------------------------------
-// [핵심] 출고일 목록 추출 (입고 완료 필터)
-// ---------------------------------------------------------
 function extractShipDates() {
     const checklistContainer = document.getElementById('date-checklist-container');
     if (!checklistContainer) return;
-
     const dateMap = {};
     const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
     const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
     const inQtyColsOrig = ['1차실입고수량','2차실입고수량','3차실입고수량','4차실입고수량','5차실입고수량','6차실입고수량'];
     const inAmtColsOrig = ['1차실입고금액','2차실입고금액','3차실입고금액','4차실입고금액','5차실입고금액','6차실입고금액'];
-
-    const dateColsBuy = ['1차패킹리스트출고일','2차패킹리스트출고일'];
-    const qtyColsBuy  = ['1차패킹리스트출고수량','2차패킹리스트출고수량'];
-    const inQtyColsBuy = ['1차실입고수량','2차실입고수량'];
-    const inAmtColsBuy = ['1차실입고금액','2차실입고금액'];
-
+    
     const process = (rows, dCols, qCols, iQCols, iACols) => {
         rows.forEach(row => {
             dCols.forEach((dc, idx) => {
-                // 입고 데이터 체크
                 if (hasValue(row[iQCols[idx]]) || hasValue(row[iACols[idx]])) return;
-
                 const normalized = normalizeDate(row[dc]);
                 if (!normalized || normalized.length < 10) return;
                 if (!dateMap[normalized]) dateMap[normalized] = { qty: 0, skus: new Set() };
@@ -112,27 +95,19 @@ function extractShipDates() {
             });
         });
     };
-
     process(orderDataOriginal, dateColsOrig, qtyColsOrig, inQtyColsOrig, inAmtColsOrig);
-    process(orderDataBuy, dateColsBuy, qtyColsBuy, inQtyColsBuy, inAmtColsBuy);
-
+    process(orderDataBuy, ['1차패킹리스트출고일','2차패킹리스트출고일'], ['1차패킹리스트출고수량','2차패킹리스트출고수량'], ['1차실입고수량','2차실입고수량'], ['1차실입고금액','2차실입고금액']);
+    
     const sortedDates = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0]));
-
-    if (sortedDates.length === 0) {
-        checklistContainer.innerHTML = '<div style="color:#888; font-size:12px; padding:10px;">미입고 데이터가 없습니다.</div>';
-        return;
-    }
-
+    if (sortedDates.length === 0) { checklistContainer.innerHTML = '<div style="color:#888; padding:10px;">미입고 데이터 없음</div>'; return; }
+    
     let html = '';
     sortedDates.forEach(([date, info]) => {
         const isChecked = savedDates.includes(date) ? 'checked' : '';
         html += `<label class="date-item"><input type="checkbox" class="date-check" value="${date}" ${isChecked}><span>${date} (${info.skus.size}종 / ${info.qty.toLocaleString()}장)</span></label>`;
     });
     checklistContainer.innerHTML = html;
-
-    checklistContainer.querySelectorAll('.date-check').forEach(ck => {
-        ck.addEventListener('change', () => { updateSavedDatesFromCheckboxes(); renderSelectedTags(); });
-    });
+    checklistContainer.querySelectorAll('.date-check').forEach(ck => { ck.addEventListener('change', () => { updateSavedDatesFromCheckboxes(); renderSelectedTags(); }); });
     renderSelectedTags();
 }
 
@@ -144,8 +119,7 @@ function updateSavedDatesFromCheckboxes() {
 }
 
 function renderSelectedTags() {
-    const container = document.getElementById('date-tags-container');
-    if (!container) return;
+    const container = document.getElementById('date-tags-container'); if (!container) return;
     if (savedDates.length === 0) { container.innerHTML = '<span class="no-selection-text">선택된 출고일 없음</span>'; return; }
     const sorted = [...savedDates].sort((a, b) => b.localeCompare(a));
     let html = '';
@@ -155,34 +129,18 @@ function renderSelectedTags() {
         btn.addEventListener('click', () => {
             const date = btn.dataset.date;
             savedDates = savedDates.filter(d => d !== date);
-            const ck = document.querySelector(`.date-check[value="${date}"]`);
-            if (ck) ck.checked = false;
+            const ck = document.querySelector(`.date-check[value="${date}"]`); if (ck) ck.checked = false;
             updateSavedDatesFromCheckboxes(); renderSelectedTags();
         });
     });
 }
 
-// Firebase & CSV 로직
-async function loadConfig() {
-    try {
-        const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC));
-        if (snap.exists()) {
-            const cfg = snap.data(); csvUrlOrder = cfg.csvUrlOrder || ''; csvUrlBuy = cfg.csvUrlBuy || ''; savedDates = cfg.savedDates || [];
-        }
-    } catch (e) { console.error('설정 로드 실패:', e); }
-}
-
-async function saveConfig() { try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); } catch (e) { console.error('설정 저장 실패:', e); } }
-async function loadEditedCells() { try { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; } catch (e) { console.error('편집 데이터 로드 실패:', e); } }
-async function saveEditedCells() { try { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells, updatedAt: new Date() }); } catch (e) { console.error('편집 데이터 저장 실패:', e); } }
-
-async function loadStockLogFromFirebase() {
-    try {
-        stockLogData = {};
-        const snap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog'));
-        snap.forEach(d => { const data = d.data(); if (data.dataStr) { JSON.parse(data.dataStr).forEach(row => { const code = (row['상품코드'] || '').toString().trim(); if (code) stockLogData[code] = row; }); } });
-    } catch (e) { console.error('미발재고로그 로드 실패:', e); }
-}
+// Firebase 로직
+async function loadConfig() { try { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const cfg = snap.data(); csvUrlOrder = cfg.csvUrlOrder || ''; csvUrlBuy = cfg.csvUrlBuy || ''; savedDates = cfg.savedDates || []; } } catch (e) {} }
+async function saveConfig() { try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); } catch (e) {} }
+async function loadEditedCells() { try { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; } catch (e) {} }
+async function saveEditedCells() { try { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells, updatedAt: new Date() }); } catch (e) {} }
+async function loadStockLogFromFirebase() { try { stockLogData = {}; const snap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog')); snap.forEach(d => { const data = d.data(); if (data.dataStr) { JSON.parse(data.dataStr).forEach(row => { const code = (row['상품코드'] || '').toString().trim(); if (code) stockLogData[code] = row; }); } }); } catch (e) {} }
 
 async function saveChunkedData(rows, subCollection, onProgress) {
     const collName = CHINA_COLLECTION + '_' + subCollection;
@@ -190,13 +148,12 @@ async function saveChunkedData(rows, subCollection, onProgress) {
         const existing = await getDocs(collection(db, collName));
         if (existing.size > 0) { for (const d of existing.docs) { await deleteDoc(d.ref); } }
         const CHUNK_SIZE = 500;
-        const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
         for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
             const chunk = rows.slice(i, i + CHUNK_SIZE);
-            const chunkIdx = Math.floor(i / CHUNK_SIZE);
-            let b = writeBatch(db); b.set(doc(db, collName, `CHUNK_${chunkIdx}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
-            await b.commit();
-            if (onProgress) onProgress(`💾 ${subCollection} 저장 중... ${chunkIdx + 1}/${totalChunks}`);
+            const batch = writeBatch(db);
+            batch.set(doc(db, collName, `CHUNK_${Math.floor(i/CHUNK_SIZE)}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            await batch.commit();
+            if (onProgress) onProgress(`💾 ${subCollection} 저장 중...`);
             await sleep(150);
         }
     } catch (e) { throw e; }
@@ -204,34 +161,33 @@ async function saveChunkedData(rows, subCollection, onProgress) {
 
 async function fetchCSV(url) {
     let textData = '';
-    try { const res = await fetch(url); if (!res.ok) throw new Error('연결 실패'); textData = await res.text(); }
+    try { const res = await fetch(url); textData = await res.text(); }
     catch (e) { const res2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`); textData = await res2.text(); }
     const wb = XLSX.read(textData, { type: 'string' });
     const rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
     let headerIdx = -1, headers = [];
     for (let i = 0; i < Math.min(20, rawData.length); i++) {
-        const cleaned = rawData[i].map(h => cleanKey(h));
-        if (cleaned.includes('어드민상품코드') || cleaned.includes('상품코드')) { headerIdx = i; headers = cleaned; break; }
+        const cl = rawData[i].map(h => cleanKey(h));
+        if (cl.includes('어드민상품코드') || cl.includes('상품코드')) { headerIdx = i; headers = cl; break; }
     }
-    if (headerIdx === -1) return [];
     const result = [];
     for (let i = headerIdx + 1; i < rawData.length; i++) {
         let obj = {}, empty = true;
-        for (let j = 0; j < headers.length; j++) { if (headers[j]) { obj[headers[j]] = rawData[i][j]; if (rawData[i][j] !== '' && rawData[i][j] !== undefined) empty = false; } }
+        for (let j = 0; j < headers.length; j++) { if (headers[j]) { obj[headers[j]] = rawData[i][j]; if (rawData[i][j] !== '') empty = false; } }
         if (!empty) result.push(obj);
     }
     return result;
 }
 
 async function syncOrderData(silent = false) {
-    if (!csvUrlOrder && !csvUrlBuy) { if(!silent) alert('링크를 먼저 설정하세요.'); return; }
+    if (!csvUrlOrder && !csvUrlBuy) return;
     if(!silent) showLoading('🔄 오더리스트 동기화 중...');
     try {
         const [dataOrder, dataBuy] = await Promise.all([fetchCSV(csvUrlOrder), fetchCSV(csvUrlBuy)]);
         orderDataOriginal = dataOrder; orderDataBuy = dataBuy;
         extractShipDates(); 
         if(!silent) { hideLoading(); showToast('✅ 동기화 완료'); }
-    } catch (e) { if(!silent) { hideLoading(); alert('실패: ' + e.message); } }
+    } catch (e) { if(!silent) hideLoading(); }
 }
 
 function handleStockLogUpload(e) {
@@ -240,37 +196,62 @@ function handleStockLogUpload(e) {
     const reader = new FileReader();
     reader.onload = async function(evt) {
         try {
-            const ab = new Uint8Array(evt.target.result.split('').map(c => c.charCodeAt(0))).buffer;
-            const wb = XLSX.read(ab, { type: 'array' });
+            const wb = XLSX.read(evt.target.result, { type: 'binary' });
             const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
             stockLogData = {}; rows.forEach(row => { const code = (row['상품코드'] || '').toString().trim(); if (code) stockLogData[code] = row; });
             await saveChunkedData(rows, 'StockLog', (msg) => showLoading(msg));
             hideLoading(); showToast('✅ 저장 완료');
             if (tableData.length > 0) applyDates();
-        } catch (err) { hideLoading(); alert('실패'); }
+        } catch (err) { hideLoading(); }
         e.target.value = '';
     };
-    reader.readAsText(file, 'UTF-8');
+    reader.readAsBinaryString(file);
 }
 
 // ---------------------------------------------------------
-// [핵심] 출고일 적용 (입고 완료 필터)
+// [신규] Ver 1.9: 앱용 스캔DB 업로드 함수
 // ---------------------------------------------------------
-function applyDates() {
-    const inputDates = savedDates; 
-    if (inputDates.length === 0) { alert('출고일을 선택해주세요.'); return; }
-    saveConfig();
+async function uploadScanDB() {
+    if (!tableData || tableData.length === 0) { alert('업로드할 데이터가 없습니다.'); return; }
+    if (!confirm(`현재 ${tableData.length}건의 데이터를 앱용 스캔DB로 업로드하시겠습니까?`)) return;
 
+    showLoading('🚀 앱용 스캔DB 업로드 중...');
+    const SCAN_DB_COLL = 'ChinaStockGoods_ScanDB';
+
+    try {
+        const existing = await getDocs(collection(db, SCAN_DB_COLL));
+        if (existing.size > 0) {
+            const delBatch = writeBatch(db);
+            existing.docs.forEach(d => delBatch.delete(d.ref));
+            await delBatch.commit();
+        }
+
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < tableData.length; i += CHUNK_SIZE) {
+            const batch = writeBatch(db);
+            const chunk = tableData.slice(i, i + CHUNK_SIZE);
+            chunk.forEach(item => {
+                const docRef = doc(db, SCAN_DB_COLL, item.code);
+                batch.set(docRef, {
+                    code: item.code, name: item.name, option: item.option,
+                    arrivalQty: item.arrivalQty, mibalQty: item.mibalQty,
+                    totalStock: item.totalStock, location: item.location,
+                    capacity: item.capacity, updatedAt: new Date()
+                });
+            });
+            await batch.commit();
+        }
+        hideLoading(); showToast(`✅ 스캔DB 업로드 완료 (${tableData.length}건)`);
+    } catch (e) { hideLoading(); alert('업로드 실패: ' + e.message); }
+}
+
+function applyDates() {
+    const inputDates = savedDates; if (inputDates.length === 0) { alert('출고일을 선택하세요.'); return; }
+    saveConfig();
     const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
     const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
     const inQtyColsOrig = ['1차실입고수량','2차실입고수량','3차실입고수량','4차실입고수량','5차실입고수량','6차실입고수량'];
     const inAmtColsOrig = ['1차실입고금액','2차실입고금액','3차실입고금액','4차실입고금액','5차실입고금액','6차실입고금액'];
-
-    const dateColsBuy = ['1차패킹리스트출고일','2차패킹리스트출고일'];
-    const qtyColsBuy  = ['1차패킹리스트출고수량','2차패킹리스트출고수량'];
-    const inQtyColsBuy = ['1차실입고수량','2차실입고수량'];
-    const inAmtColsBuy = ['1차실입고금액','2차실입고금액'];
-
     let resultMap = {};
     const match = (rows, dCols, qCols, iQCols, iACols) => {
         rows.forEach(row => {
@@ -287,10 +268,8 @@ function applyDates() {
             }
         });
     };
-
     match(orderDataOriginal, dateColsOrig, qtyColsOrig, inQtyColsOrig, inAmtColsOrig);
-    match(orderDataBuy, dateColsBuy, qtyColsBuy, inQtyColsBuy, inAmtColsBuy);
-
+    match(orderDataBuy, ['1차패킹리스트출고일','2차패킹리스트출고일'], ['1차패킹리스트출고수량','2차패킹리스트출고수량'], ['1차실입고수량','2차실입고수량'], ['1차실입고금액','2차실입고금액']);
     tableData = Object.values(resultMap).map(item => {
         const log = stockLogData[item.code] || {}; const edited = editedCells[item.code] || {}; const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
         return {
@@ -311,7 +290,7 @@ function clearDates() {
 
 function renderTable() {
     const tbody = document.getElementById('table-body');
-    if (!filteredData || filteredData.length === 0) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하고 [적용] 버튼을 누르세요.</td></tr>'; return; }
+    if (!filteredData.length) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>'; return; }
     let html = '';
     filteredData.forEach((row, idx) => {
         html += `<tr><td>${idx + 1}</td><td class="code-cell" data-code="${row.code}">${row.code}</td><td style="text-align:left;">${row.name}</td><td>${row.option}</td><td style="font-weight:bold;">${row.arrivalQty.toLocaleString()}</td><td style="color:${row.mibalQty > 0 ? '#d32f2f' : '#333'}; font-weight:bold;">${row.mibalQty.toLocaleString()}</td><td>${row.totalStock.toLocaleString()}</td><td>${row.location}</td><td class="capacity-auto">${row.capacity || '-'}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed">${row.confirmed}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="directShip">${row.directShip}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="memo">${row.memo}</td></tr>`;
@@ -342,14 +321,8 @@ function sortTable(key) {
     renderTable();
 }
 
-function onCellEdit(el) {
-    const code = el.dataset.code; const field = el.dataset.field; const value = el.textContent.trim();
-    if (!editedCells[code]) editedCells[code] = {}; editedCells[code][field] = value;
-    clearTimeout(saveTimeout); saveTimeout = setTimeout(() => { saveEditedCells(); showToast('💾 자동 저장됨'); }, 1000);
-}
-
-// 이벤트 바인딩
 function setupEventListeners() {
+    // 이벤트 리스너 바인딩 (순서가 중요함)
     document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
         e.stopPropagation(); const menu = document.getElementById('main-tools-menu');
         if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
@@ -378,6 +351,7 @@ function setupEventListeners() {
     document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
     document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
+    document.getElementById('btn-upload-scandb')?.addEventListener('click', uploadScanDB);
     document.getElementById('search-input')?.addEventListener('input', applySearch);
     document.getElementById('btn-excel-download')?.addEventListener('click', () => {
         if (!filteredData.length) return;
@@ -388,7 +362,11 @@ function setupEventListeners() {
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '미발계산기.xls'; a.click();
     });
     document.querySelectorAll('.th-sortable').forEach(th => th.addEventListener('click', () => sortTable(th.dataset.sort)));
-    document.getElementById('table-body')?.addEventListener('focusout', (e) => { if (e.target.classList.contains('editable-cell')) onCellEdit(e.target); });
+    document.getElementById('table-body')?.addEventListener('focusout', (e) => { if (e.target.classList.contains('editable-cell')) {
+        const code = e.target.dataset.code; const field = e.target.dataset.field; const value = e.target.textContent.trim();
+        if (!editedCells[code]) editedCells[code] = {}; editedCells[code][field] = value;
+        clearTimeout(saveTimeout); saveTimeout = setTimeout(() => { saveEditedCells(); showToast('💾 자동 저장됨'); }, 1000);
+    }});
     document.getElementById('table-body')?.addEventListener('click', (e) => { if (e.target.classList.contains('code-cell')) { const code = e.target.dataset.code; if (code) navigator.clipboard.writeText(code).then(() => showToast(`📋 ${code} 복사됨`)); } });
 }
 
