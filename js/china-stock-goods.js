@@ -1,6 +1,88 @@
-// =========================================================
-// [수정 대상 1] extractShipDates 함수 (입고 완료 필터 추가)
-// =========================================================
+// === js/china-stock-goods.js ===
+// 중국제작 미발계산기 Ver 1.8.2 (입고 완료 필터 강화)
+
+import { initializeFirebase } from './config.js';
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const { db } = initializeFirebase();
+const CHINA_COLLECTION = 'ChinaStockGoods';
+const CONFIG_DOC = 'CONFIG';
+
+// 전역 상태
+let orderDataOriginal = [];
+let orderDataBuy = [];
+let stockLogData = {};
+let tableData = [];
+let filteredData = [];
+let editedCells = {};
+let sortConfig = { key: '', direction: 'asc' };
+let csvUrlOrder = '';
+let csvUrlBuy = '';
+let savedDates = []; 
+let saveTimeout = null;
+
+// 유틸리티
+const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+const hasValue = (v) => v !== '' && v !== undefined && v !== null && v !== 0 && v !== '0';
+
+function getProductName(row) { return row['상품명'] || row['공급처상품명'] || ''; }
+
+function formatExcelDate(excelDate) {
+    if (!excelDate || excelDate.toString().trim() === '') return '';
+    if (typeof excelDate === 'string' && (excelDate.includes('-') || excelDate.includes('.'))) return excelDate;
+    const num = parseFloat(excelDate);
+    if (isNaN(num)) return excelDate;
+    const date = new Date(Math.round((num - 25569) * 86400 * 1000));
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+}
+
+function normalizeDate(dateStr) {
+    if (!dateStr) return '';
+    let s = dateStr.toString().trim();
+    if (/^\d{4,5}(\.\d+)?$/.test(s)) s = formatExcelDate(parseFloat(s));
+    s = s.replace(/\./g, '-').replace(/\//g, '-');
+    const parts = s.split('-');
+    if (parts.length === 3) {
+        let [y, m, d] = parts;
+        if (y.length === 2) y = '20' + y;
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    }
+    return s;
+}
+
+function showLoading(text) {
+    const el = document.getElementById('loading-text');
+    if (el) el.innerText = text;
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) overlay.style.display = 'flex';
+}
+function hideLoading() { const overlay = document.getElementById('loading-overlay'); if (overlay) overlay.style.display = 'none'; }
+
+function showToast(msg) {
+    const t = document.getElementById('toast');
+    if (!t) return;
+    t.innerText = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function getCapacityByLocation(locStr) {
+    if (!locStr) return 0;
+    const ch = locStr.toString().trim().toUpperCase().charAt(0);
+    const map = { 'A':20,'B':20,'C':20,'D':20,'E':40,'F':40,'G':40,'H':15,'I':15,'Z':15,'L':15,'O':15,'P':15,'Q':15,'R':15,'S':15,'T':15 };
+    if (locStr.includes('★')) return 90;
+    return map[ch] || 0;
+}
+
+function closeAllMenus() {
+    const menu = document.getElementById('main-tools-menu'); if (menu) menu.style.display = 'none';
+    const popup = document.getElementById('date-dropdown-popup'); if (popup) popup.style.display = 'none';
+}
+
+// ---------------------------------------------------------
+// [핵심] 출고일 목록 추출 (입고 완료 필터)
+// ---------------------------------------------------------
 function extractShipDates() {
     const checklistContainer = document.getElementById('date-checklist-container');
     if (!checklistContainer) return;
@@ -8,8 +90,6 @@ function extractShipDates() {
     const dateMap = {};
     const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
     const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
-    
-    // 입고 완료 판단을 위한 컬럼들 (cleanKey 적용 기준 예상 키)
     const inQtyColsOrig = ['1차실입고수량','2차실입고수량','3차실입고수량','4차실입고수량','5차실입고수량','6차실입고수량'];
     const inAmtColsOrig = ['1차실입고금액','2차실입고금액','3차실입고금액','4차실입고금액','5차실입고금액','6차실입고금액'];
 
@@ -18,18 +98,14 @@ function extractShipDates() {
     const inQtyColsBuy = ['1차실입고수량','2차실입고수량'];
     const inAmtColsBuy = ['1차실입고금액','2차실입고금액'];
 
-    // 값이 존재하는지 판단하는 헬퍼 함수
-    const hasValue = (v) => v !== '' && v !== undefined && v !== null && v !== 0 && v !== '0';
-
     const process = (rows, dCols, qCols, iQCols, iACols) => {
         rows.forEach(row => {
             dCols.forEach((dc, idx) => {
-                // ★ [필터 로직] 해당 차수에 실입고수량이나 실입고금액이 있으면 스킵
+                // 입고 데이터 체크
                 if (hasValue(row[iQCols[idx]]) || hasValue(row[iACols[idx]])) return;
 
                 const normalized = normalizeDate(row[dc]);
                 if (!normalized || normalized.length < 10) return;
-                
                 if (!dateMap[normalized]) dateMap[normalized] = { qty: 0, skus: new Set() };
                 dateMap[normalized].qty += (parseInt(row[qCols[idx]]) || 0);
                 dateMap[normalized].skus.add(row['상품코드'] || row['어드민상품코드']);
@@ -43,35 +119,143 @@ function extractShipDates() {
     const sortedDates = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0]));
 
     if (sortedDates.length === 0) {
-        checklistContainer.innerHTML = '<div style="color:#888; font-size:12px; padding:10px;">미입고된 출고 데이터가 없습니다.</div>';
+        checklistContainer.innerHTML = '<div style="color:#888; font-size:12px; padding:10px;">미입고 데이터가 없습니다.</div>';
         return;
     }
 
     let html = '';
     sortedDates.forEach(([date, info]) => {
         const isChecked = savedDates.includes(date) ? 'checked' : '';
-        html += `
-            <label class="date-item">
-                <input type="checkbox" class="date-check" value="${date}" ${isChecked}>
-                <span>${date} (${info.skus.size}종 / ${info.qty.toLocaleString()}장)</span>
-            </label>
-        `;
+        html += `<label class="date-item"><input type="checkbox" class="date-check" value="${date}" ${isChecked}><span>${date} (${info.skus.size}종 / ${info.qty.toLocaleString()}장)</span></label>`;
     });
     checklistContainer.innerHTML = html;
 
     checklistContainer.querySelectorAll('.date-check').forEach(ck => {
-        ck.addEventListener('change', () => {
-            updateSavedDatesFromCheckboxes();
-            renderSelectedTags();
-        });
+        ck.addEventListener('change', () => { updateSavedDatesFromCheckboxes(); renderSelectedTags(); });
     });
-
     renderSelectedTags();
 }
 
-// =========================================================
-// [수정 대상 2] applyDates 함수 (동일 필터 적용)
-// =========================================================
+function updateSavedDatesFromCheckboxes() {
+    const checks = document.querySelectorAll('.date-check:checked');
+    savedDates = Array.from(checks).map(c => c.value);
+    const btn = document.getElementById('btn-date-dropdown');
+    if (btn) btn.innerText = savedDates.length > 0 ? `▼ ${savedDates.length}개 선택됨` : `▼ 출고일 선택`;
+}
+
+function renderSelectedTags() {
+    const container = document.getElementById('date-tags-container');
+    if (!container) return;
+    if (savedDates.length === 0) { container.innerHTML = '<span class="no-selection-text">선택된 출고일 없음</span>'; return; }
+    const sorted = [...savedDates].sort((a, b) => b.localeCompare(a));
+    let html = '';
+    sorted.forEach(date => { html += `<div class="date-tag">${date} <span class="remove-btn" data-date="${date}">✕</span></div>`; });
+    container.innerHTML = html;
+    container.querySelectorAll('.remove-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const date = btn.dataset.date;
+            savedDates = savedDates.filter(d => d !== date);
+            const ck = document.querySelector(`.date-check[value="${date}"]`);
+            if (ck) ck.checked = false;
+            updateSavedDatesFromCheckboxes(); renderSelectedTags();
+        });
+    });
+}
+
+// Firebase & CSV 로직
+async function loadConfig() {
+    try {
+        const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC));
+        if (snap.exists()) {
+            const cfg = snap.data(); csvUrlOrder = cfg.csvUrlOrder || ''; csvUrlBuy = cfg.csvUrlBuy || ''; savedDates = cfg.savedDates || [];
+        }
+    } catch (e) { console.error('설정 로드 실패:', e); }
+}
+
+async function saveConfig() { try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); } catch (e) { console.error('설정 저장 실패:', e); } }
+async function loadEditedCells() { try { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; } catch (e) { console.error('편집 데이터 로드 실패:', e); } }
+async function saveEditedCells() { try { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells, updatedAt: new Date() }); } catch (e) { console.error('편집 데이터 저장 실패:', e); } }
+
+async function loadStockLogFromFirebase() {
+    try {
+        stockLogData = {};
+        const snap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog'));
+        snap.forEach(d => { const data = d.data(); if (data.dataStr) { JSON.parse(data.dataStr).forEach(row => { const code = (row['상품코드'] || '').toString().trim(); if (code) stockLogData[code] = row; }); } });
+    } catch (e) { console.error('미발재고로그 로드 실패:', e); }
+}
+
+async function saveChunkedData(rows, subCollection, onProgress) {
+    const collName = CHINA_COLLECTION + '_' + subCollection;
+    try {
+        const existing = await getDocs(collection(db, collName));
+        if (existing.size > 0) { for (const d of existing.docs) { await deleteDoc(d.ref); } }
+        const CHUNK_SIZE = 500;
+        const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
+        for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+            const chunk = rows.slice(i, i + CHUNK_SIZE);
+            const chunkIdx = Math.floor(i / CHUNK_SIZE);
+            let b = writeBatch(db); b.set(doc(db, collName, `CHUNK_${chunkIdx}`), { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            await b.commit();
+            if (onProgress) onProgress(`💾 ${subCollection} 저장 중... ${chunkIdx + 1}/${totalChunks}`);
+            await sleep(150);
+        }
+    } catch (e) { throw e; }
+}
+
+async function fetchCSV(url) {
+    let textData = '';
+    try { const res = await fetch(url); if (!res.ok) throw new Error('연결 실패'); textData = await res.text(); }
+    catch (e) { const res2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`); textData = await res2.text(); }
+    const wb = XLSX.read(textData, { type: 'string' });
+    const rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+    let headerIdx = -1, headers = [];
+    for (let i = 0; i < Math.min(20, rawData.length); i++) {
+        const cleaned = rawData[i].map(h => cleanKey(h));
+        if (cleaned.includes('어드민상품코드') || cleaned.includes('상품코드')) { headerIdx = i; headers = cleaned; break; }
+    }
+    if (headerIdx === -1) return [];
+    const result = [];
+    for (let i = headerIdx + 1; i < rawData.length; i++) {
+        let obj = {}, empty = true;
+        for (let j = 0; j < headers.length; j++) { if (headers[j]) { obj[headers[j]] = rawData[i][j]; if (rawData[i][j] !== '' && rawData[i][j] !== undefined) empty = false; } }
+        if (!empty) result.push(obj);
+    }
+    return result;
+}
+
+async function syncOrderData(silent = false) {
+    if (!csvUrlOrder && !csvUrlBuy) { if(!silent) alert('링크를 먼저 설정하세요.'); return; }
+    if(!silent) showLoading('🔄 오더리스트 동기화 중...');
+    try {
+        const [dataOrder, dataBuy] = await Promise.all([fetchCSV(csvUrlOrder), fetchCSV(csvUrlBuy)]);
+        orderDataOriginal = dataOrder; orderDataBuy = dataBuy;
+        extractShipDates(); 
+        if(!silent) { hideLoading(); showToast('✅ 동기화 완료'); }
+    } catch (e) { if(!silent) { hideLoading(); alert('실패: ' + e.message); } }
+}
+
+function handleStockLogUpload(e) {
+    const file = e.target.files[0]; if (!file) return;
+    showLoading('📂 미발재고로그 저장 중...');
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+        try {
+            const ab = new Uint8Array(evt.target.result.split('').map(c => c.charCodeAt(0))).buffer;
+            const wb = XLSX.read(ab, { type: 'array' });
+            const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
+            stockLogData = {}; rows.forEach(row => { const code = (row['상품코드'] || '').toString().trim(); if (code) stockLogData[code] = row; });
+            await saveChunkedData(rows, 'StockLog', (msg) => showLoading(msg));
+            hideLoading(); showToast('✅ 저장 완료');
+            if (tableData.length > 0) applyDates();
+        } catch (err) { hideLoading(); alert('실패'); }
+        e.target.value = '';
+    };
+    reader.readAsText(file, 'UTF-8');
+}
+
+// ---------------------------------------------------------
+// [핵심] 출고일 적용 (입고 완료 필터)
+// ---------------------------------------------------------
 function applyDates() {
     const inputDates = savedDates; 
     if (inputDates.length === 0) { alert('출고일을 선택해주세요.'); return; }
@@ -87,27 +271,16 @@ function applyDates() {
     const inQtyColsBuy = ['1차실입고수량','2차실입고수량'];
     const inAmtColsBuy = ['1차실입고금액','2차실입고금액'];
 
-    const hasValue = (v) => v !== '' && v !== undefined && v !== null && v !== 0 && v !== '0';
-
     let resultMap = {};
-
     const match = (rows, dCols, qCols, iQCols, iACols) => {
         rows.forEach(row => {
-            const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
-            if (!code) return;
-
+            const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim(); if (!code) return;
             let matched = false, totalQty = 0;
             dCols.forEach((dc, idx) => {
-                // ★ [필터 로직] 입고 데이터가 있으면 합산에서 제외
                 if (hasValue(row[iQCols[idx]]) || hasValue(row[iACols[idx]])) return;
-
                 const rd = normalizeDate(row[dc] || '');
-                if (rd && inputDates.includes(rd)) { 
-                    matched = true; 
-                    totalQty += (parseInt(row[qCols[idx]]) || 0); 
-                }
+                if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qCols[idx]]) || 0); }
             });
-
             if (matched) {
                 if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
                 resultMap[code].arrivalQty += totalQty;
@@ -119,18 +292,112 @@ function applyDates() {
     match(orderDataBuy, dateColsBuy, qtyColsBuy, inQtyColsBuy, inAmtColsBuy);
 
     tableData = Object.values(resultMap).map(item => {
-        const log = stockLogData[item.code] || {};
-        const edited = editedCells[item.code] || {};
-        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
+        const log = stockLogData[item.code] || {}; const edited = editedCells[item.code] || {}; const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
         return {
             code: item.code, name: item.name, option: item.option, arrivalQty: item.arrivalQty,
             mibalQty: parseInt(log['부족수량']) || 0, totalStock: parseInt(log['정상재고']) || 0,
-            location: loc,
-            capacity: getCapacityByLocation(loc),
-            confirmed: edited.confirmed || '', shortage: edited.shortage || '',
-            directShip: item.bigoY || edited.directShip || '', memo: edited.memo || ''
+            location: loc, capacity: getCapacityByLocation(loc),
+            confirmed: edited.confirmed || '', shortage: edited.shortage || '', directShip: item.bigoY || edited.directShip || '', memo: edited.memo || ''
         };
     }).filter(d => d.arrivalQty > 0);
-
     filteredData = [...tableData]; renderTable(); updateSummary(); showToast('✅ 매칭 완료');
 }
+
+function clearDates() {
+    savedDates = []; document.querySelectorAll('.date-check').forEach(btn => btn.checked = false);
+    updateSavedDatesFromCheckboxes(); renderSelectedTags();
+    tableData = []; filteredData = []; renderTable(); updateSummary(); saveConfig(); showToast('🔄 초기화 완료');
+}
+
+function renderTable() {
+    const tbody = document.getElementById('table-body');
+    if (!filteredData || filteredData.length === 0) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하고 [적용] 버튼을 누르세요.</td></tr>'; return; }
+    let html = '';
+    filteredData.forEach((row, idx) => {
+        html += `<tr><td>${idx + 1}</td><td class="code-cell" data-code="${row.code}">${row.code}</td><td style="text-align:left;">${row.name}</td><td>${row.option}</td><td style="font-weight:bold;">${row.arrivalQty.toLocaleString()}</td><td style="color:${row.mibalQty > 0 ? '#d32f2f' : '#333'}; font-weight:bold;">${row.mibalQty.toLocaleString()}</td><td>${row.totalStock.toLocaleString()}</td><td>${row.location}</td><td class="capacity-auto">${row.capacity || '-'}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed">${row.confirmed}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="directShip">${row.directShip}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="memo">${row.memo}</td></tr>`;
+    });
+    tbody.innerHTML = html;
+}
+
+function updateSummary() {
+    document.getElementById('sum-sku').textContent = filteredData.length.toLocaleString();
+    document.getElementById('sum-arrival').textContent = filteredData.reduce((s, d) => s + (d.arrivalQty || 0), 0).toLocaleString();
+    document.getElementById('sum-mibal').textContent = filteredData.reduce((s, d) => s + (d.mibalQty || 0), 0).toLocaleString();
+}
+
+function applySearch() {
+    const keyword = (document.getElementById('search-input')?.value || '').trim().toUpperCase();
+    filteredData = keyword ? tableData.filter(d => d.code.toUpperCase().includes(keyword) || d.name.toUpperCase().includes(keyword) || d.option.toUpperCase().includes(keyword)) : [...tableData];
+    renderTable(); updateSummary();
+}
+
+function sortTable(key) {
+    if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
+    else { sortConfig.key = key; sortConfig.direction = 'asc'; }
+    filteredData.sort((a, b) => {
+        let va = a[key], vb = b[key];
+        if (typeof va === 'number' && typeof vb === 'number') return sortConfig.direction === 'asc' ? va - vb : vb - va;
+        return sortConfig.direction === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+    });
+    renderTable();
+}
+
+function onCellEdit(el) {
+    const code = el.dataset.code; const field = el.dataset.field; const value = el.textContent.trim();
+    if (!editedCells[code]) editedCells[code] = {}; editedCells[code][field] = value;
+    clearTimeout(saveTimeout); saveTimeout = setTimeout(() => { saveEditedCells(); showToast('💾 자동 저장됨'); }, 1000);
+}
+
+// 이벤트 바인딩
+function setupEventListeners() {
+    document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
+        e.stopPropagation(); const menu = document.getElementById('main-tools-menu');
+        if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+        const popup = document.getElementById('date-dropdown-popup'); if (popup) popup.style.display = 'none';
+    });
+    document.getElementById('btn-date-dropdown')?.addEventListener('click', (e) => {
+        e.stopPropagation(); const popup = document.getElementById('date-dropdown-popup');
+        const isVisible = popup?.style.display === 'block'; if (popup) popup.style.display = isVisible ? 'none' : 'block';
+        const menu = document.getElementById('main-tools-menu'); if (menu) menu.style.display = 'none';
+    });
+    document.getElementById('date-dropdown-popup')?.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => closeAllMenus());
+    document.getElementById('btn-date-all')?.addEventListener('click', () => { document.querySelectorAll('.date-check').forEach(ck => ck.checked = true); updateSavedDatesFromCheckboxes(); renderSelectedTags(); });
+    document.getElementById('btn-date-none')?.addEventListener('click', () => { document.querySelectorAll('.date-check').forEach(ck => ck.checked = false); updateSavedDatesFromCheckboxes(); renderSelectedTags(); });
+    document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
+    document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { 
+        closeAllMenus(); document.getElementById('modal-csv-order').value = csvUrlOrder; document.getElementById('modal-csv-buy').value = csvUrlBuy;
+        const modal = document.getElementById('sheet-settings-modal'); if (modal) modal.style.display = 'flex';
+    });
+    document.getElementById('btn-sheet-save')?.addEventListener('click', async () => {
+        csvUrlOrder = document.getElementById('modal-csv-order')?.value.trim() || ''; csvUrlBuy = document.getElementById('modal-csv-buy')?.value.trim() || '';
+        await saveConfig(); document.getElementById('sheet-settings-modal').style.display = 'none'; showToast('저장 완료'); syncOrderData();
+    });
+    document.getElementById('btn-sheet-cancel')?.addEventListener('click', () => { document.getElementById('sheet-settings-modal').style.display = 'none'; });
+    document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => { if (e.target.id === 'sheet-settings-modal') e.target.style.display = 'none'; });
+    document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
+    document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
+    document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
+    document.getElementById('search-input')?.addEventListener('input', applySearch);
+    document.getElementById('btn-excel-download')?.addEventListener('click', () => {
+        if (!filteredData.length) return;
+        const headers = ['상품코드','수량']; let html = '<table><tr><th>상품코드</th><th>수량</th></tr>';
+        filteredData.forEach(r => html += `<tr><td>${r.code}</td><td>${r.arrivalQty}</td></tr>`);
+        html += '</table>';
+        const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '미발계산기.xls'; a.click();
+    });
+    document.querySelectorAll('.th-sortable').forEach(th => th.addEventListener('click', () => sortTable(th.dataset.sort)));
+    document.getElementById('table-body')?.addEventListener('focusout', (e) => { if (e.target.classList.contains('editable-cell')) onCellEdit(e.target); });
+    document.getElementById('table-body')?.addEventListener('click', (e) => { if (e.target.classList.contains('code-cell')) { const code = e.target.dataset.code; if (code) navigator.clipboard.writeText(code).then(() => showToast(`📋 ${code} 복사됨`)); } });
+}
+
+async function init() {
+    setupEventListeners(); showLoading('📦 데이터 로드 중...');
+    try {
+        await loadConfig(); await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true)]);
+        const btn = document.getElementById('btn-date-dropdown'); if (btn && savedDates.length > 0) btn.innerText = `▼ ${savedDates.length}개 선택됨`;
+        hideLoading(); if (savedDates.length > 0 && tableData.length === 0) applyDates();
+    } catch (e) { console.error(e); hideLoading(); }
+}
+init();
