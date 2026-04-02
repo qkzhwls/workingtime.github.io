@@ -1,8 +1,9 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.9 (App ScanDB 연동 지원)
+// 중국제작 미발계산기 Ver 2.0 (실시간 앱 입고 수신 통합본)
 
 import { initializeFirebase } from './config.js';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+// [수정 5] onSnapshot, query, collection 추가
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
 const CHINA_COLLECTION = 'ChinaStockGoods';
@@ -15,6 +16,7 @@ let stockLogData = {};
 let tableData = [];
 let filteredData = [];
 let editedCells = {};
+let inboundMap = {}; // [Ver 2.0 추가] 앱에서 들어온 상품별 입고 합산 데이터
 let sortConfig = { key: '', direction: 'asc' };
 let csvUrlOrder = '';
 let csvUrlBuy = '';
@@ -74,6 +76,41 @@ function closeAllMenus() {
     const popup = document.getElementById('date-dropdown-popup'); if (popup) popup.style.display = 'none';
 }
 
+// ---------------------------------------------------------
+// [Ver 2.0 신규] ① loadInboundHistory() 추가 (실시간 구독)
+// ---------------------------------------------------------
+function loadInboundHistory() {
+    const q = query(collection(db, 'ChinaStockGoods_InboundHistory'));
+    
+    // onSnapshot으로 실시간 구독 시작
+    onSnapshot(q, (snapshot) => {
+        inboundMap = {}; // 수신 시마다 맵 초기화 후 재합산
+        
+        snapshot.forEach((doc) => {
+            const data = doc.data();
+            const code = data.barcode;
+            const qty = parseInt(data.qty) || 0;
+            
+            if (code) {
+                inboundMap[code] = (inboundMap[code] || 0) + qty;
+            }
+        });
+
+        console.log("실시간 입고 데이터 수신됨:", inboundMap);
+        
+        // 현재 테이블 데이터가 존재한다면 렌더링만 다시 호출 (UI 실시간 업데이트)
+        if (tableData.length > 0) {
+            renderTable();
+            updateSummary();
+        }
+    }, (error) => {
+        console.error("InboundHistory 구독 에러:", error);
+    });
+}
+
+// ---------------------------------------------------------
+// 출고일 관련 로직 (기존 유지)
+// ---------------------------------------------------------
 function extractShipDates() {
     const checklistContainer = document.getElementById('date-checklist-container');
     if (!checklistContainer) return;
@@ -82,7 +119,6 @@ function extractShipDates() {
     const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
     const inQtyColsOrig = ['1차실입고수량','2차실입고수량','3차실입고수량','4차실입고수량','5차실입고수량','6차실입고수량'];
     const inAmtColsOrig = ['1차실입고금액','2차실입고금액','3차실입고금액','4차실입고금액','5차실입고금액','6차실입고금액'];
-    
     const process = (rows, dCols, qCols, iQCols, iACols) => {
         rows.forEach(row => {
             dCols.forEach((dc, idx) => {
@@ -97,10 +133,8 @@ function extractShipDates() {
     };
     process(orderDataOriginal, dateColsOrig, qtyColsOrig, inQtyColsOrig, inAmtColsOrig);
     process(orderDataBuy, ['1차패킹리스트출고일','2차패킹리스트출고일'], ['1차패킹리스트출고수량','2차패킹리스트출고수량'], ['1차실입고수량','2차실입고수량'], ['1차실입고금액','2차실입고금액']);
-    
     const sortedDates = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0]));
     if (sortedDates.length === 0) { checklistContainer.innerHTML = '<div style="color:#888; padding:10px;">미입고 데이터 없음</div>'; return; }
-    
     let html = '';
     sortedDates.forEach(([date, info]) => {
         const isChecked = savedDates.includes(date) ? 'checked' : '';
@@ -208,16 +242,11 @@ function handleStockLogUpload(e) {
     reader.readAsBinaryString(file);
 }
 
-// ---------------------------------------------------------
-// [신규] Ver 1.9: 앱용 스캔DB 업로드 함수
-// ---------------------------------------------------------
 async function uploadScanDB() {
     if (!tableData || tableData.length === 0) { alert('업로드할 데이터가 없습니다.'); return; }
     if (!confirm(`현재 ${tableData.length}건의 데이터를 앱용 스캔DB로 업로드하시겠습니까?`)) return;
-
     showLoading('🚀 앱용 스캔DB 업로드 중...');
     const SCAN_DB_COLL = 'ChinaStockGoods_ScanDB';
-
     try {
         const existing = await getDocs(collection(db, SCAN_DB_COLL));
         if (existing.size > 0) {
@@ -225,7 +254,6 @@ async function uploadScanDB() {
             existing.docs.forEach(d => delBatch.delete(d.ref));
             await delBatch.commit();
         }
-
         const CHUNK_SIZE = 500;
         for (let i = 0; i < tableData.length; i += CHUNK_SIZE) {
             const batch = writeBatch(db);
@@ -245,6 +273,9 @@ async function uploadScanDB() {
     } catch (e) { hideLoading(); alert('업로드 실패: ' + e.message); }
 }
 
+// ---------------------------------------------------------
+// [수정 2] applyDates() - inboundMap 데이터 매칭 로직 추가
+// ---------------------------------------------------------
 function applyDates() {
     const inputDates = savedDates; if (inputDates.length === 0) { alert('출고일을 선택하세요.'); return; }
     saveConfig();
@@ -270,13 +301,23 @@ function applyDates() {
     };
     match(orderDataOriginal, dateColsOrig, qtyColsOrig, inQtyColsOrig, inAmtColsOrig);
     match(orderDataBuy, ['1차패킹리스트출고일','2차패킹리스트출고일'], ['1차패킹리스트출고수량','2차패킹리스트출고수량'], ['1차실입고수량','2차실입고수량'], ['1차실입고금액','2차실입고금액']);
+    
     tableData = Object.values(resultMap).map(item => {
-        const log = stockLogData[item.code] || {}; const edited = editedCells[item.code] || {}; const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
+        const log = stockLogData[item.code] || {}; 
+        const edited = editedCells[item.code] || {}; 
+        const loc = (log['로케이션'] || '').toString().split('/')[0].trim();
+        
+        // [Ver 2.0] 앱 수신값이 있으면 우선 사용, 없으면 수동 편집값 사용
+        const confirmedVal = inboundMap[item.code] || edited.confirmed || '';
+
         return {
             code: item.code, name: item.name, option: item.option, arrivalQty: item.arrivalQty,
             mibalQty: parseInt(log['부족수량']) || 0, totalStock: parseInt(log['정상재고']) || 0,
             location: loc, capacity: getCapacityByLocation(loc),
-            confirmed: edited.confirmed || '', shortage: edited.shortage || '', directShip: item.bigoY || edited.directShip || '', memo: edited.memo || ''
+            confirmed: confirmedVal, 
+            shortage: edited.shortage || '', 
+            directShip: item.bigoY || edited.directShip || '', 
+            memo: edited.memo || ''
         };
     }).filter(d => d.arrivalQty > 0);
     filteredData = [...tableData]; renderTable(); updateSummary(); showToast('✅ 매칭 완료');
@@ -288,12 +329,35 @@ function clearDates() {
     tableData = []; filteredData = []; renderTable(); updateSummary(); saveConfig(); showToast('🔄 초기화 완료');
 }
 
+// ---------------------------------------------------------
+// [수정 3] renderTable() - 입고확인 칸 스타일 구분 로직 추가
+// ---------------------------------------------------------
 function renderTable() {
     const tbody = document.getElementById('table-body');
     if (!filteredData.length) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>'; return; }
     let html = '';
+    
     filteredData.forEach((row, idx) => {
-        html += `<tr><td>${idx + 1}</td><td class="code-cell" data-code="${row.code}">${row.code}</td><td style="text-align:left;">${row.name}</td><td>${row.option}</td><td style="font-weight:bold;">${row.arrivalQty.toLocaleString()}</td><td style="color:${row.mibalQty > 0 ? '#d32f2f' : '#333'}; font-weight:bold;">${row.mibalQty.toLocaleString()}</td><td>${row.totalStock.toLocaleString()}</td><td>${row.location}</td><td class="capacity-auto">${row.capacity || '-'}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed">${row.confirmed}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="directShip">${row.directShip}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="memo">${row.memo}</td></tr>`;
+        // [Ver 2.0] 앱에서 들어온 값(inboundMap)인 경우 파란색 스타일 적용
+        const isFromApp = inboundMap[row.code] !== undefined;
+        const confirmStyle = isFromApp ? 'color: #1976d2; font-weight: 900;' : '';
+        const displayConfirmed = row.confirmed || '';
+
+        html += `<tr>
+            <td>${idx + 1}</td>
+            <td class="code-cell" data-code="${row.code}">${row.code}</td>
+            <td style="text-align:left;">${row.name}</td>
+            <td>${row.option}</td>
+            <td style="font-weight:bold;">${row.arrivalQty.toLocaleString()}</td>
+            <td style="color:${row.mibalQty > 0 ? '#d32f2f' : '#333'}; font-weight:bold;">${row.mibalQty.toLocaleString()}</td>
+            <td>${row.totalStock.toLocaleString()}</td>
+            <td>${row.location}</td>
+            <td class="capacity-auto">${row.capacity || '-'}</td>
+            <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed" style="${confirmStyle}">${displayConfirmed}</td>
+            <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td>
+            <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="directShip">${row.directShip}</td>
+            <td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="memo">${row.memo}</td>
+        </tr>`;
     });
     tbody.innerHTML = html;
 }
@@ -322,7 +386,6 @@ function sortTable(key) {
 }
 
 function setupEventListeners() {
-    // 이벤트 리스너 바인딩 (순서가 중요함)
     document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
         e.stopPropagation(); const menu = document.getElementById('main-tools-menu');
         if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
@@ -347,7 +410,6 @@ function setupEventListeners() {
         await saveConfig(); document.getElementById('sheet-settings-modal').style.display = 'none'; showToast('저장 완료'); syncOrderData();
     });
     document.getElementById('btn-sheet-cancel')?.addEventListener('click', () => { document.getElementById('sheet-settings-modal').style.display = 'none'; });
-    document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => { if (e.target.id === 'sheet-settings-modal') e.target.style.display = 'none'; });
     document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
     document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
@@ -370,12 +432,25 @@ function setupEventListeners() {
     document.getElementById('table-body')?.addEventListener('click', (e) => { if (e.target.classList.contains('code-cell')) { const code = e.target.dataset.code; if (code) navigator.clipboard.writeText(code).then(() => showToast(`📋 ${code} 복사됨`)); } });
 }
 
+// ---------------------------------------------------------
+// [수정 4] init() - loadInboundHistory() 호출 추가
+// ---------------------------------------------------------
 async function init() {
     setupEventListeners(); showLoading('📦 데이터 로드 중...');
+    
+    // Ver 2.0: 실시간 수신 대기 시작 (await 하지 않음)
+    loadInboundHistory();
+
     try {
-        await loadConfig(); await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true)]);
+        await loadConfig(); 
+        await Promise.all([
+            loadEditedCells(), 
+            loadStockLogFromFirebase(), 
+            syncOrderData(true)
+        ]);
         const btn = document.getElementById('btn-date-dropdown'); if (btn && savedDates.length > 0) btn.innerText = `▼ ${savedDates.length}개 선택됨`;
-        hideLoading(); if (savedDates.length > 0 && tableData.length === 0) applyDates();
+        hideLoading(); 
+        if (savedDates.length > 0 && tableData.length === 0) applyDates();
     } catch (e) { console.error(e); hideLoading(); }
 }
 init();
