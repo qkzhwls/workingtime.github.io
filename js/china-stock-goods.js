@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.7
+// 중국제작 미발계산기 Ver 1.7 (최종 통합본)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -21,6 +21,7 @@ let sortConfig = { key: '', direction: 'asc' };
 let csvUrlOrder = '';
 let csvUrlBuy = '';
 let savedDates = [];
+let saveTimeout = null;
 
 // =========================================================
 // 유틸리티 & 헬퍼
@@ -61,6 +62,7 @@ function showLoading(text) {
     const overlay = document.getElementById('loading-overlay');
     if (overlay) overlay.style.display = 'flex';
 }
+
 function hideLoading() { 
     const overlay = document.getElementById('loading-overlay');
     if (overlay) overlay.style.display = 'none'; 
@@ -310,6 +312,34 @@ function handleStockLogUpload(e) {
 }
 
 // =========================================================
+// 모달 제어 함수
+// =========================================================
+function openSheetSettingsModal() {
+    const inputOrder = document.getElementById('modal-csv-order');
+    const inputBuy = document.getElementById('modal-csv-buy');
+    if (inputOrder) inputOrder.value = csvUrlOrder || '';
+    if (inputBuy) inputBuy.value = csvUrlBuy || '';
+
+    const modal = document.getElementById('sheet-settings-modal');
+    if (modal) modal.style.display = 'flex';
+}
+
+function closeSheetSettingsModal() {
+    const modal = document.getElementById('sheet-settings-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function saveSheetSettings() {
+    csvUrlOrder = document.getElementById('modal-csv-order')?.value.trim() || '';
+    csvUrlBuy = document.getElementById('modal-csv-buy')?.value.trim() || '';
+    
+    await saveConfig();
+    closeSheetSettingsModal();
+    showToast('✅ 설정 저장 완료');
+    syncOrderData();
+}
+
+// =========================================================
 // 출고일 적용 및 테이블 렌더링
 // =========================================================
 function applyDates() {
@@ -444,32 +474,73 @@ function onCellEdit(el) {
     saveTimeout = setTimeout(() => { saveEditedCells(); showToast('💾 자동 저장됨'); }, 1000);
 }
 
+// =========================================================
+// 이벤트 리스너 바인딩 (인라인 제거 후 수동 연결)
+// =========================================================
 function setupEventListeners() {
+    // 1. 상단 메뉴 토글
     document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
         e.stopPropagation();
         const menu = document.getElementById('main-tools-menu');
-        if (menu) menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+        if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
     });
     document.addEventListener('click', () => closeAllMenus());
-    document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
-    document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { closeAllMenus(); openSheetSettingsModal(); });
+
+    // 2. 오더리스트 동기화
+    document.getElementById('btn-sync-order')?.addEventListener('click', () => {
+        closeAllMenus();
+        syncOrderData();
+    });
+
+    // 3. 설정 모달 열기
+    document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => {
+        closeAllMenus();
+        openSheetSettingsModal();
+    });
+
+    // 4. 모달 내 저장/취소
+    document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
+    document.getElementById('btn-sheet-cancel')?.addEventListener('click', closeSheetSettingsModal);
+
+    // 5. 모달 바깥 영역 클릭 시 닫기
+    document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'sheet-settings-modal') closeSheetSettingsModal();
+    });
+
+    // 6. 데이터 관련
     document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
     document.getElementById('search-input')?.addEventListener('input', applySearch);
+    
     document.querySelectorAll('.th-sortable').forEach(th => {
         th.addEventListener('click', () => sortTable(th.dataset.sort));
     });
+
     document.getElementById('table-body')?.addEventListener('focusout', (e) => {
         if (e.target.classList.contains('editable-cell')) onCellEdit(e.target);
     });
-    document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
+
+    // 7. 초기화 버튼
+    document.getElementById('btn-clear-all')?.addEventListener('click', async () => {
+        closeAllMenus();
+        if (!confirm('미발재고로그와 모든 편집 내용을 초기화하시겠습니까?')) return;
+        showLoading('🗑️ 초기화 중...');
+        try {
+            const snap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog'));
+            for (const docSnap of snap.docs) { await deleteDoc(docSnap.ref); }
+            await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: {}, updatedAt: new Date() });
+            stockLogData={}; tableData=[]; filteredData=[]; editedCells={};
+            renderTable(); updateSummary(); hideLoading();
+            alert('✅ 초기화 완료');
+        } catch (e) { hideLoading(); alert('🚨 실패: ' + e.message); }
+    });
 }
 
 // =========================================================
-// 초기화 (★ HTML 수정 없이 1.7 표시 적용)
+// 초기화
 // =========================================================
 async function init() {
-    // [강제 버전 표시 로직]
+    // 버전 배지 강제 업데이트
     const badge = document.querySelector('.version-badge');
     if (badge) badge.innerHTML = '🚀 Ver 1.7';
     
