@@ -43,12 +43,18 @@
 
         .date-actions { display: flex; gap: 5px; border-left: 1px solid #eee; padding-left: 15px; }
 
-        /* 요약 바 및 테이블 스타일 */
+        /* 요약 바 및 Ver 1.9 스캔DB 버튼 */
         .summary-bar { margin: 0 20px 10px 20px; display: flex; gap: 15px; flex-wrap: wrap; }
         .summary-card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px 18px; display: flex; flex-direction: column; align-items: center; min-width: 100px; }
         .summary-card .label { font-size: 11px; color: #888; font-weight: bold; }
         .summary-card .value { font-size: 22px; font-weight: 900; color: #333; }
         .summary-card.highlight .value { color: var(--primary); }
+        
+        .btn-upload-scandb { 
+            padding: 8px 18px; background: #2e7d32; color: white; border: none; border-radius: 8px; 
+            font-weight: bold; cursor: pointer; margin-left: auto; align-self: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .btn-upload-scandb:hover { background: #1b5e20; }
 
         .list-container { overflow: auto; background: white; margin: 0 20px 10px 20px; border-radius: 12px; border: 1px solid #ccc; height: calc(100vh - 230px); }
         .list-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
@@ -85,7 +91,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 1.8.2</div>
+            <div class="version-badge">🚀 Ver 1.9</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -132,6 +138,7 @@
         <div class="summary-card highlight"><span class="label">총 SKU</span><span class="value" id="sum-sku">0</span></div>
         <div class="summary-card highlight"><span class="label">총 도착수량</span><span class="value" id="sum-arrival">0</span></div>
         <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span></div>
+        <button id="btn-upload-scandb" class="btn-upload-scandb">🚀 앱용 스캔DB 업로드</button>
     </div>
 
     <div class="list-container">
