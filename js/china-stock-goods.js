@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 1.7 (최종 통합본)
+// 중국제작 미발계산기 Ver 1.8
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -20,7 +20,8 @@ let editedCells = {};
 let sortConfig = { key: '', direction: 'asc' };
 let csvUrlOrder = '';
 let csvUrlBuy = '';
-let savedDates = [];
+let savedDates = []; // 선택된 날짜 목록 (Firebase 저장용)
+let availableDates = []; // CSV에서 추출된 전체 날짜 정보 [{date, totalQty, skuCount}]
 let saveTimeout = null;
 
 // =========================================================
@@ -88,19 +89,85 @@ function closeAllMenus() {
     document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
 }
 
-async function runConcurrent(tasks, concurrency = 2) {
-    const results = [];
-    let idx = 0;
-    async function worker() {
-        while (idx < tasks.length) {
-            const i = idx++;
-            results[i] = await tasks[i]();
-            await sleep(150); 
-        }
+// =========================================================
+// 1. 출고일 목록 추출 로직
+// =========================================================
+function extractAvailableDates() {
+    const dateMap = {}; // { '2026-03-27': { qty: 0, skus: Set } }
+    
+    const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
+    const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
+    const dateColsBuy = ['1차패킹리스트출고일','2차패킹리스트출고일'];
+    const qtyColsBuy  = ['1차패킹리스트출고수량','2차패킹리스트출고수량'];
+
+    const processRows = (rows, dCols, qCols) => {
+        rows.forEach(row => {
+            dCols.forEach((dc, idx) => {
+                const rawDate = row[dc];
+                if (!rawDate) return;
+                const normalized = normalizeDate(rawDate);
+                if (!normalized || normalized.length < 10) return;
+                
+                const qty = parseInt(row[qCols[idx]]) || 0;
+                if (!dateMap[normalized]) {
+                    dateMap[normalized] = { qty: 0, skus: new Set() };
+                }
+                dateMap[normalized].qty += qty;
+                dateMap[normalized].skus.add(row['상품코드'] || row['어드민상품코드']);
+            });
+        });
+    };
+
+    processRows(orderDataOriginal, dateColsOrig, qtyColsOrig);
+    processRows(orderDataBuy, dateColsBuy, qtyColsBuy);
+
+    // 객체를 배열로 변환 후 날짜 내림차순 정렬
+    availableDates = Object.entries(dateMap).map(([date, info]) => ({
+        date,
+        totalQty: info.qty,
+        skuCount: info.skus.size
+    })).sort((a, b) => b.date.localeCompare(a.date));
+
+    renderDateButtons();
+}
+
+function renderDateButtons() {
+    const container = document.getElementById('date-list-container');
+    if (!container) return;
+
+    if (availableDates.length === 0) {
+        container.innerHTML = '<span style="color:#888; font-size:13px;">오더리스트를 먼저 동기화하세요.</span>';
+        return;
     }
-    const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker());
-    await Promise.all(workers);
-    return results;
+
+    let html = '';
+    availableDates.forEach(item => {
+        const isSelected = savedDates.includes(item.date);
+        const activeClass = isSelected ? 'selected' : '';
+        const shortDate = item.date.split('-').slice(1).join('.'); // 03.27 형식
+        
+        html += `
+            <button class="date-toggle-btn ${activeClass}" data-date="${item.date}">
+                ${shortDate}출고 <br>
+                <small>${item.skuCount}박스 (${item.totalQty.toLocaleString()}장)</small>
+            </button>
+        `;
+    });
+    container.innerHTML = html;
+
+    // 버튼 이벤트 바인딩
+    container.querySelectorAll('.date-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const date = btn.dataset.date;
+            if (savedDates.includes(date)) {
+                savedDates = savedDates.filter(d => d !== date);
+                btn.classList.remove('selected');
+            } else {
+                savedDates.push(date);
+                btn.classList.add('selected');
+            }
+        });
+    });
 }
 
 // =========================================================
@@ -113,20 +180,19 @@ async function loadConfig() {
             const cfg = snap.data();
             csvUrlOrder = cfg.csvUrlOrder || '';
             csvUrlBuy = cfg.csvUrlBuy || '';
-            savedDates = cfg.savedDates || [];
-            savedDates.forEach((d, i) => {
-                const el = document.getElementById(`date-${i + 1}`);
-                if (el && d) el.value = d;
-            });
+            savedDates = cfg.savedDates || []; // Firebase에서 선택된 날짜 복원
         }
     } catch (e) { console.error('설정 로드 실패:', e); }
 }
 
 async function saveConfig() {
     try {
-        const dates = [];
-        for (let i = 1; i <= 8; i++) dates.push(document.getElementById(`date-${i}`)?.value || '');
-        await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates: dates, updatedAt: new Date() }, { merge: true });
+        await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { 
+            csvUrlOrder, 
+            csvUrlBuy, 
+            savedDates, // 현재 선택된 버튼 목록 저장
+            updatedAt: new Date() 
+        }, { merge: true });
     } catch (e) { console.error('설정 저장 실패:', e); }
 }
 
@@ -195,7 +261,16 @@ async function saveChunkedData(rows, subCollection, onProgress) {
                 }
             });
         }
-        await runConcurrent(batchTasks, 2);
+        // 동시 실행 제어 (concurrency 2)
+        let idx = 0;
+        const workers = Array.from({ length: 2 }, async () => {
+            while (idx < batchTasks.length) {
+                const task = batchTasks[idx++];
+                await task();
+                await sleep(150);
+            }
+        });
+        await Promise.all(workers);
         return totalChunks;
     } catch (e) { throw e; }
 }
@@ -262,6 +337,9 @@ async function syncOrderData(silent = false) {
         const [dataOrder, dataBuy] = await Promise.all(downloadTasks);
         orderDataOriginal = dataOrder;
         orderDataBuy = dataBuy;
+
+        // 동기화 완료 후 출고일 목록 추출
+        extractAvailableDates();
 
         if(!silent) {
             hideLoading();
@@ -340,17 +418,16 @@ async function saveSheetSettings() {
 }
 
 // =========================================================
-// 출고일 적용 및 테이블 렌더링
+// 출고일 적용 및 테이블 렌더링 (Ver 1.8 핵심 변경)
 // =========================================================
 function applyDates() {
-    const inputDates = [];
-    for (let i = 1; i <= 8; i++) {
-        const val = document.getElementById(`date-${i}`)?.value;
-        if (val) inputDates.push(normalizeDate(val));
+    // 1. 선택된 버튼(savedDates) 기반으로 필터링
+    if (savedDates.length === 0) { 
+        alert('출고일 버튼을 1개 이상 선택해주세요.'); 
+        return; 
     }
-    if (inputDates.length === 0) { alert('출고일을 입력해주세요.'); return; }
 
-    saveConfig();
+    saveConfig(); // 선택 상태 저장
 
     const dateColsOrig = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
     const qtyColsOrig  = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
@@ -359,33 +436,37 @@ function applyDates() {
 
     let resultMap = {};
 
-    orderDataOriginal.forEach(row => {
-        const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
-        if (!code) return;
-        let matched = false, totalQty = 0;
-        dateColsOrig.forEach((dc, idx) => {
-            const rd = normalizeDate(row[dc] || '');
-            if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsOrig[idx]]) || 0); }
-        });
-        if (matched) {
-            if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
-            resultMap[code].arrivalQty += totalQty;
-        }
-    });
+    const matchRows = (rows, dCols, qCols) => {
+        rows.forEach(row => {
+            const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
+            if (!code) return;
+            
+            let matched = false, totalQty = 0;
+            dCols.forEach((dc, idx) => {
+                const rd = normalizeDate(row[dc] || '');
+                if (rd && savedDates.includes(rd)) { 
+                    matched = true; 
+                    totalQty += (parseInt(row[qCols[idx]]) || 0); 
+                }
+            });
 
-    orderDataBuy.forEach(row => {
-        const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
-        if (!code) return;
-        let matched = false, totalQty = 0;
-        dateColsBuy.forEach((dc, idx) => {
-            const rd = normalizeDate(row[dc] || '');
-            if (rd && inputDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qtyColsBuy[idx]]) || 0); }
+            if (matched) {
+                if (!resultMap[code]) {
+                    resultMap[code] = { 
+                        code, 
+                        name: getProductName(row), 
+                        option: row['옵션']||'', 
+                        arrivalQty: 0, 
+                        bigoY: row['비고']||'' 
+                    };
+                }
+                resultMap[code].arrivalQty += totalQty;
+            }
         });
-        if (matched) {
-            if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: '' };
-            resultMap[code].arrivalQty += totalQty;
-        }
-    });
+    };
+
+    matchRows(orderDataOriginal, dateColsOrig, qtyColsOrig);
+    matchRows(orderDataBuy, dateColsBuy, qtyColsBuy);
 
     tableData = Object.values(resultMap).map(item => {
         const log = stockLogData[item.code] || {};
@@ -414,7 +495,7 @@ function applyDates() {
 function renderTable() {
     const tbody = document.getElementById('table-body');
     if (!filteredData || filteredData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">데이터를 불러온 후 출고일을 선택하세요.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하고 [적용] 버튼을 누르세요.</td></tr>';
         return;
     }
     let html = '';
@@ -475,52 +556,43 @@ function onCellEdit(el) {
 }
 
 // =========================================================
-// 이벤트 리스너 바인딩 (인라인 제거 후 수동 연결)
+// 이벤트 리스너 바인딩
 // =========================================================
 function setupEventListeners() {
-    // 1. 상단 메뉴 토글
     document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
         e.stopPropagation();
         const menu = document.getElementById('main-tools-menu');
         if (menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
     });
     document.addEventListener('click', () => closeAllMenus());
-
-    // 2. 오더리스트 동기화
-    document.getElementById('btn-sync-order')?.addEventListener('click', () => {
-        closeAllMenus();
-        syncOrderData();
-    });
-
-    // 3. 설정 모달 열기
-    document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => {
-        closeAllMenus();
-        openSheetSettingsModal();
-    });
-
-    // 4. 모달 내 저장/취소
-    document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
-    document.getElementById('btn-sheet-cancel')?.addEventListener('click', closeSheetSettingsModal);
-
-    // 5. 모달 바깥 영역 클릭 시 닫기
-    document.getElementById('sheet-settings-modal')?.addEventListener('click', (e) => {
-        if (e.target.id === 'sheet-settings-modal') closeSheetSettingsModal();
-    });
-
-    // 6. 데이터 관련
+    document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
+    document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => { closeAllMenus(); openSheetSettingsModal(); });
     document.getElementById('upload-stock-log')?.addEventListener('change', handleStockLogUpload);
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
-    document.getElementById('search-input')?.addEventListener('input', applySearch);
     
+    // 초기화 버튼 (버튼식)
+    document.getElementById('btn-date-clear')?.addEventListener('click', () => {
+        savedDates = [];
+        tableData = [];
+        filteredData = [];
+        renderDateButtons();
+        renderTable();
+        updateSummary();
+        saveConfig();
+        showToast('🔄 선택이 해제되었습니다.');
+    });
+
+    document.getElementById('search-input')?.addEventListener('input', applySearch);
     document.querySelectorAll('.th-sortable').forEach(th => {
         th.addEventListener('click', () => sortTable(th.dataset.sort));
     });
-
     document.getElementById('table-body')?.addEventListener('focusout', (e) => {
         if (e.target.classList.contains('editable-cell')) onCellEdit(e.target);
     });
+    document.getElementById('btn-sheet-save')?.addEventListener('click', saveSheetSettings);
+    document.getElementById('btn-sheet-cancel')?.addEventListener('click', closeSheetSettingsModal);
 
-    // 7. 초기화 버튼
+    // 전체 초기화 (DB 데이터 삭제)
     document.getElementById('btn-clear-all')?.addEventListener('click', async () => {
         closeAllMenus();
         if (!confirm('미발재고로그와 모든 편집 내용을 초기화하시겠습니까?')) return;
@@ -540,9 +612,8 @@ function setupEventListeners() {
 // 초기화
 // =========================================================
 async function init() {
-    // 버전 배지 강제 업데이트
     const badge = document.querySelector('.version-badge');
-    if (badge) badge.innerHTML = '🚀 Ver 1.7';
+    if (badge) badge.innerHTML = '🚀 Ver 1.8';
     
     setupEventListeners();
     showLoading('📦 최신 데이터 동기화 및 로드 중...');
@@ -551,11 +622,12 @@ async function init() {
     await Promise.all([
         loadEditedCells(),
         loadStockLogFromFirebase(),
-        syncOrderData(true)
+        syncOrderData(true) // 로드 시 CSV fetch -> 날짜 추출까지 수행
     ]);
 
     hideLoading();
-    if (savedDates.some(d => d && d.trim()) && (orderDataOriginal.length > 0 || orderDataBuy.length > 0)) {
+    // 데이터 로드 성공했고 저장된 날짜가 있다면 즉시 테이블 생성
+    if (savedDates.length > 0 && (orderDataOriginal.length > 0 || orderDataBuy.length > 0)) {
         applyDates();
     }
 }
