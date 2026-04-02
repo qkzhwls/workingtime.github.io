@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.3 (누락 함수 복구 및 이벤트 바인딩 완전체)
+// 중국제작 미발계산기 Ver 2.3 (이벤트 바인딩 완전체)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -158,9 +158,6 @@ async function fetchCSV(url) {
     return result;
 }
 
-// ---------------------------------------------------------
-// [복구] 1. 미발재고로그 업로드 (DOMParser 사용)
-// ---------------------------------------------------------
 function handleStockLogUpload(e) {
     const file = e.target.files[0]; 
     if (!file) return;
@@ -172,7 +169,6 @@ function handleStockLogUpload(e) {
             const text = evt.target.result;
             let rows = [];
             
-            // HTML 테이블 형식인지 확인 (DOMParser 적용)
             if (text.includes('<table') || text.includes('<TABLE')) {
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(text, 'text/html');
@@ -200,7 +196,6 @@ function handleStockLogUpload(e) {
                     });
                 }
             } else {
-                // 일반 Excel, CSV 처리
                 const wb = XLSX.read(text, { type: 'binary' });
                 rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }).filter(r => r['상품코드']);
             }
@@ -225,9 +220,6 @@ function handleStockLogUpload(e) {
     reader.readAsText(file, 'UTF-8');
 }
 
-// ---------------------------------------------------------
-// [복구] 2. 스캔DB 업로드
-// ---------------------------------------------------------
 async function uploadScanDB() {
     if (!tableData || tableData.length === 0) { alert('업로드할 데이터가 없습니다.'); return; }
     if (!confirm(`현재 ${tableData.length}건의 데이터를 앱용 스캔DB로 업로드하시겠습니까?`)) return;
@@ -259,17 +251,12 @@ async function uploadScanDB() {
     } catch (e) { hideLoading(); alert('업로드 실패: ' + e.message); }
 }
 
-// ---------------------------------------------------------
-// [복구] 3. 전체 데이터 초기화 (#btn-clear-all)
-// ---------------------------------------------------------
 async function clearAllData() {
     if (!confirm("모든 데이터를 초기화하시겠습니까?\n(수동편집, 미발재고로그, 앱 입고이력이 모두 삭제됩니다.)")) return;
     showLoading('🗑️ 전체 데이터 초기화 중...');
     try {
-        // 1. EDITED_CELLS 삭제
         await deleteDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'));
         
-        // 2. StockLog 청크 삭제
         const stockSnap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog'));
         if (stockSnap.size > 0) {
             const b1 = writeBatch(db);
@@ -277,7 +264,6 @@ async function clearAllData() {
             await b1.commit();
         }
         
-        // 3. InboundHistory 삭제
         const inboundSnap = await getDocs(collection(db, 'ChinaStockGoods_InboundHistory'));
         if (inboundSnap.size > 0) {
             const b2 = writeBatch(db);
@@ -285,7 +271,6 @@ async function clearAllData() {
             await b2.commit();
         }
 
-        // 변수 초기화
         orderDataOriginal = [];
         orderDataBuy = [];
         stockLogData = {};
@@ -309,9 +294,6 @@ async function clearAllData() {
     }
 }
 
-// ---------------------------------------------------------
-// [복구] 4. 출고일 초기화 (clearDates)
-// ---------------------------------------------------------
 function clearDates() {
     savedDates = []; 
     document.querySelectorAll('.date-check').forEach(btn => btn.checked = false);
@@ -488,7 +470,7 @@ function setupEventListeners() {
     // 5. #btn-open-sheet-settings (CSV 링크 설정 모달 열기)
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => openSheetSettingsModal());
 
-    // 6. #btn-clear-all (전체 초기화) - [복구 완료]
+    // 6. #btn-clear-all (전체 초기화)
     document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
 
     // 7. #upload-stock-log (미발재고로그 업로드)
@@ -497,7 +479,7 @@ function setupEventListeners() {
     // 8. #btn-date-apply (적용)
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
 
-    // 9. #btn-date-clear (초기화) - [복구 완료]
+    // 9. #btn-date-clear (초기화)
     document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
 
     // 10. #btn-excel-download (엑셀 다운로드)
@@ -547,7 +529,7 @@ function setupEventListeners() {
     // 18. #sheet-settings-modal .modal-content (전파 방지)
     document.querySelector('#sheet-settings-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
-    // 19. #btn-upload-scandb (스캔DB 업로드) - [복구 완료]
+    // 19. #btn-upload-scandb (스캔DB 업로드)
     document.getElementById('btn-upload-scandb')?.addEventListener('click', () => uploadScanDB());
 
     // 20. #btn-clear-inbound (입고 이력 초기화)
@@ -568,16 +550,16 @@ function setupEventListeners() {
         updateSavedDatesFromCheckboxes(); renderSelectedTags(); 
     });
 
-    // ========= 바인딩 체크리스트 (Ver 2.3) =========
+    // ========= 바인딩 체크리스트 =========
     // 1. #btn-toggle-menu [OK]
     // 2. #main-tools-menu [OK]
     // 3. document click [OK]
     // 4. #btn-sync-order [OK]
     // 5. #btn-open-sheet-settings [OK]
-    // 6. #btn-clear-all [OK] (clearAllData 함수 복원)
-    // 7. #upload-stock-log [OK] (handleStockLogUpload 함수 복원)
+    // 6. #btn-clear-all [OK] 
+    // 7. #upload-stock-log [OK] 
     // 8. #btn-date-apply [OK]
-    // 9. #btn-date-clear [OK] (clearDates 함수 복원)
+    // 9. #btn-date-clear [OK] 
     // 10. #btn-excel-download [OK]
     // 11. #search-input [OK]
     // 12. .th-sortable [OK]
@@ -587,10 +569,10 @@ function setupEventListeners() {
     // 16. #btn-sheet-save [OK]
     // 17. #sheet-settings-modal [OK]
     // 18. #sheet-settings-modal .modal-content [OK]
-    // 19. #btn-upload-scandb [OK] (uploadScanDB 함수 복원)
+    // 19. #btn-upload-scandb [OK] 
     // 20. #btn-clear-inbound [OK]
     // 21. 출고일 드롭다운 관련 [OK]
-    // ===============================================
+    // =====================================
 }
 
 async function init() {
@@ -608,5 +590,5 @@ async function init() {
 }
 init();
 
-// module 스크립트 특성상 전역 스코프에 함수를 노출 (인라인 이벤트 호환용)
+// 전역 스코프 노출
 window.handleStockLogUpload = handleStockLogUpload;
