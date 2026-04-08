@@ -18,6 +18,7 @@ let currentUserName = "비로그인 작업자";
 let appConfig = null;
 window.currentUsageTab = '3F';
 window.capacity2F = 200000;
+window.angleSizeMap = {};
 
 window.sheetUrlOrder = ''; 
 window.sheetUrlBuy = ''; 
@@ -164,6 +165,7 @@ function setupRealtimeListenerA() {
             if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
             if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders.filter(h => h && !h.includes('<') && !h.includes('>') && !h.includes('='));
+            if (conf.angleSizeMap) window.angleSizeMap = conf.angleSizeMap;
             
             if (conf.recommendRatios) {
                 let r = conf.recommendRatios;
@@ -540,8 +542,19 @@ window.downloadMainExcel = function() {
         const stock = loc.stock || '0';
         const stock2f = loc.stock2f || '0';
         
+        // ★ 로케이션 컬럼 복원: ★★-01(4)/ S561045 형식
+        const zone = (loc.id.charAt(0) || '').toUpperCase();
+        const dong = (loc.dong || '').toString().trim();
+        const angleSize = (window.angleSizeMap || {})[`${zone}-${dong}`] || '';
+        let locDisplay = loc.id;
+        if (angleSize) {
+            locDisplay = code 
+                ? `${loc.id}(${angleSize})/ ${code}` 
+                : `${loc.id}(${angleSize})`;
+        }
+        
         let row = '';
-        row += `<td class='style1'>${loc.id}</td>`;
+        row += `<td class='style1'>${locDisplay}</td>`;
         row += `<td class='style2'>${loc.dong || ''}</td>`;
         row += `<td class='style2'>${loc.pos || ''}</td>`;
         row += `<td class='style1'>${code}</td>`;
@@ -1125,7 +1138,50 @@ window.openSettingsModal = (e) => {
 
     html += `</div>`;
     container.innerHTML = html;
+    
+    // ★ 구역+동 표 렌더링
+    const angleContainer = document.getElementById('setting-angle-container');
+    if (angleContainer) {
+        // 현재 데이터에서 구역+동 조합 추출
+        const comboSet = new Set();
+        originalData.forEach(loc => {
+            const zone = (loc.id.charAt(0) || '').toUpperCase();
+            const dong = (loc.dong || '').toString().trim();
+            if (zone && dong) comboSet.add(`${zone}-${dong}`);
+        });
+        const combos = [...comboSet].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+        
+        if (combos.length === 0) {
+            angleContainer.innerHTML = '<div style="text-align:center; padding:20px; color:#888; font-size:12px;">로케이션 데이터가 없습니다.</div>';
+        } else {
+            let angleHtml = '<table style="width:100%; border-collapse:collapse; font-size:13px;"><thead><tr style="background:#e3f2fd;"><th style="padding:6px; border:1px solid #bbdefb;">구역-동</th><th style="padding:6px; border:1px solid #bbdefb; width:120px;">칸 수</th></tr></thead><tbody>';
+            combos.forEach(key => {
+                const val = (window.angleSizeMap || {})[key] || '';
+                angleHtml += `<tr><td style="padding:6px; border:1px solid #e0e0e0; text-align:center; font-weight:bold;">${key}</td><td style="padding:4px; border:1px solid #e0e0e0;"><input type="number" min="0" class="angle-size-input" data-key="${key}" value="${val}" style="width:100%; padding:4px; text-align:center; border:1px solid #ccc; border-radius:3px;"></td></tr>`;
+            });
+            angleHtml += '</tbody></table>';
+            angleContainer.innerHTML = angleHtml;
+        }
+    }
+    
     document.getElementById('settings-modal').style.display = 'flex';
+};
+
+window.saveAngleSizeMap = async function() {
+    const inputs = document.querySelectorAll('.angle-size-input');
+    const newMap = {};
+    inputs.forEach(input => {
+        const key = input.dataset.key;
+        const val = input.value.trim();
+        if (key && val && Number(val) > 0) {
+            newMap[key] = val;
+        }
+    });
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { angleSizeMap: newMap }, { merge: true });
+        window.angleSizeMap = newMap;
+        alert(`✅ 칸 수 설정이 저장되었습니다. (${Object.keys(newMap).length}개)`);
+    } catch(e) { console.error(e); alert('저장 중 오류가 발생했습니다.'); }
 };
 
 window.saveHeaderSettings = async () => {
@@ -1288,7 +1344,33 @@ window.syncIncomingData = async () => {
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
             window.hideLoading();
-            alert(`✅ 입고 대기 상품 연동 완료!\n(오더리스트 ${orderData.length}건, 사입리스트 ${buyData.length}건)`);
+            
+            // 검증 정보 수집
+            const orderItems = finalJson.filter(r => r.source === '제작');
+            const buyItems = finalJson.filter(r => r.source === '사입');
+            
+            const buildSummary = (items, label) => {
+                if (items.length === 0) return `[${label}] 데이터 없음`;
+                const sorted = [...items].sort((a, b) => (a['상품코드'] || '').localeCompare(b['상품코드'] || ''));
+                const totalQty = items.reduce((sum, r) => sum + Number(r['입고대기수량'] || 0), 0);
+                const dates = items.map(r => r['표시날짜']).filter(Boolean).sort();
+                const minDate = dates[0] || '-';
+                const maxDate = dates[dates.length - 1] || '-';
+                return `[${label}] ${items.length}건 / 총 ${totalQty.toLocaleString()}장\n` +
+                       `  첫 코드: ${sorted[0]['상품코드']} / 끝 코드: ${sorted[sorted.length-1]['상품코드']}\n` +
+                       `  날짜 범위: ${minDate} ~ ${maxDate}`;
+            };
+            
+            const summary = 
+                `✅ 입고 대기 상품 연동 완료!\n\n` +
+                `📊 원본 파싱: 오더 ${orderData.length}건, 사입 ${buyData.length}건\n` +
+                `📊 저장 대상: ${finalJson.length}건 (수량>0, 날짜있음)\n\n` +
+                buildSummary(orderItems, '제작') + '\n\n' +
+                buildSummary(buyItems, '사입') + '\n\n' +
+                `※ 위 정보를 구글 시트와 비교해서 일치하는지 확인하세요.`;
+            
+            alert(summary);
+            console.log('[입고대기 동기화 검증]', { orderItems: orderItems.slice(0,3), buyItems: buyItems.slice(0,3) });
         } else { 
             window.hideLoading(); 
             alert("입고 대기(수량 1개 이상) 상품이 없거나 데이터를 찾지 못했습니다."); 
