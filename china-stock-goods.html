@@ -19,8 +19,9 @@
         .date-item { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 12px; cursor: pointer; border-radius: 4px; }
         .selected-date-tags { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; flex: 1; margin: 0 10px; overflow: hidden; }
         .date-tag { display: inline-flex; align-items: center; gap: 5px; background: #fff3e0; color: #bf360c; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; border: 1px solid #ffcc80; }
+        .date-actions { display: flex; gap: 5px; border-left: 1px solid #eee; padding-left: 15px; }
 
-        /* 요약 바 및 Ver 2.1 버튼 그룹 스타일 */
+        /* 요약 바 및 버튼 그룹 스타일 */
         .summary-bar { margin: 0 20px 10px 20px; display: flex; gap: 15px; flex-wrap: wrap; }
         .summary-card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px 18px; display: flex; flex-direction: column; align-items: center; min-width: 100px; }
         .summary-card .label { font-size: 11px; color: #888; font-weight: bold; }
@@ -37,6 +38,7 @@
         .list-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
         .list-table th, .list-table td { padding: 10px 12px; text-align: center; border: 1px solid #ccc; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .list-table th { background: #f4f4f4; position: sticky; top: -1px; z-index: 10; font-weight: 800; }
+        .th-sortable { cursor: pointer; }
         .editable-cell { cursor: text; background: #fffde7; }
         .code-cell { font-weight: bold; color: #1565c0; cursor: copy; }
 
@@ -44,6 +46,10 @@
         .spinner { border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--primary); border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 20px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
+        /* [긴급 수정] 모달 CSS 복구 */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center; }
+        .modal-content { background: white; padding: 25px; border-radius: 10px; width: 450px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+
         #toast { visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center; border-radius: 8px; padding: 12px; position: fixed; z-index: 10001; left: 50%; bottom: 50px; transform: translateX(-50%); opacity: 0; transition: 0.3s; }
         #toast.show { visibility: visible; opacity: 1; }
     </style>
@@ -57,7 +63,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 2.1</div>
+            <div class="version-badge">🚀 Ver 2.3</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -70,6 +76,7 @@
                     <div class="menu-item" id="btn-sync-order" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#1976d2;">🔄 오더리스트 시트 동기화</div>
                     <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a; border-top:1px solid #ddd;">⚙️ 설정</div>
                     <div class="menu-item" id="btn-open-sheet-settings" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#607d8b;">📎 CSV 시트 링크 설정</div>
+                    <div class="menu-item" id="btn-clear-all" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#d32f2f;">🗑️ 전체 데이터 초기화</div>
                 </div>
             </div>
         </div>
