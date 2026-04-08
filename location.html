@@ -170,5 +170,34 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script type="module" src="js/location.js"></script>
+    <script>
+        window.closeAllPopups = function() {
+            document.querySelectorAll('.upload-menu').forEach(m => m.style.display = 'none');
+            document.getElementById('usage-popup').style.display = 'none';
+        }
+        function toggleUploadMenu(e, id) {
+            e.stopPropagation();
+            const menu = document.getElementById(id);
+            const isVisible = menu.style.display === 'block';
+            window.closeAllPopups();
+            if(!isVisible) menu.style.display = 'block';
+        }
+        function toggleUsagePopup(e) {
+            e.stopPropagation();
+            const pop = document.getElementById('usage-popup');
+            const isVisible = pop.style.display === 'block';
+            window.closeAllPopups();
+            if(!isVisible) pop.style.display = 'block';
+        }
+        function toggleIncomingSidebar(e) {
+            if(e) e.stopPropagation();
+            const sidebar = document.getElementById('incoming-sidebar');
+            sidebar.classList.toggle('open');
+            if(sidebar.classList.contains('open') && typeof window.renderIncomingQueue === 'function') window.renderIncomingQueue();
+        }
+        function closeSettingsModal(e) {
+            if(!e || e.target.id === 'settings-modal') document.getElementById('settings-modal').style.display = 'none';
+        }
+    </script>
 </body>
 </html>
