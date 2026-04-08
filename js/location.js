@@ -7,10 +7,11 @@ const LOC_COLLECTION = 'Locations';
 let originalData = [];
 let incomingData = {}; 
 let currentUserName = "작업자";
+let visibleColumns = ['std_dong', 'std_pos', 'std_id', 'std_code', 'std_name', 'std_stock'];
 
-// 📌 작업 1-B: downloadMainExcel 함수의 로케이션 컬럼 복원
+// 📌 작업 1-B: 다운로드 시 로케이션 컬럼 형식 복원 로직
 window.downloadMainExcel = function() {
-    const targetData = originalData; // 필터링된 데이터 연동 필요 시 수정
+    const targetData = originalData; 
     
     let excelHtml = "<html><head><meta charset='utf-8'><style>.style1{mso-number-format:'\\@';}.style2{text-align:center;}</style></head><body><table border='1'>";
     excelHtml += "<tr><th>로케이션</th><th>동</th><th>위치</th><th>상품코드</th><th>상품명</th><th>옵션</th><th>정상재고</th></tr>";
@@ -43,11 +44,11 @@ window.downloadMainExcel = function() {
     const blob = new Blob([excelHtml], { type: "application/vnd.ms-excel" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `로케이션전체리스트_${new Date().toLocaleDateString()}.xls`;
+    link.download = `로케이션_리스트_${new Date().toLocaleDateString()}.xls`;
     link.click();
 };
 
-// 📌 작업 1-A: updateDatabaseA 함수의 permanent 모드에서 칸수 처리
+// 📌 작업 1-A: 영구 세팅 업로드 시 '칸수' 필드 처리
 async function updateDatabaseA(rows, mode = 'daily') {
     try {
         let existingLocMap = {};
@@ -79,7 +80,7 @@ async function updateDatabaseA(rows, mode = 'daily') {
                 updateData.stock = existingData.stock || '0';
                 updateData.stock2f = existingData.stock2f || '0';
                 
-                // ★ 칸수 필드 추가 (엑셀에 칸수 컬럼이 있으면 저장, 없으면 기존 값 유지)
+                // ★ 칸수 필드 추가 (작업 1-A)
                 if ('칸수' in row || 'angleSize' in row) {
                     const rawAngle = (row['칸수'] || row['angleSize'] || '').toString().trim();
                     updateData.angleSize = rawAngle;
@@ -87,9 +88,9 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     updateData.angleSize = existingData.angleSize || '';
                 }
             } else {
-                // 일일 최신화 로직 (생략)
                 updateData.code = row['상품코드']?.toString().trim() || '';
                 updateData.name = row['상품명']?.toString().trim() || '';
+                updateData.option = row['옵션']?.toString().trim() || '';
                 updateData.stock = row['정상재고']?.toString().trim() || '0';
             }
 
@@ -101,11 +102,11 @@ async function updateDatabaseA(rows, mode = 'daily') {
             batch.set(doc(db, LOC_COLLECTION, zoneId), zoneUpdates[zoneId], { merge: true });
         }
         await batch.commit();
-        alert(`✅ ${updateCount}건 처리 완료!`);
-    } catch (e) { console.error(e); alert("오류 발생"); }
+        alert(`✅ ${updateCount}건의 데이터가 성공적으로 처리되었습니다.`);
+    } catch (e) { console.error(e); alert("오류가 발생했습니다. 콘솔을 확인하세요."); }
 }
 
-// 📌 작업 2-A: 입고대기 사이드바 카드에 옵션 표시 추가
+// 📌 작업 2-A: 입고대기 사이드바 카드에 옵션 표시
 window.renderIncomingQueue = function() {
     const container = document.getElementById('incoming-list');
     if(!container) return;
@@ -136,41 +137,73 @@ window.renderIncomingQueue = function() {
             </div>
         `;
     });
-    container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">데이터가 없습니다.</div>';
+    container.innerHTML = html || '<div style="text-align:center; padding:30px; color:#888;">입고 대기 항목이 없습니다.</div>';
 };
 
-// 데이터 로드 리스너
-onSnapshot(collection(db, LOC_COLLECTION), (snapshot) => {
-    let tempLocMap = {};
-    snapshot.forEach(docSnap => {
-        if(docSnap.id.startsWith('ZONE_')) {
-            const data = docSnap.data();
-            for(let id in data) { tempLocMap[id] = { id, ...data[id] }; }
+// Firebase 실시간 데이터 리스너
+function setupListeners() {
+    onSnapshot(collection(db, LOC_COLLECTION), (snapshot) => {
+        let tempLocMap = {};
+        snapshot.forEach(docSnap => {
+            if(docSnap.id.startsWith('ZONE_')) {
+                const data = docSnap.data();
+                for(let id in data) { tempLocMap[id] = { id, ...data[id] }; }
+            }
+        });
+        originalData = Object.values(tempLocMap);
+        renderTable(originalData);
+    });
+
+    onSnapshot(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), (docSnap) => {
+        if(docSnap.exists()) {
+            const conf = docSnap.data();
+            if(conf.visibleColumns) visibleColumns = conf.visibleColumns;
+            renderTableHeader();
         }
     });
-    originalData = Object.values(tempLocMap);
-    renderTable(originalData);
-});
+}
+
+// 테이블 렌더링 함수
+function renderTableHeader() {
+    const tr = document.getElementById('dynamic-thead-tr');
+    if(!tr) return;
+    let html = '<th><input type="checkbox" id="check-all"></th>';
+    visibleColumns.forEach(col => {
+        let label = col.replace('std_', '');
+        html += `<th>${label}</th>`;
+    });
+    tr.innerHTML = html;
+}
 
 function renderTable(data) {
     const tbody = document.getElementById('location-list-body');
+    if(!tbody) return;
     let html = '';
     data.forEach(loc => {
-        html += `<tr><td><input type="checkbox" value="${loc.id}"></td><td>${loc.id}</td><td>${loc.dong||''}</td><td>${loc.pos||''}</td><td>${loc.code||''}</td><td>${loc.name||''}</td><td>${loc.stock||0}</td></tr>`;
+        html += `<tr><td><input type="checkbox" class="loc-check" value="${loc.id}"></td>`;
+        visibleColumns.forEach(col => {
+            let key = col.replace('std_', '');
+            html += `<td>${loc[key] || ''}</td>`;
+        });
+        html += `</tr>`;
     });
     tbody.innerHTML = html;
 }
 
-// 엑셀 업로드 이벤트 바인딩
+// 초기화
+window.onload = () => {
+    setupListeners();
+};
+
+// 엑셀 업로드 처리
 document.getElementById('excel-upload-permanent')?.addEventListener('change', (e) => {
     const file = e.target.files[0];
+    if(!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-        const wb = XLSX.read(ev.target.result, {type:'binary'});
+        const wb = XLSX.read(ev.target.result, {type: 'binary'});
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
         updateDatabaseA(rows, 'permanent');
     };
     reader.readAsBinaryString(file);
 });
-
-// 기타 유틸리티 함수 (showRecommendation, toggleIncomingSidebar 등 기존 코드 유지)
