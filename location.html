@@ -145,6 +145,36 @@
         .pre-assign-banner { display: none; position: fixed; top: 15px; left: 50%; transform: translateX(-50%); background: #e65100; color: white; padding: 12px 25px; border-radius: 30px; font-weight: bold; z-index: 10002; box-shadow: 0 4px 15px rgba(0,0,0,0.3); align-items: center; gap: 20px; font-size: 15px; }
         .pre-assign-banner button { background: white; color: #e65100; border: none; padding: 6px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .pre-assign-banner button:hover { background: #ffe0b2; }
+        /* ℹ️ 호버 툴팁 공통 스타일 */
+        .info-tip { 
+            position: relative; display: inline-block; 
+            cursor: help; margin-left: 4px; 
+            width: 16px; height: 16px; line-height: 16px; 
+            text-align: center; border-radius: 50%; 
+            background: #b0bec5; color: white; 
+            font-size: 11px; font-weight: bold; 
+            font-style: normal; vertical-align: middle;
+        }
+        .info-tip:hover { background: var(--primary); }
+        .info-tip .info-tip-content {
+            display: none; position: absolute; 
+            bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+            background: #263238; color: white; 
+            padding: 10px 14px; border-radius: 8px; 
+            font-size: 12px; font-weight: normal; font-style: normal;
+            line-height: 1.6; text-align: left;
+            white-space: normal; width: max-content; max-width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 999999; pointer-events: none;
+        }
+        .info-tip .info-tip-content::after {
+            content: ''; position: absolute; top: 100%; left: 50%; 
+            transform: translateX(-50%); border: 6px solid transparent; 
+            border-top-color: #263238;
+        }
+        .info-tip:hover .info-tip-content { display: block; }
+        .info-tip b { color: #80deea; }
+    </style>
     </style>
 </head>
 <body onclick="closeAllPopups()">
