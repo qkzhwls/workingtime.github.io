@@ -9,6 +9,7 @@ let originalData = [];
 let zikjinData = {}; 
 let weeklyData = {}; 
 let incomingData = {}; 
+let incomingTotalByCode = {}; // ★ 상품코드별 입고대기 합계 (오더+사입)
 let sortConfig = { key: 'id', direction: 'asc' }; 
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all', reserved: 'all', preassigned: 'all' };
 
@@ -137,6 +138,7 @@ function setupRealtimeListenerB() {
     
     onSnapshot(collection(db, 'IncomingData'), (snapshot) => {
         incomingData = {};
+        incomingTotalByCode = {}; // ★ 합계 초기화
         snapshot.forEach(docSnap => { 
             let data = docSnap.data();
             if(data.dataStr) {
@@ -144,7 +146,12 @@ function setupRealtimeListenerB() {
                     let chunk = JSON.parse(data.dataStr);
                     chunk.forEach(row => {
                         let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호']);
-                        if(code) incomingData[code] = row;
+                        if(code) {
+                            incomingData[code] = row;
+                            // ★ 상품코드별 오더+사입 합계 누적
+                            const qty = Number(row['입고대기수량'] || 0);
+                            incomingTotalByCode[code] = (incomingTotalByCode[code] || 0) + qty;
+                        }
                     });
                 } catch(e){}
             }
@@ -152,7 +159,6 @@ function setupRealtimeListenerB() {
         if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
         applyFiltersAndSort();
     }, (error) => console.error("입고예정데이터 오류:", error));
-}
 
 function setupRealtimeListenerA() {
     onSnapshot(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), (docSnap) => {
@@ -1709,7 +1715,12 @@ function applyFiltersAndSort() {
         for (const col in filters) {
             if (!col.startsWith('cus_') || filters[col] === 'all') continue;
             const key = col.replace('cus_', '');
-            const val = (item.rawData && item.rawData[key]) ? item.rawData[key].toString().trim() : '';
+            let val = (item.rawData && item.rawData[key]) ? item.rawData[key].toString().trim() : '';
+            // ★ 입고대기 컬럼은 오더+사입 합계 기준으로 필터
+            if (key === '입고대기') {
+                const code = (item.code && item.code !== item.id) ? item.code : '';
+                val = code && incomingTotalByCode[code] ? incomingTotalByCode[code].toString() : '';
+            }
             // ★ 빈칸/내용있음 필터 지원
             if (filters[col] === 'empty') { if (val !== '') return false; }
             else if (filters[col] === 'not-empty') { if (val === '') return false; }
@@ -1865,6 +1876,11 @@ function renderVisibleRows() {
             else if (col.startsWith('cus_')) {
                 const key = col.replace('cus_', '');
                 let val = (loc.rawData && loc.rawData[key]) ? loc.rawData[key] : '';
+                // ★ 입고대기 컬럼은 오더리스트/사입리스트 합계로 덮어쓰기
+                if (key === '입고대기') {
+                    const code = (loc.code && loc.code !== loc.id) ? loc.code : '';
+                    val = code && incomingTotalByCode[code] ? incomingTotalByCode[code] : '0';
+                }
                 html += `<td>${val}</td>`;
             }
         });
