@@ -1097,7 +1097,12 @@ function renderTableHeader() {
         else if (col === 'std_stock2f') { html += createTh('stock2f', '2층창고재고', 130, true); popupHtml += `<div id="pop-stock2f" class="filter-popup"></div>`; }
         else if (col.startsWith('cus_')) {
             const label = col.replace('cus_', '');
-            html += createTh(col, label, 120, true);
+            // ★ 입고대기 컬럼에 툴팁 추가
+            let displayLabel = label;
+            if (label === '입고대기') {
+                displayLabel = `입고대기<span class="info-tip">i<span class="info-tip-content">📦 <b>오더리스트 + 사입리스트 합계</b><br>입고대기 사이드바에 연동된 구글시트의 <b>미입고수량</b>을 상품코드 기준으로 합산한 값입니다.<br>(같은 상품코드의 옵션별 수량이 모두 더해집니다)</span></span>`;
+            }
+            html += createTh(col, displayLabel, 120, true);
             popupHtml += `<div id="pop-${col}" class="filter-popup"></div>`;
         }
     });
