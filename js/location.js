@@ -540,8 +540,17 @@ window.downloadMainExcel = function() {
         const stock = loc.stock || '0';
         const stock2f = loc.stock2f || '0';
         
+        // ★ 로케이션 컬럼 복원: ★★-01(4)/ S561045 형식
+        const angleSize = (loc.angleSize || '').toString().trim();
+        let locDisplay = loc.id;
+        if (angleSize) {
+            locDisplay = code 
+                ? `${loc.id}(${angleSize})/ ${code}` 
+                : `${loc.id}(${angleSize})`;
+        }
+        
         let row = '';
-        row += `<td class='style1'>${loc.id}</td>`;
+        row += `<td class='style1'>${locDisplay}</td>`;
         row += `<td class='style2'>${loc.dong || ''}</td>`;
         row += `<td class='style2'>${loc.pos || ''}</td>`;
         row += `<td class='style1'>${code}</td>`;
@@ -2250,6 +2259,13 @@ async function updateDatabaseA(rows, mode = 'daily') {
                         updateData.option = existingData.option || '';
                         updateData.stock = existingData.stock || '0';
                         updateData.stock2f = existingData.stock2f || '0';
+                        // ★ 칸수 필드 추가 (엑셀에 칸수 컬럼이 있으면 저장, 없으면 기존 값 유지)
+                        if ('칸수' in row || 'angleSize' in row) {
+                            const rawAngle = (row['칸수'] || row['angleSize'] || '').toString().trim();
+                            updateData.angleSize = rawAngle;
+                        } else {
+                            updateData.angleSize = existingData.angleSize || '';
+                        }
                     } else {
                         updateData.code = finalCode || '';
                         updateData.name = row['상품명']?.toString().trim() || '';
@@ -2477,7 +2493,8 @@ window.renderIncomingQueue = function() {
                     <div style="font-weight:bold; color:var(--primary); font-size:14px;">${code}</div>
                     <span style="font-size:10px; background:${src==='제작'?'#e3f2fd':'#fbe9e7'}; color:${src==='제작'?'#1976d2':'#d84315'}; padding:2px 5px; border-radius:3px; font-weight:bold;">${src}</span>
                 </div>
-                <div style="font-size:12px; color:#333; margin-bottom:6px;">${name}</div>
+                <div style="font-size:12px; color:#333; margin-bottom:${option ? '2px' : '6px'};">${name}</div>
+                ${option ? `<div style="font-size:11px; color:#777; margin-bottom:6px;">${option}</div>` : ''}
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px;">
                     <span style="color:#555;">${src==='제작'?'출고일':'도착일'}: <b style="color:#d32f2f;">${date}</b></span>
                     <span style="color:#e65100; font-weight:bold; font-size:12px;">대기: ${qty}개</span>
