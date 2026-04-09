@@ -159,6 +159,7 @@ function setupRealtimeListenerB() {
         if(document.getElementById('incoming-sidebar').classList.contains('open')) window.renderIncomingQueue();
         applyFiltersAndSort();
     }, (error) => console.error("입고예정데이터 오류:", error));
+}
 
 function setupRealtimeListenerA() {
     onSnapshot(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), (docSnap) => {
