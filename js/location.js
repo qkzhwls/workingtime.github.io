@@ -141,19 +141,24 @@ function setupRealtimeListenerB() {
         incomingData = {};
         incomingTotalByCode = {}; // ★ 합계 초기화
         // ★ v3.53: 오늘 날짜 (YYYY-MM-DD)
-    const _today = new Date().toISOString().slice(0, 10);
-    list = list.filter(item => {
-        if(filterSource !== 'all' && item.source !== filterSource) return false;
-        if(existingLocMap[item['상품코드']]) return false; 
-        
-        if(!item['표시날짜'] || item['표시날짜'].toString().trim() === '') return false;
-        
-        // ★ v3.53: 도착예정일이 과거이면 제외
-        const arrivalDate = (item['도착예상일'] || item['표시날짜'] || '').toString().trim();
-        if (arrivalDate && arrivalDate < _today) return false;
-        
-        return true;
-    });
+        const _today = new Date().toISOString().slice(0, 10);
+        snapshot.forEach(docSnap => { 
+            let data = docSnap.data();
+            if(data.dataStr) {
+                try {
+                    let chunk = JSON.parse(data.dataStr);
+                    chunk.forEach(row => {
+                        let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호']);
+                        if(code) {
+                            incomingData[code] = row;
+                            // ★ v3.53: 도착예정일이 과거이거나 빈칸이면 합계에서 제외
+                            const arrivalDate = (row['도착예상일'] || row['표시날짜'] || '').toString().trim();
+                            if (!arrivalDate || arrivalDate < _today) return;
+                            // ★ 상품코드별 오더+사입 합계 누적
+                            const qty = Number(row['입고대기수량'] || 0);
+                            incomingTotalByCode[code] = (incomingTotalByCode[code] || 0) + qty;
+                        }
+                    });
                 } catch(e){}
             }
         });
@@ -1513,11 +1518,11 @@ window.calculateAndRenderUsage = function() {
         }
         
         if (sortedDates.length === 0) {
-            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="color:#888; text-align:right;">입고대기 데이터 없음 (시트 동기화 필요)</td></tr>`;
         } else if (sum2F >= window.capacity2F) {
-            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#d32f2f; text-align:right;">이미 초과 상태입니다! (${(sum2F - window.capacity2F).toLocaleString()}장 초과)</td></tr>`;
         } else if (fullDate) {
-            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#e65100; text-align:right;">${fullDate}<br><span style="font-size:11px; color:#888;">현재 ${sum2F.toLocaleString()}장 + 입고예정 누적 → ${cumTotal.toLocaleString()}장 도달</span></td></tr>`;
         } else {
             const afterAll = sum2F + totalIncoming;
             const remainAfter = window.capacity2F - afterAll;
@@ -1539,9 +1544,9 @@ window.calculateAndRenderUsage = function() {
             }
             
             if (estimatedDate && dailyAvg > 0) {
-                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#2e7d32; text-align:right;">${estimatedDate} (추정)<br><span style="font-size:11px; color:#888;">일평균 입고 ${Math.round(dailyAvg).toLocaleString()}장 기준, 입고예정 후 여유 ${remainAfter.toLocaleString()}장</span></td></tr>`;
             } else {
-                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정 전량 입고 후에도 여유 ${remainAfter.toLocaleString()}장<br><span style="font-size:11px; color:#888;">예상 적재: ${afterAll.toLocaleString()} / ${window.capacity2F.toLocaleString()}장</span></td></tr>`;
             }
         }
         
@@ -2505,11 +2510,17 @@ window.renderIncomingQueue = function() {
     let list = [];
     for(let code in incomingData) { list.push(incomingData[code]); }
 
+    // ★ v3.53: 오늘 날짜 (YYYY-MM-DD)
+    const _today = new Date().toISOString().slice(0, 10);
     list = list.filter(item => {
         if(filterSource !== 'all' && item.source !== filterSource) return false;
         if(existingLocMap[item['상품코드']]) return false; 
         
         if(!item['표시날짜'] || item['표시날짜'].toString().trim() === '') return false;
+        
+        // ★ v3.53: 도착예정일이 과거이면 제외
+        const arrivalDate = (item['도착예상일'] || item['표시날짜'] || '').toString().trim();
+        if (arrivalDate && arrivalDate < _today) return false;
         
         return true;
     });
