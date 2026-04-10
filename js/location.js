@@ -679,7 +679,7 @@ window.showRecommendation = function() {
                     zContrib, wContrib, tContrib
                 });
             }
-
+        });
         scoredItems.sort((a, b) => b.score - a.score);
 
         let emptyLocs = originalData.filter(d => {
@@ -1502,11 +1502,11 @@ window.calculateAndRenderUsage = function() {
         }
         
         if (sortedDates.length === 0) {
-            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="color:#888; text-align:right;">입고대기 데이터 없음 (시트 동기화 필요)</td></tr>`;
         } else if (sum2F >= window.capacity2F) {
-            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#d32f2f; text-align:right;">이미 초과 상태입니다! (${(sum2F - window.capacity2F).toLocaleString()}장 초과)</td></tr>`;
         } else if (fullDate) {
-            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#e65100; text-align:right;">${fullDate}<br><span style="font-size:11px; color:#888;">현재 ${sum2F.toLocaleString()}장 + 입고예정 누적 → ${cumTotal.toLocaleString()}장 도달</span></td></tr>`;
         } else {
             const afterAll = sum2F + totalIncoming;
             const remainAfter = window.capacity2F - afterAll;
@@ -1528,9 +1528,9 @@ window.calculateAndRenderUsage = function() {
             }
             
             if (estimatedDate && dailyAvg > 0) {
-                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#2e7d32; text-align:right;">${estimatedDate} (추정)<br><span style="font-size:11px; color:#888;">일평균 입고 ${Math.round(dailyAvg).toLocaleString()}장 기준, 입고예정 후 여유 ${remainAfter.toLocaleString()}장</span></td></tr>`;
             } else {
-                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정 전량 입고 후에도 여유 ${remainAfter.toLocaleString()}장<br><span style="font-size:11px; color:#888;">예상 적재: ${afterAll.toLocaleString()} / ${window.capacity2F.toLocaleString()}장</span></td></tr>`;
             }
         }
         
@@ -1890,14 +1890,14 @@ function renderVisibleRows() {
             else if (col === 'std_stock') html += `<td style="font-weight:bold;">${loc.stock || '0'}</td>`;
             else if (col === 'std_stock2f') html += `<td style="font-weight:bold;">${loc.stock2f || '0'}</td>`;
             else if (col.startsWith('cus_')) {
-                const label = col.replace('cus_', '');
-                // ★ 입고대기 컬럼에 툴팁 추가
-                let displayLabel = label;
-                if (label === '입고대기') {
-                    displayLabel = `입고대기<span class="info-tip">i<span class="info-tip-content">📦 <b>오더리스트 + 사입리스트 합계</b><br>입고대기 사이드바에 연동된 구글시트의 <b>미입고수량</b>을 상품코드 기준으로 합산한 값입니다.<br>(같은 상품코드의 옵션별 수량이 모두 더해집니다)</span></span>`;
+                const key = col.replace('cus_', '');
+                let val = (loc.rawData && loc.rawData[key]) ? loc.rawData[key] : '';
+                // ★ 입고대기 컬럼은 오더리스트/사입리스트 합계로 덮어쓰기
+                if (key === '입고대기') {
+                    const code = (loc.code && loc.code !== loc.id) ? loc.code : '';
+                    val = code && incomingTotalByCode[code] ? incomingTotalByCode[code] : '0';
                 }
-                html += createTh(col, displayLabel, 120, true);
-                popupHtml += `<div id="pop-${col}" class="filter-popup"></div>`;
+                html += `<td>${val}</td>`;
             }
         });
         html += `</tr>`;
