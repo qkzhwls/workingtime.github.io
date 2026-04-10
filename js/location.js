@@ -140,20 +140,20 @@ function setupRealtimeListenerB() {
     onSnapshot(collection(db, 'IncomingData'), (snapshot) => {
         incomingData = {};
         incomingTotalByCode = {}; // ★ 합계 초기화
-        snapshot.forEach(docSnap => { 
-            let data = docSnap.data();
-            if(data.dataStr) {
-                try {
-                    let chunk = JSON.parse(data.dataStr);
-                    chunk.forEach(row => {
-                        let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호']);
-                        if(code) {
-                            incomingData[code] = row;
-                            // ★ 상품코드별 오더+사입 합계 누적
-                            const qty = Number(row['입고대기수량'] || 0);
-                            incomingTotalByCode[code] = (incomingTotalByCode[code] || 0) + qty;
-                        }
-                    });
+        // ★ v3.53: 오늘 날짜 (YYYY-MM-DD)
+    const _today = new Date().toISOString().slice(0, 10);
+    list = list.filter(item => {
+        if(filterSource !== 'all' && item.source !== filterSource) return false;
+        if(existingLocMap[item['상품코드']]) return false; 
+        
+        if(!item['표시날짜'] || item['표시날짜'].toString().trim() === '') return false;
+        
+        // ★ v3.53: 도착예정일이 과거이면 제외
+        const arrivalDate = (item['도착예상일'] || item['표시날짜'] || '').toString().trim();
+        if (arrivalDate && arrivalDate < _today) return false;
+        
+        return true;
+    });
                 } catch(e){}
             }
         });
@@ -639,9 +639,11 @@ window.showRecommendation = function() {
         window.currentRecommendations = [];
         
         // ★ 로케이션에 실제 존재하는 상품코드만 대상
+        // ★ v3.53: 입고대기 남은 상품 제외 (곧 입고되므로 자리 이동 보류)
         const allCodes = new Set(
             originalData
                 .filter(d => d.code && d.code.trim() !== '' && d.code !== d.id)
+                .filter(d => !(incomingTotalByCode[d.code.trim()] > 0))
                 .map(d => d.code.trim())
         );
         let maxZQty = 0; let maxWQty = 0; let maxTrend = 0;
@@ -941,6 +943,8 @@ window.calc2FList = function() {
     const tbody = document.getElementById('2f-tbody');
 
     for (const code in codeMap) {
+        // ★ v3.53: 입고대기 남은 상품은 2F 이동 추천에서 제외
+        if (incomingTotalByCode[code] > 0) continue;
         const locs = codeMap[code];
         const firstLoc = locs[0];
         
