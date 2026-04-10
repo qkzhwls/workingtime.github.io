@@ -10,7 +10,8 @@ let zikjinData = {};
 let weeklyData = {}; 
 let incomingData = {}; 
 let incomingTotalByCode = {}; // ★ 상품코드별 입고대기 합계 (오더+사입)
-let sortConfig = { key: 'id', direction: 'asc' }; 
+let customTooltips = {}; // ★ v3.53: 사용자 정의 툴팁 { key: html_content, "__deleted__keyName": true }
+let sortConfig = { key: 'id', direction: 'asc' };
 let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all', reserved: 'all', preassigned: 'all' };
 
 const RESERVE_EXPIRE_MS = Infinity; 
@@ -179,9 +180,15 @@ function setupRealtimeListenerA() {
             if (conf.recommendPriorities) {
                 window.recommendPriorities = conf.recommendPriorities;
             }
+            // ★ v3.53: 사용자 정의 툴팁 로드
+            if (conf.customTooltips) {
+                customTooltips = conf.customTooltips;
+            }
             
             renderTableHeader(); 
             applyFiltersAndSort();
+            // ★ v3.53: 툴팁 재적용 (페이지 로드/설정 변경 시)
+            if (typeof window.applyCustomTooltips === 'function') window.applyCustomTooltips();
         }
     });
 
@@ -818,7 +825,7 @@ window.showRecommendation = function() {
                 const moveQtyDisplay = moveQty > 0 ? `<span style="color:#e65100; font-weight:900; font-size:15px;">${moveQty.toLocaleString()}</span><br><span style="font-size:10px; color:#888;">개</span>` : `<span style="color:#bbb; font-size:12px;">-</span>`;
 
                 // ★ 점수 세부 툴팁 HTML (html += 윗줄에 선언)
-                const scoreTipHtml = `<span class="info-tip" style="margin-left:3px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• 직진배송: ${item.zContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.zQty||0).toLocaleString()})</span><br>• 주차별: ${item.wContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${item.tContrib.toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: 직진 ${window.recommendRatios.zikjin}% / 주차 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
+                const scoreTipHtml = `<span class="info-tip" data-tip-key="rec-score-detail" style="margin-left:3px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• 직진배송: ${item.zContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.zQty||0).toLocaleString()})</span><br>• 주차별: ${item.wContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${item.tContrib.toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: 직진 ${window.recommendRatios.zikjin}% / 주차 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
 
                 html += `
                     <tr style="background:${rowBg};">
@@ -1110,7 +1117,7 @@ function renderTableHeader() {
             // ★ 입고대기 컬럼에 툴팁 추가
             let displayLabel = label;
             if (label === '입고대기') {
-                displayLabel = `입고대기<span class="info-tip">i<span class="info-tip-content">📦 <b>오더리스트 + 사입리스트 합계</b><br>입고대기 사이드바에 연동된 구글시트의 <b>미입고수량</b>을 상품코드 기준으로 합산한 값입니다.<br>(같은 상품코드의 옵션별 수량이 모두 더해집니다)</span></span>`;
+                displayLabel = `입고대기<span class="info-tip" data-tip-key="header-incoming">i<span class="info-tip-content">📦 <b>오더리스트 + 사입리스트 합계</b><br>입고대기 사이드바에 연동된 구글시트의 <b>미입고수량</b>을 상품코드 기준으로 합산한 값입니다.<br>(같은 상품코드의 옵션별 수량이 모두 더해집니다)</span></span>`;
             }
             html += createTh(col, displayLabel, 120, true);
             popupHtml += `<div id="pop-${col}" class="filter-popup"></div>`;
@@ -1416,12 +1423,12 @@ window.calculateAndRenderUsage = function() {
         html += `
             <div style="display:flex; justify-content: space-around; background: #eef1ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #c5cae9;">
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#555; font-weight:bold;">당일지정수량<span class="info-tip">i<span class="info-tip-content">📌 <b>오늘 작업 중 예약된 자리</b><br>로케이션 셀을 클릭하면 현재 작업자가 예약(복사+잠금)한 상태가 됩니다.<br><br>자정에 자동으로 초기화됩니다.</span></span></div>
+                    <div style="font-size:11px; color:#555; font-weight:bold;">당일지정수량<span class="info-tip" data-tip-key="usage-today-reserved">i<span class="info-tip-content">📌 <b>오늘 작업 중 예약된 자리</b><br>로케이션 셀을 클릭하면 현재 작업자가 예약(복사+잠금)한 상태가 됩니다.<br><br>자정에 자동으로 초기화됩니다.</span></span></div>
                     <div style="font-size:18px; color:var(--primary); font-weight:900;">${todayReservedCount}</div>
                 </div>
                 <div style="width:1px; background:#ccc;"></div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량<span class="info-tip">i<span class="info-tip-content">📦 <b>입고 전에 미리 찜해둔 자리</b><br>입고대기 사이드바에서 상품을 클릭하고 빈 자리를 지정하면 선지정됩니다.<br><br>로케이션 변경 추천에서 보호(제외)되며, 자정에 초기화되지 않습니다.</span></span></div>
+                    <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량<span class="info-tip" data-tip-key="usage-pre-assigned">i<span class="info-tip-content">📦 <b>입고 전에 미리 찜해둔 자리</b><br>입고대기 사이드바에서 상품을 클릭하고 빈 자리를 지정하면 선지정됩니다.<br><br>로케이션 변경 추천에서 보호(제외)되며, 자정에 초기화되지 않습니다.</span></span></div>
                     <div style="font-size:18px; color:#e65100; font-weight:900;">${preAssignedCount}</div>
                 </div>
             </div>
@@ -1502,11 +1509,11 @@ window.calculateAndRenderUsage = function() {
         }
         
         if (sortedDates.length === 0) {
-            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="color:#888; text-align:right;">입고대기 데이터 없음 (시트 동기화 필요)</td></tr>`;
+            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
         } else if (sum2F >= window.capacity2F) {
-            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#d32f2f; text-align:right;">이미 초과 상태입니다! (${(sum2F - window.capacity2F).toLocaleString()}장 초과)</td></tr>`;
+            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
         } else if (fullDate) {
-            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#e65100; text-align:right;">${fullDate}<br><span style="font-size:11px; color:#888;">현재 ${sum2F.toLocaleString()}장 + 입고예정 누적 → ${cumTotal.toLocaleString()}장 도달</span></td></tr>`;
+            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
         } else {
             const afterAll = sum2F + totalIncoming;
             const remainAfter = window.capacity2F - afterAll;
@@ -1528,9 +1535,9 @@ window.calculateAndRenderUsage = function() {
             }
             
             if (estimatedDate && dailyAvg > 0) {
-                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#2e7d32; text-align:right;">${estimatedDate} (추정)<br><span style="font-size:11px; color:#888;">일평균 입고 ${Math.round(dailyAvg).toLocaleString()}장 기준, 입고예정 후 여유 ${remainAfter.toLocaleString()}장</span></td></tr>`;
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
             } else {
-                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정 전량 입고 후에도 여유 ${remainAfter.toLocaleString()}장<br><span style="font-size:11px; color:#888;">예상 적재: ${afterAll.toLocaleString()} / ${window.capacity2F.toLocaleString()}장</span></td></tr>`;
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측<span class="info-tip" data-tip-key="usage-full-prediction">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
             }
         }
         
@@ -2550,6 +2557,168 @@ window.cancelPreAssignMode = function() {
     window.selectedPreAssignItem = null;
     document.getElementById('pre-assign-banner').style.display = 'none';
 };
+
+// =============================
+// ★ v3.53: 툴팁 편집 시스템
+// =============================
+
+// 모든 .info-tip 요소에 customTooltips 적용 (또는 숨기기)
+window.applyCustomTooltips = function() {
+    document.querySelectorAll('.info-tip[data-tip-key]').forEach(tip => {
+        const key = tip.getAttribute('data-tip-key');
+        if (!key) return;
+        // 삭제 마커가 있으면 숨김
+        if (customTooltips['__deleted__' + key]) {
+            tip.style.display = 'none';
+            return;
+        } else {
+            tip.style.display = '';
+        }
+        // 사용자 정의 내용이 있으면 덮어쓰기
+        if (customTooltips[key]) {
+            const content = tip.querySelector('.info-tip-content');
+            if (content) content.innerHTML = customTooltips[key];
+        }
+    });
+};
+
+// 우클릭 시 편집 모달 열기 (전역 contextmenu 이벤트)
+document.addEventListener('contextmenu', function(e) {
+    const tip = e.target.closest('.info-tip');
+    if (!tip) return;
+    const key = tip.getAttribute('data-tip-key');
+    if (!key) return;
+    e.preventDefault();
+    window.openTooltipEditModal(key);
+});
+
+window.openTooltipEditModal = function(targetKey) {
+    let modal = document.getElementById('tooltip-edit-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'tooltip-edit-modal';
+        modal.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10000005;";
+        modal.innerHTML = `
+            <div style="background:white; padding:25px; border-radius:12px; width:600px; max-width:92vw; max-height:90vh; overflow-y:auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #607d8b; padding-bottom:10px; margin-bottom:15px;">
+                    <h2 style="margin:0; color:#37474f; font-size:18px;">💬 툴팁 편집</h2>
+                    <button onclick="document.getElementById('tooltip-edit-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer;">×</button>
+                </div>
+                <div style="font-size:12px; color:#666; background:#f5f5f5; padding:10px; border-radius:6px; margin-bottom:15px; line-height:1.5;">
+                    💡 <b>HTML 사용 가능</b>: <code>&lt;b&gt;굵게&lt;/b&gt;</code>, <code>&lt;br&gt;</code> (줄바꿈), <code>&lt;span style="color:#80deea;"&gt;색깔&lt;/span&gt;</code><br>
+                    📝 <b>마우스 우클릭</b>으로 다른 ℹ️ 툴팁도 편집할 수 있습니다.
+                </div>
+                
+                <div style="margin-bottom:15px;">
+                    <label style="font-size:13px; font-weight:bold; color:#555;">🔑 키 (식별자, 변경 불가)</label>
+                    <input type="text" id="tt-edit-key" readonly style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px; background:#eee; font-family:monospace; font-size:13px; box-sizing:border-box; margin-top:5px;">
+                </div>
+                
+                <div style="margin-bottom:15px;">
+                    <label style="font-size:13px; font-weight:bold; color:#555;">📄 내용 (HTML)</label>
+                    <textarea id="tt-edit-content" style="width:100%; height:180px; padding:10px; border:1px solid #ccc; border-radius:5px; font-family:monospace; font-size:12px; box-sizing:border-box; margin-top:5px; line-height:1.5;" placeholder="툴팁에 표시할 내용을 입력하세요..."></textarea>
+                </div>
+                
+                <div style="display:flex; justify-content:space-between; gap:10px;">
+                    <button onclick="window.deleteTooltipFromModal()" style="padding:10px 15px; background:#d32f2f; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">🗑️ 이 툴팁 숨기기</button>
+                    <div style="display:flex; gap:10px;">
+                        <button onclick="window.resetTooltipFromModal()" style="padding:10px 15px; background:#607d8b; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">↩️ 기본값으로</button>
+                        <button onclick="window.saveTooltipFromModal()" style="padding:10px 20px; background:var(--primary); color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">💾 저장</button>
+                    </div>
+                </div>
+
+                <hr style="margin:25px 0 15px 0; border:none; border-top:1px solid #eee;">
+                
+                <div style="font-size:13px; font-weight:bold; color:#37474f; margin-bottom:10px;">📋 모든 사용자 정의 툴팁 목록</div>
+                <div id="tt-edit-list" style="max-height:180px; overflow-y:auto; background:#fafafa; border:1px solid #eee; border-radius:6px; padding:10px; font-size:12px;"></div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+    
+    // 현재 화면에서 해당 키의 기본 툴팁 내용 추출
+    let defaultContent = '';
+    const sample = document.querySelector(`.info-tip[data-tip-key="${targetKey}"] .info-tip-content`);
+    if (sample) defaultContent = sample.innerHTML;
+    
+    document.getElementById('tt-edit-key').value = targetKey;
+    document.getElementById('tt-edit-content').value = customTooltips[targetKey] || defaultContent;
+    
+    // 사용자 정의 목록 렌더링
+    const listEl = document.getElementById('tt-edit-list');
+    const customKeys = Object.keys(customTooltips).filter(k => !k.startsWith('__deleted__'));
+    const deletedKeys = Object.keys(customTooltips).filter(k => k.startsWith('__deleted__')).map(k => k.replace('__deleted__', ''));
+    
+    let listHtml = '';
+    if (customKeys.length === 0 && deletedKeys.length === 0) {
+        listHtml = '<div style="color:#999; text-align:center; padding:10px;">아직 수정된 툴팁이 없습니다.</div>';
+    } else {
+        customKeys.forEach(k => {
+            listHtml += `<div style="padding:6px 8px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;"><span><b style="color:#1976d2;">${k}</b> (수정됨)</span><button onclick="window.openTooltipEditModal('${k.replace(/'/g, "\\'")}')" style="padding:3px 8px; font-size:11px; background:#eee; border:1px solid #ccc; border-radius:3px; cursor:pointer;">편집</button></div>`;
+        });
+        deletedKeys.forEach(k => {
+            listHtml += `<div style="padding:6px 8px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; opacity:0.6;"><span><b style="color:#d32f2f;">${k}</b> (숨김)</span><button onclick="window.restoreTooltip('${k.replace(/'/g, "\\'")}')" style="padding:3px 8px; font-size:11px; background:#fff3e0; border:1px solid #ffb74d; border-radius:3px; cursor:pointer;">복원</button></div>`;
+        });
+    }
+    listEl.innerHTML = listHtml;
+    
+    modal.style.display = 'flex';
+};
+
+window.saveTooltipFromModal = async function() {
+    const key = document.getElementById('tt-edit-key').value;
+    const content = document.getElementById('tt-edit-content').value;
+    if (!key) return;
+    customTooltips[key] = content;
+    delete customTooltips['__deleted__' + key];
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
+        showToast("✅ 툴팁이 저장되었습니다.");
+        window.applyCustomTooltips();
+        document.getElementById('tooltip-edit-modal').style.display = 'none';
+    } catch(e) { console.error(e); alert("툴팁 저장 실패"); }
+};
+
+window.deleteTooltipFromModal = async function() {
+    const key = document.getElementById('tt-edit-key').value;
+    if (!key) return;
+    if (!confirm(`[${key}] 툴팁을 숨기시겠습니까?\n(나중에 복원 가능)`)) return;
+    customTooltips['__deleted__' + key] = true;
+    delete customTooltips[key];
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
+        showToast("✅ 툴팁이 숨겨졌습니다.");
+        window.applyCustomTooltips();
+        document.getElementById('tooltip-edit-modal').style.display = 'none';
+    } catch(e) { console.error(e); alert("툴팁 숨김 실패"); }
+};
+
+window.resetTooltipFromModal = async function() {
+    const key = document.getElementById('tt-edit-key').value;
+    if (!key) return;
+    if (!confirm(`[${key}] 툴팁을 기본값으로 되돌리시겠습니까?`)) return;
+    delete customTooltips[key];
+    delete customTooltips['__deleted__' + key];
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
+        showToast("✅ 기본값으로 복원되었습니다.");
+        // 페이지 새로고침 권장 (코드의 기본값을 다시 표시하려면)
+        location.reload();
+    } catch(e) { console.error(e); alert("복원 실패"); }
+};
+
+window.restoreTooltip = async function(key) {
+    delete customTooltips['__deleted__' + key];
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
+        showToast(`✅ [${key}] 툴팁이 복원되었습니다.`);
+        window.applyCustomTooltips();
+        window.openTooltipEditModal(key); // 모달 새로고침
+    } catch(e) { console.error(e); alert("복원 실패"); }
+};
+
+// =============================
+// 🗺️ 도면 보기 (거리뷰)
 
 
 // =============================
