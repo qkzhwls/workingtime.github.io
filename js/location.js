@@ -669,9 +669,16 @@ window.showRecommendation = function() {
             if (finalScore > 0) {
                 let currentLocs = originalData.filter(d => d.code === item.code).map(d => d.id).join(', ');
                 if (!currentLocs) currentLocs = '신규배치 (없음)';
-                scoredItems.push({ code: item.code, name: item.name, score: finalScore, currentLocs });
+                // ★ 점수 내역 세부 저장 (툴팁용)
+                const zContrib = zScore * (window.recommendRatios.zikjin / 100);
+                const wContrib = wScore * (window.recommendRatios.weekly / 100);
+                const tContrib = tScore * (window.recommendRatios.trend / 100);
+                scoredItems.push({ 
+                    code: item.code, name: item.name, score: finalScore, currentLocs,
+                    zQty: item.zQty, wQty: item.wQty, trendVal: item.trendVal,
+                    zContrib, wContrib, tContrib
+                });
             }
-        });
 
         scoredItems.sort((a, b) => b.score - a.score);
 
@@ -810,11 +817,14 @@ window.showRecommendation = function() {
                 const rowBg = isEven ? '#f9fafb' : '#ffffff';
                 const moveQtyDisplay = moveQty > 0 ? `<span style="color:#e65100; font-weight:900; font-size:15px;">${moveQty.toLocaleString()}</span><br><span style="font-size:10px; color:#888;">개</span>` : `<span style="color:#bbb; font-size:12px;">-</span>`;
 
+                // ★ 점수 세부 툴팁 HTML (html += 윗줄에 선언)
+                const scoreTipHtml = `<span class="info-tip" style="margin-left:3px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• 직진배송: ${item.zContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.zQty||0).toLocaleString()})</span><br>• 주차별: ${item.wContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${item.tContrib.toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: 직진 ${window.recommendRatios.zikjin}% / 주차 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
+
                 html += `
                     <tr style="background:${rowBg};">
                         <td style="color:var(--primary); font-weight:900; font-size:15px; border-left:none; padding:14px 10px;">
                             ${displayRank}위
-                            <br><span style="font-size:11px; color:#e65100; font-weight:bold;">${item.score.toFixed(1)}점</span>
+                            <br><span style="font-size:11px; color:#e65100; font-weight:bold;">${item.score.toFixed(1)}점${scoreTipHtml}</span>
                         </td>
                         <td style="font-weight:bold; color:#1a237e; font-size:13px; letter-spacing:0.3px;">${item.code}</td>
                         <td style="text-align:left; font-size:14px; font-weight:bold; color:#212121; padding:14px 12px; line-height:1.5;">${item.name}</td>
@@ -1406,12 +1416,12 @@ window.calculateAndRenderUsage = function() {
         html += `
             <div style="display:flex; justify-content: space-around; background: #eef1ff; padding: 10px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #c5cae9;">
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#555; font-weight:bold;">당일지정수량</div>
+                    <div style="font-size:11px; color:#555; font-weight:bold;">당일지정수량<span class="info-tip">i<span class="info-tip-content">📌 <b>오늘 작업 중 예약된 자리</b><br>로케이션 셀을 클릭하면 현재 작업자가 예약(복사+잠금)한 상태가 됩니다.<br><br>자정에 자동으로 초기화됩니다.</span></span></div>
                     <div style="font-size:18px; color:var(--primary); font-weight:900;">${todayReservedCount}</div>
                 </div>
                 <div style="width:1px; background:#ccc;"></div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량</div>
+                    <div style="font-size:11px; color:#555; font-weight:bold;">선지정수량<span class="info-tip">i<span class="info-tip-content">📦 <b>입고 전에 미리 찜해둔 자리</b><br>입고대기 사이드바에서 상품을 클릭하고 빈 자리를 지정하면 선지정됩니다.<br><br>로케이션 변경 추천에서 보호(제외)되며, 자정에 초기화되지 않습니다.</span></span></div>
                     <div style="font-size:18px; color:#e65100; font-weight:900;">${preAssignedCount}</div>
                 </div>
             </div>
@@ -1492,11 +1502,11 @@ window.calculateAndRenderUsage = function() {
         }
         
         if (sortedDates.length === 0) {
-            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측</th><td style="color:#888; text-align:right;">입고대기 데이터 없음 (시트 동기화 필요)</td></tr>`;
+            predictionHtml = `<tr><th style="background:#eceff1;">📅 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
         } else if (sum2F >= window.capacity2F) {
-            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측</th><td style="font-weight:bold; color:#d32f2f; text-align:right;">이미 초과 상태입니다! (${(sum2F - window.capacity2F).toLocaleString()}장 초과)</td></tr>`;
+            predictionHtml = `<tr><th style="background:#ffebee;">⚠️ 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
         } else if (fullDate) {
-            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일</th><td style="font-weight:bold; color:#e65100; text-align:right;">${fullDate}<br><span style="font-size:11px; color:#888;">현재 ${sum2F.toLocaleString()}장 + 입고예정 누적 → ${cumTotal.toLocaleString()}장 도달</span></td></tr>`;
+            predictionHtml = `<tr><th style="background:#fff3e0;">📅 만재 예측일<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
         } else {
             const afterAll = sum2F + totalIncoming;
             const remainAfter = window.capacity2F - afterAll;
@@ -1518,9 +1528,9 @@ window.calculateAndRenderUsage = function() {
             }
             
             if (estimatedDate && dailyAvg > 0) {
-                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일</th><td style="font-weight:bold; color:#2e7d32; text-align:right;">${estimatedDate} (추정)<br><span style="font-size:11px; color:#888;">일평균 입고 ${Math.round(dailyAvg).toLocaleString()}장 기준, 입고예정 후 여유 ${remainAfter.toLocaleString()}장</span></td></tr>`;
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측일<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
             } else {
-                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측</th><td style="font-weight:bold; color:#2e7d32; text-align:right;">입고예정 전량 입고 후에도 여유 ${remainAfter.toLocaleString()}장<br><span style="font-size:11px; color:#888;">예상 적재: ${afterAll.toLocaleString()} / ${window.capacity2F.toLocaleString()}장</span></td></tr>`;
+                predictionHtml = `<tr><th style="background:#e8f5e9;">📅 만재 예측<span class="info-tip">i<span class="info-tip-content">📊 <b>만재 예측 계산 방식</b><br>현재 2층 적재수량에 입고대기 중인 수량을 <b>도착예상일 순</b>으로 누적 더해서, 총 적재가능수량에 도달하는 날짜를 계산합니다.<br><br>입고예정 전량을 더해도 여유가 있으면, 일평균 입고량을 기준으로 만재 예상일을 추정합니다.</span></span></th>
             }
         }
         
@@ -1880,14 +1890,14 @@ function renderVisibleRows() {
             else if (col === 'std_stock') html += `<td style="font-weight:bold;">${loc.stock || '0'}</td>`;
             else if (col === 'std_stock2f') html += `<td style="font-weight:bold;">${loc.stock2f || '0'}</td>`;
             else if (col.startsWith('cus_')) {
-                const key = col.replace('cus_', '');
-                let val = (loc.rawData && loc.rawData[key]) ? loc.rawData[key] : '';
-                // ★ 입고대기 컬럼은 오더리스트/사입리스트 합계로 덮어쓰기
-                if (key === '입고대기') {
-                    const code = (loc.code && loc.code !== loc.id) ? loc.code : '';
-                    val = code && incomingTotalByCode[code] ? incomingTotalByCode[code] : '0';
+                const label = col.replace('cus_', '');
+                // ★ 입고대기 컬럼에 툴팁 추가
+                let displayLabel = label;
+                if (label === '입고대기') {
+                    displayLabel = `입고대기<span class="info-tip">i<span class="info-tip-content">📦 <b>오더리스트 + 사입리스트 합계</b><br>입고대기 사이드바에 연동된 구글시트의 <b>미입고수량</b>을 상품코드 기준으로 합산한 값입니다.<br>(같은 상품코드의 옵션별 수량이 모두 더해집니다)</span></span>`;
                 }
-                html += `<td>${val}</td>`;
+                html += createTh(col, displayLabel, 120, true);
+                popupHtml += `<div id="pop-${col}" class="filter-popup"></div>`;
             }
         });
         html += `</tr>`;
