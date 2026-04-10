@@ -2734,10 +2734,6 @@ window.restoreTooltip = async function(key) {
 
 // =============================
 // 🗺️ 도면 보기 (거리뷰)
-
-
-// =============================
-// 🗺️ 도면 보기 (거리뷰)
 // =============================
 let currentCorridorIdx = 0;
 let svCorridorList = [];
