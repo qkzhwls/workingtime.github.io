@@ -2776,7 +2776,6 @@ document.addEventListener('mouseout', function(e) {
     if (rt && (rt.closest && (rt.closest('.info-tip[data-tip-key]') || rt.closest('.info-tip-content')))) return;
     _ttScheduleHide();
 }, true);
-};
 
 // =============================
 // 🗺️ 도면 보기 (거리뷰)
