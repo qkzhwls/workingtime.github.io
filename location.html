@@ -145,7 +145,7 @@
         .pre-assign-banner { display: none; position: fixed; top: 15px; left: 50%; transform: translateX(-50%); background: #e65100; color: white; padding: 12px 25px; border-radius: 30px; font-weight: bold; z-index: 10002; box-shadow: 0 4px 15px rgba(0,0,0,0.3); align-items: center; gap: 20px; font-size: 15px; }
         .pre-assign-banner button { background: white; color: #e65100; border: none; padding: 6px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; transition: 0.2s; }
         .pre-assign-banner button:hover { background: #ffe0b2; }
-        /* ℹ️ 호버 툴팁 공통 스타일 (v3.52: fixed 포지션으로 모달 밖 표시 지원) */
+        /* ℹ️ 호버 툴팁 공통 스타일 */
         .info-tip { 
             position: relative; display: inline-block; 
             cursor: help; margin-left: 4px; 
@@ -159,15 +159,31 @@
         .info-tip .info-tip-content {
             display: none; position: fixed; 
             background: #263238; color: white; 
-            padding: 10px 14px; border-radius: 8px; 
+            padding: 0; border-radius: 8px; 
             font-size: 12px; font-weight: normal; font-style: normal;
             line-height: 1.6; text-align: left;
-            white-space: normal; width: max-content; max-width: 320px;
+            white-space: normal; width: 320px; max-width: 320px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            z-index: 9999999; pointer-events: none;
+            z-index: 9999999; pointer-events: auto;
+            overflow: hidden;
         }
-        .info-tip:hover .info-tip-content { display: block; }
+        .info-tip.tip-open .info-tip-content { display: block; }
         .info-tip b { color: #80deea; }
+        
+        /* v3.54: 툴팁 탭 */
+        .tt-tabs { display: flex; background: #1a2327; border-bottom: 1px solid #37474f; }
+        .tt-tab-btn { flex: 1; padding: 8px; background: none; border: none; color: #90a4ae; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.15s; }
+        .tt-tab-btn:hover { background: #263238; color: #80deea; }
+        .tt-tab-btn.active { background: #263238; color: #80deea; border-bottom: 2px solid #80deea; }
+        .tt-tab-content { padding: 10px 14px; min-height: 60px; max-height: 280px; overflow-y: auto; }
+        .tt-tab-content.hidden { display: none; }
+        .tt-empty { color: #90a4ae; font-style: italic; text-align: center; padding: 20px 0; }
+        .tt-btn-edit { display: block; margin: 10px auto 0; padding: 5px 14px; background: #3d5afe; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        .tt-btn-edit:hover { background: #5870ff; }
+        .tt-editor textarea { width: 100%; min-height: 120px; padding: 8px; background: #1a2327; color: white; border: 1px solid #455a64; border-radius: 4px; font-family: monospace; font-size: 11px; box-sizing: border-box; resize: vertical; }
+        .tt-editor-btns { display: flex; gap: 6px; margin-top: 8px; justify-content: flex-end; }
+        .tt-btn-save { padding: 5px 12px; background: #4caf50; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        .tt-btn-cancel { padding: 5px 12px; background: #78909c; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
     </style>    
 </head>
 <body onclick="closeAllPopups()">
@@ -547,35 +563,6 @@
                 window.renderIncomingQueue();
             }
         }
-
-        // ★ v3.52: info-tip 툴팁 위치 동적 계산 (모달/테이블 밖으로도 표시)
-        document.addEventListener('mouseover', function(e) {
-            const tip = e.target.closest('.info-tip');
-            if (!tip) return;
-            const content = tip.querySelector('.info-tip-content');
-            if (!content) return;
-            
-            // 일단 보이게 해서 크기 측정
-            content.style.visibility = 'hidden';
-            content.style.display = 'block';
-            const cw = content.offsetWidth;
-            const ch = content.offsetHeight;
-            content.style.display = '';
-            content.style.visibility = '';
-            
-            // 아이콘 위치 기준으로 좌표 계산
-            const r = tip.getBoundingClientRect();
-            let x = r.left + r.width / 2 - cw / 2;
-            let y = r.top - ch - 10; // 기본: 아이콘 위쪽
-            
-            // 화면 밖으로 나가지 않게 보정
-            if (y < 8) y = r.bottom + 10; // 위가 부족하면 아래로
-            if (x < 8) x = 8;
-            if (x + cw > window.innerWidth - 8) x = window.innerWidth - cw - 8;
-            
-            content.style.left = x + 'px';
-            content.style.top = y + 'px';
-        }, true);
     </script>
 </body>
 </html>
