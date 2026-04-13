@@ -154,7 +154,6 @@ function setupRealtimeListenerB() {
                             // ★ v3.53: 도착예정일이 과거이거나 빈칸이면 합계에서 제외
                             const arrivalDate = (row['도착예상일'] || row['표시날짜'] || '').toString().trim();
                             if (!arrivalDate || arrivalDate < _today) return;
-                            // ★ 상품코드별 오더+사입 합계 누적
                             const qty = Number(row['입고대기수량'] || 0);
                             incomingTotalByCode[code] = (incomingTotalByCode[code] || 0) + qty;
                         }
@@ -2518,7 +2517,6 @@ window.renderIncomingQueue = function() {
         
         if(!item['표시날짜'] || item['표시날짜'].toString().trim() === '') return false;
         
-        // ★ v3.53: 도착예정일이 과거이면 제외
         const arrivalDate = (item['도착예상일'] || item['표시날짜'] || '').toString().trim();
         if (arrivalDate && arrivalDate < _today) return false;
         
