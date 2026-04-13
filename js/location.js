@@ -2575,159 +2575,17 @@ window.cancelPreAssignMode = function() {
 // ★ v3.53: 툴팁 편집 시스템
 // =============================
 
-// 모든 .info-tip 요소에 customTooltips 적용 (또는 숨기기)
+window.cancelPreAssignMode = function() {
+    window.isPreAssignMode = false;
+    window.selectedPreAssignItem = null;
+    document.getElementById('pre-assign-banner').style.display = 'none';
+};
+
+// =============================
+// ★ v3.53: 사용자 정의 툴팁 적용 (다음 단계에서 탭 시스템이 활용)
+// =============================
 window.applyCustomTooltips = function() {
-    document.querySelectorAll('.info-tip[data-tip-key]').forEach(tip => {
-        const key = tip.getAttribute('data-tip-key');
-        if (!key) return;
-        // 삭제 마커가 있으면 숨김
-        if (customTooltips['__deleted__' + key]) {
-            tip.style.display = 'none';
-            return;
-        } else {
-            tip.style.display = '';
-        }
-        // 사용자 정의 내용이 있으면 덮어쓰기
-        if (customTooltips[key]) {
-            const content = tip.querySelector('.info-tip-content');
-            if (content) content.innerHTML = customTooltips[key];
-        }
-    });
-};
-
-// 우클릭 시 편집 모달 열기 (전역 contextmenu 이벤트)
-document.addEventListener('contextmenu', function(e) {
-    const tip = e.target.closest('.info-tip');
-    if (!tip) return;
-    const key = tip.getAttribute('data-tip-key');
-    if (!key) return;
-    e.preventDefault();
-    window.openTooltipEditModal(key);
-});
-
-window.openTooltipEditModal = function(targetKey) {
-    let modal = document.getElementById('tooltip-edit-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'tooltip-edit-modal';
-        modal.style.cssText = "position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10000005;";
-        modal.innerHTML = `
-            <div style="background:white; padding:25px; border-radius:12px; width:600px; max-width:92vw; max-height:90vh; overflow-y:auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #607d8b; padding-bottom:10px; margin-bottom:15px;">
-                    <h2 style="margin:0; color:#37474f; font-size:18px;">💬 툴팁 편집</h2>
-                    <button onclick="document.getElementById('tooltip-edit-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer;">×</button>
-                </div>
-                <div style="font-size:12px; color:#666; background:#f5f5f5; padding:10px; border-radius:6px; margin-bottom:15px; line-height:1.5;">
-                    💡 <b>HTML 사용 가능</b>: <code>&lt;b&gt;굵게&lt;/b&gt;</code>, <code>&lt;br&gt;</code> (줄바꿈), <code>&lt;span style="color:#80deea;"&gt;색깔&lt;/span&gt;</code><br>
-                    📝 <b>마우스 우클릭</b>으로 다른 ℹ️ 툴팁도 편집할 수 있습니다.
-                </div>
-                
-                <div style="margin-bottom:15px;">
-                    <label style="font-size:13px; font-weight:bold; color:#555;">🔑 키 (식별자, 변경 불가)</label>
-                    <input type="text" id="tt-edit-key" readonly style="width:100%; padding:8px; border:1px solid #ddd; border-radius:5px; background:#eee; font-family:monospace; font-size:13px; box-sizing:border-box; margin-top:5px;">
-                </div>
-                
-                <div style="margin-bottom:15px;">
-                    <label style="font-size:13px; font-weight:bold; color:#555;">📄 내용 (HTML)</label>
-                    <textarea id="tt-edit-content" style="width:100%; height:180px; padding:10px; border:1px solid #ccc; border-radius:5px; font-family:monospace; font-size:12px; box-sizing:border-box; margin-top:5px; line-height:1.5;" placeholder="툴팁에 표시할 내용을 입력하세요..."></textarea>
-                </div>
-                
-                <div style="display:flex; justify-content:space-between; gap:10px;">
-                    <button onclick="window.deleteTooltipFromModal()" style="padding:10px 15px; background:#d32f2f; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">🗑️ 이 툴팁 숨기기</button>
-                    <div style="display:flex; gap:10px;">
-                        <button onclick="window.resetTooltipFromModal()" style="padding:10px 15px; background:#607d8b; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">↩️ 기본값으로</button>
-                        <button onclick="window.saveTooltipFromModal()" style="padding:10px 20px; background:var(--primary); color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">💾 저장</button>
-                    </div>
-                </div>
-
-                <hr style="margin:25px 0 15px 0; border:none; border-top:1px solid #eee;">
-                
-                <div style="font-size:13px; font-weight:bold; color:#37474f; margin-bottom:10px;">📋 모든 사용자 정의 툴팁 목록</div>
-                <div id="tt-edit-list" style="max-height:180px; overflow-y:auto; background:#fafafa; border:1px solid #eee; border-radius:6px; padding:10px; font-size:12px;"></div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-    }
-    
-    // 현재 화면에서 해당 키의 기본 툴팁 내용 추출
-    let defaultContent = '';
-    const sample = document.querySelector(`.info-tip[data-tip-key="${targetKey}"] .info-tip-content`);
-    if (sample) defaultContent = sample.innerHTML;
-    
-    document.getElementById('tt-edit-key').value = targetKey;
-    document.getElementById('tt-edit-content').value = customTooltips[targetKey] || defaultContent;
-    
-    // 사용자 정의 목록 렌더링
-    const listEl = document.getElementById('tt-edit-list');
-    const customKeys = Object.keys(customTooltips).filter(k => !k.startsWith('__deleted__'));
-    const deletedKeys = Object.keys(customTooltips).filter(k => k.startsWith('__deleted__')).map(k => k.replace('__deleted__', ''));
-    
-    let listHtml = '';
-    if (customKeys.length === 0 && deletedKeys.length === 0) {
-        listHtml = '<div style="color:#999; text-align:center; padding:10px;">아직 수정된 툴팁이 없습니다.</div>';
-    } else {
-        customKeys.forEach(k => {
-            listHtml += `<div style="padding:6px 8px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;"><span><b style="color:#1976d2;">${k}</b> (수정됨)</span><button onclick="window.openTooltipEditModal('${k.replace(/'/g, "\\'")}')" style="padding:3px 8px; font-size:11px; background:#eee; border:1px solid #ccc; border-radius:3px; cursor:pointer;">편집</button></div>`;
-        });
-        deletedKeys.forEach(k => {
-            listHtml += `<div style="padding:6px 8px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center; opacity:0.6;"><span><b style="color:#d32f2f;">${k}</b> (숨김)</span><button onclick="window.restoreTooltip('${k.replace(/'/g, "\\'")}')" style="padding:3px 8px; font-size:11px; background:#fff3e0; border:1px solid #ffb74d; border-radius:3px; cursor:pointer;">복원</button></div>`;
-        });
-    }
-    listEl.innerHTML = listHtml;
-    
-    modal.style.display = 'flex';
-};
-
-window.saveTooltipFromModal = async function() {
-    const key = document.getElementById('tt-edit-key').value;
-    const content = document.getElementById('tt-edit-content').value;
-    if (!key) return;
-    customTooltips[key] = content;
-    delete customTooltips['__deleted__' + key];
-    try {
-        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
-        showToast("✅ 툴팁이 저장되었습니다.");
-        window.applyCustomTooltips();
-        document.getElementById('tooltip-edit-modal').style.display = 'none';
-    } catch(e) { console.error(e); alert("툴팁 저장 실패"); }
-};
-
-window.deleteTooltipFromModal = async function() {
-    const key = document.getElementById('tt-edit-key').value;
-    if (!key) return;
-    if (!confirm(`[${key}] 툴팁을 숨기시겠습니까?\n(나중에 복원 가능)`)) return;
-    customTooltips['__deleted__' + key] = true;
-    delete customTooltips[key];
-    try {
-        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
-        showToast("✅ 툴팁이 숨겨졌습니다.");
-        window.applyCustomTooltips();
-        document.getElementById('tooltip-edit-modal').style.display = 'none';
-    } catch(e) { console.error(e); alert("툴팁 숨김 실패"); }
-};
-
-window.resetTooltipFromModal = async function() {
-    const key = document.getElementById('tt-edit-key').value;
-    if (!key) return;
-    if (!confirm(`[${key}] 툴팁을 기본값으로 되돌리시겠습니까?`)) return;
-    delete customTooltips[key];
-    delete customTooltips['__deleted__' + key];
-    try {
-        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
-        showToast("✅ 기본값으로 복원되었습니다.");
-        // 페이지 새로고침 권장 (코드의 기본값을 다시 표시하려면)
-        location.reload();
-    } catch(e) { console.error(e); alert("복원 실패"); }
-};
-
-window.restoreTooltip = async function(key) {
-    delete customTooltips['__deleted__' + key];
-    try {
-        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
-        showToast(`✅ [${key}] 툴팁이 복원되었습니다.`);
-        window.applyCustomTooltips();
-        window.openTooltipEditModal(key); // 모달 새로고침
-    } catch(e) { console.error(e); alert("복원 실패"); }
+    // 탭 시스템 구현 전까지는 빈 함수로 유지
 };
 
 // =============================
