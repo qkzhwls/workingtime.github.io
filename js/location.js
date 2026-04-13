@@ -2582,10 +2582,200 @@ window.cancelPreAssignMode = function() {
 };
 
 // =============================
-// ★ v3.53: 사용자 정의 툴팁 적용 (다음 단계에서 탭 시스템이 활용)
+// ★ v3.54: 툴팁 탭 시스템 (설명/메뉴얼)
 // =============================
+
+// 기본 설명 텍스트 캐시 (최초 렌더링 시의 HTML 저장)
+const _ttDefaults = {};
+
+// applyCustomTooltips: 초기 1회 세팅용 (탭 구조 주입)
 window.applyCustomTooltips = function() {
-    // 탭 시스템 구현 전까지는 빈 함수로 유지
+    document.querySelectorAll('.info-tip[data-tip-key]').forEach(tip => {
+        const key = tip.getAttribute('data-tip-key');
+        if (!key) return;
+        const content = tip.querySelector('.info-tip-content');
+        if (!content) return;
+        // 이미 탭 구조가 있으면 스킵
+        if (content.querySelector('.tt-tabs')) return;
+        // 기본 설명 캐시
+        if (!_ttDefaults[key]) _ttDefaults[key] = content.innerHTML;
+        // 탭 구조로 재구성
+        _ttRenderTabs(tip, key);
+    });
+};
+
+function _ttRenderTabs(tip, key) {
+    const content = tip.querySelector('.info-tip-content');
+    if (!content) return;
+    const defaultHtml = _ttDefaults[key] || '';
+    const manualHtml = (customTooltips[key] || '').trim();
+    
+    content.innerHTML = `
+        <div class="tt-tabs">
+            <button type="button" class="tt-tab-btn active" data-tab="desc">📖 설명</button>
+            <button type="button" class="tt-tab-btn" data-tab="manual">📝 메뉴얼</button>
+        </div>
+        <div class="tt-tab-content tt-tab-desc">${defaultHtml}</div>
+        <div class="tt-tab-content tt-tab-manual hidden">
+            <div class="tt-manual-view">
+                ${manualHtml ? manualHtml : '<div class="tt-empty">아직 등록된 메뉴얼이 없습니다.<br>아래 ✏️ 편집 버튼으로 추가하세요.</div>'}
+                <button type="button" class="tt-btn-edit">✏️ 편집</button>
+            </div>
+        </div>
+    `;
+    
+    // 탭 클릭
+    content.querySelectorAll('.tt-tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tabName = btn.getAttribute('data-tab');
+            content.querySelectorAll('.tt-tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+            content.querySelector('.tt-tab-desc').classList.toggle('hidden', tabName !== 'desc');
+            content.querySelector('.tt-tab-manual').classList.toggle('hidden', tabName !== 'manual');
+        });
+    });
+    
+    // 편집 버튼
+    const editBtn = content.querySelector('.tt-btn-edit');
+    if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _ttShowEditor(tip, key);
+        });
+    }
+}
+
+function _ttShowEditor(tip, key) {
+    const content = tip.querySelector('.info-tip-content');
+    const manualView = content.querySelector('.tt-tab-manual');
+    if (!manualView) return;
+    const currentManual = customTooltips[key] || '';
+    
+    manualView.innerHTML = `
+        <div class="tt-editor">
+            <textarea class="tt-editor-textarea" placeholder="메뉴얼 내용을 입력하세요. HTML 태그 사용 가능 (<b>굵게</b>, <br>, <span style='color:#80deea;'>색상</span> 등)">${currentManual}</textarea>
+            <div class="tt-editor-btns">
+                <button type="button" class="tt-btn-cancel">❌ 취소</button>
+                <button type="button" class="tt-btn-save">💾 저장</button>
+            </div>
+        </div>
+    `;
+    
+    const textarea = manualView.querySelector('.tt-editor-textarea');
+    textarea.focus();
+    
+    // 텍스트영역 클릭 이벤트 전파 차단
+    textarea.addEventListener('click', (e) => e.stopPropagation());
+    textarea.addEventListener('mousedown', (e) => e.stopPropagation());
+    
+    manualView.querySelector('.tt-btn-cancel').addEventListener('click', (e) => {
+        e.stopPropagation();
+        _ttRenderTabs(tip, key);
+        // 메뉴얼 탭 활성 상태 유지
+        const manualBtn = tip.querySelector('.tt-tab-btn[data-tab="manual"]');
+        if (manualBtn) manualBtn.click();
+    });
+    
+    manualView.querySelector('.tt-btn-save').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const newVal = textarea.value.trim();
+        if (newVal) customTooltips[key] = newVal;
+        else delete customTooltips[key];
+        try {
+            await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { customTooltips }, { merge: true });
+            showToast("✅ 메뉴얼이 저장되었습니다.");
+            _ttRenderTabs(tip, key);
+            const manualBtn = tip.querySelector('.tt-tab-btn[data-tab="manual"]');
+            if (manualBtn) manualBtn.click();
+        } catch(err) { console.error(err); alert("저장 실패"); }
+    });
+}
+
+// 툴팁 열기/닫기 + 위치 계산
+let _ttHideTimer = null;
+let _ttCurrentTip = null;
+
+function _ttOpenTip(tip) {
+    if (_ttHideTimer) { clearTimeout(_ttHideTimer); _ttHideTimer = null; }
+    const key = tip.getAttribute('data-tip-key');
+    if (!key) return;
+    
+    // 다른 툴팁 닫기
+    document.querySelectorAll('.info-tip.tip-open').forEach(t => {
+        if (t !== tip) { t.classList.remove('tip-open'); _ttResetTab(t); }
+    });
+    
+    tip.classList.add('tip-open');
+    _ttCurrentTip = tip;
+    
+    const content = tip.querySelector('.info-tip-content');
+    if (!content) return;
+    
+    // 크기 측정 후 위치 계산
+    const r = tip.getBoundingClientRect();
+    const cw = content.offsetWidth || 320;
+    const ch = content.offsetHeight || 120;
+    let x = r.left + r.width / 2 - cw / 2;
+    let y = r.top - ch - 10;
+    if (y < 8) y = r.bottom + 10;
+    if (x < 8) x = 8;
+    if (x + cw > window.innerWidth - 8) x = window.innerWidth - cw - 8;
+    content.style.left = x + 'px';
+    content.style.top = y + 'px';
+}
+
+function _ttResetTab(tip) {
+    const content = tip.querySelector('.info-tip-content');
+    if (!content) return;
+    // 설명 탭으로 리셋
+    const descBtn = content.querySelector('.tt-tab-btn[data-tab="desc"]');
+    if (descBtn) descBtn.click();
+    // 편집 모드 종료 (메뉴얼 뷰 복원)
+    const key = tip.getAttribute('data-tip-key');
+    if (key && content.querySelector('.tt-editor')) _ttRenderTabs(tip, key);
+}
+
+function _ttScheduleHide() {
+    if (_ttHideTimer) clearTimeout(_ttHideTimer);
+    _ttHideTimer = setTimeout(() => {
+        if (_ttCurrentTip) {
+            _ttCurrentTip.classList.remove('tip-open');
+            _ttResetTab(_ttCurrentTip);
+            _ttCurrentTip = null;
+        }
+    }, 300);
+}
+
+// 이벤트 바인딩
+document.addEventListener('mouseover', function(e) {
+    const tip = e.target.closest('.info-tip[data-tip-key]');
+    if (tip) {
+        // 탭 구조 없으면 주입
+        if (!tip.querySelector('.tt-tabs')) {
+            const key = tip.getAttribute('data-tip-key');
+            if (!_ttDefaults[key]) {
+                const content = tip.querySelector('.info-tip-content');
+                if (content) _ttDefaults[key] = content.innerHTML;
+            }
+            _ttRenderTabs(tip, key);
+        }
+        _ttOpenTip(tip);
+        return;
+    }
+    // 툴팁 내용 위에 마우스 있을 때도 유지
+    const content = e.target.closest('.info-tip-content');
+    if (content && _ttHideTimer) { clearTimeout(_ttHideTimer); _ttHideTimer = null; }
+}, true);
+
+document.addEventListener('mouseout', function(e) {
+    const tip = e.target.closest('.info-tip[data-tip-key]');
+    const content = e.target.closest('.info-tip-content');
+    if (!tip && !content) return;
+    // relatedTarget이 툴팁 범위 안이면 유지
+    const rt = e.relatedTarget;
+    if (rt && (rt.closest && (rt.closest('.info-tip[data-tip-key]') || rt.closest('.info-tip-content')))) return;
+    _ttScheduleHide();
+}, true);
 };
 
 // =============================
