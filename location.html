@@ -156,10 +156,19 @@
             font-style: normal; vertical-align: middle;
         }
         .info-tip:hover { background: var(--primary); }
+        .info-tip .info-tip-content {
+            display: none; position: fixed; 
+            background: #263238; color: white; 
+            padding: 10px 14px; border-radius: 8px; 
+            font-size: 12px; font-weight: normal; font-style: normal;
+            line-height: 1.6; text-align: left;
+            white-space: normal; width: max-content; max-width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 9999999; pointer-events: none;
         }
         .info-tip:hover .info-tip-content { display: block; }
-        .info-tip b { color: #80deea; }    
-    </style>
+        .info-tip b { color: #80deea; }
+    </style>    
 </head>
 <body onclick="closeAllPopups()">
     <div id="pre-assign-banner" class="pre-assign-banner">
