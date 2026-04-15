@@ -197,6 +197,43 @@
             border: 2px solid #80deea;
             box-shadow: 0 0 20px rgba(128, 222, 234, 0.5), 0 4px 12px rgba(0,0,0,0.5);
         }
+        /* v3.56: 서식 툴바 */
+        .tt-toolbar {
+            display: flex; gap: 4px; padding: 6px; background: #1a2327;
+            border: 1px solid #455a64; border-radius: 4px 4px 0 0;
+            border-bottom: none; margin-bottom: 0;
+        }
+        .tt-tb-btn {
+            padding: 4px 9px; background: #37474f; color: white;
+            border: 1px solid #546e7a; border-radius: 3px;
+            font-size: 12px; font-weight: bold; cursor: pointer;
+            min-width: 28px; transition: 0.15s;
+        }
+        .tt-tb-btn:hover { background: #546e7a; color: #80deea; }
+        .tt-tb-color-wrap { position: relative; display: inline-block; }
+        .tt-tb-palette {
+            display: none; position: absolute; top: 100%; left: 0;
+            background: #263238; border: 1px solid #546e7a; border-radius: 4px;
+            padding: 5px; margin-top: 3px; z-index: 10;
+            grid-template-columns: repeat(6, 1fr); gap: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+        .tt-tb-palette.open { display: grid; }
+        .tt-color-swatch {
+            width: 20px; height: 20px; border: 1px solid #455a64;
+            border-radius: 3px; cursor: pointer; padding: 0;
+            transition: transform 0.1s;
+        }
+        .tt-color-swatch:hover { transform: scale(1.2); border-color: white; }
+        .tt-color-swatch.tt-color-none {
+            background: white; color: #333; font-size: 11px; font-weight: bold;
+            display: flex; align-items: center; justify-content: center;
+        }
+        /* 툴바 바로 아래 textarea는 위쪽 border-radius 제거 */
+        .tt-editor .tt-toolbar + .tt-editor-textarea {
+            border-radius: 0 0 4px 4px;
+            border-top: none;
+        }
     </style>    
 </head>
 <body onclick="closeAllPopups()">
@@ -258,7 +295,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.55 (설명 편집 + 편집 잠금)</div>
+            <div class="version-badge">🚀 Ver 3.56 (서식 툴바 + 자동 줄바꿈)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
