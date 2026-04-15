@@ -184,6 +184,19 @@
         .tt-editor-btns { display: flex; gap: 6px; margin-top: 8px; justify-content: flex-end; }
         .tt-btn-save { padding: 5px 12px; background: #4caf50; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
         .tt-btn-cancel { padding: 5px 12px; background: #78909c; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        /* v3.55: 설명 탭 편집 + 복원 + 편집 모드 표시 */
+        .tt-view-wrap { display: flex; flex-direction: column; gap: 8px; }
+        .tt-view-body { min-height: 40px; }
+        .tt-btn-row { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+        .tt-btn-reset { padding: 5px 10px; background: #546e7a; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        .tt-btn-reset:hover { background: #78909c; }
+        .tt-editor-label { font-size: 11px; color: #80deea; font-weight: bold; margin-bottom: 4px; }
+        
+        /* 편집 중 시각 표시 (테두리 강조) */
+        .info-tip.tt-editing .info-tip-content {
+            border: 2px solid #80deea;
+            box-shadow: 0 0 20px rgba(128, 222, 234, 0.5), 0 4px 12px rgba(0,0,0,0.5);
+        }
     </style>    
 </head>
 <body onclick="closeAllPopups()">
@@ -245,7 +258,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.54 (툴팁 탭 + 메뉴얼 편집)</div>
+            <div class="version-badge">🚀 Ver 3.55 (설명 편집 + 편집 잠금)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
