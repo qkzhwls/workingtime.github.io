@@ -2715,7 +2715,6 @@ function _ttShowEditor(tip, key, target) {
                         <button type="button" class="tt-color-swatch tt-color-none" data-color="" title="색상 제거">✕</button>
                     </div>
                 </div>
-                <button type="button" class="tt-tb-btn" data-action="br" title="줄바꿈 삽입">↵</button>
                 <button type="button" class="tt-tb-btn" data-action="hr" title="구분선 삽입">━</button>
             </div>
             <textarea class="tt-editor-textarea" placeholder="메모장처럼 자유롭게 입력하세요.&#10;엔터로 줄바꿈, 위 버튼으로 서식 적용"></textarea>
@@ -2773,8 +2772,6 @@ function _ttShowEditor(tip, key, target) {
             const action = btn.getAttribute('data-action');
             if (action === 'bold') {
                 _ttInsertWrap('<b>', '</b>');
-            } else if (action === 'br') {
-                _ttInsertText('<br>');
             } else if (action === 'hr') {
                 _ttInsertText('<br>━━━━━━━━━<br>');
             } else if (action === 'color-toggle') {
