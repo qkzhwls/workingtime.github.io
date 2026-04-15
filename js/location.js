@@ -12,7 +12,10 @@ let incomingData = {};
 let incomingTotalByCode = {}; // ★ 상품코드별 입고대기 합계 (오더+사입)
 let customTooltips = {}; // ★ v3.53: 사용자 정의 툴팁 { key: html_content, "__deleted__keyName": true }
 let sortConfig = { key: 'id', direction: 'asc' };
-let filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all', reserved: 'all', preassigned: 'all' };
+// ★ v3.57: 모든 필터를 배열로 통일 (다중 선택 지원)
+// loc: 구역 prefix, code: ['empty','not-empty'] 중복 불가
+// reserved/preassigned: ['only'] 또는 [] (토글)
+let filters = { loc: [], code: [], stock: [], stock2f: [], dong: [], pos: [], reserved: [], preassigned: [] };
 
 const RESERVE_EXPIRE_MS = Infinity; 
 
@@ -1362,21 +1365,20 @@ window.saveCapacity2F = async function() {
 window.switchUsageTab = function(tab) { window.currentUsageTab = tab; window.calculateAndRenderUsage(); };
 
 window.applyUsageFilter = function(zone, state) {
-    filters = { loc: [], code: 'all', stock: 'all', dong: 'all', pos: 'all', reserved: 'all', preassigned: 'all' };
+    // ★ v3.57: 모든 필터 배열 초기화
+    filters = { loc: [], code: [], stock: [], stock2f: [], dong: [], pos: [], reserved: [], preassigned: [] };
     if (zone !== 'all') filters.loc = [zone];
-    if (state === 'used') filters.code = 'not-empty';
-    else if (state === 'empty') filters.code = 'empty';
-    else if (state === 'reserved') filters.reserved = 'only';
-    else if (state === 'preassigned') filters.preassigned = 'only';
+    if (state === 'used') filters.code = ['not-empty'];
+    else if (state === 'empty') filters.code = ['empty'];
+    else if (state === 'reserved') filters.reserved = ['only'];
+    else if (state === 'preassigned') filters.preassigned = ['only'];
     setupFilterPopups();
     applyFiltersAndSort();
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
-    // 리스트 탭으로 전환
     document.getElementById('view-list').style.display = 'block';
     document.getElementById('view-map').style.display = 'none';
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelector('.tab-btn')?.classList.add('active');
-    // reserved/preassigned 필터 시 초기화 버튼 표시
     window.showFilterResetBtn();
 };
 
@@ -1466,7 +1468,7 @@ window.calculateAndRenderUsage = function() {
         const dongs = Object.keys(dongStats).sort((a,b) => a.localeCompare(b, undefined, {numeric: true}));
         dongs.forEach(d => {
             const dTotal = dongStats[d].total; const dUsed = dongStats[d].used; const dEmpty = dTotal - dUsed; const dRate = ((dUsed / dTotal) * 100).toFixed(1);
-            detailHtml += `<tr><td><strong>${d}</strong> 동</td><td>${dTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="setFilter('dong', '${d}'); applyUsageFilter('all', 'used')">${dUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="setFilter('dong', '${d}'); applyUsageFilter('all', 'empty')">${dEmpty}</td><td>${dRate}%</td></tr>`;
+            detailHtml += `<tr><td><strong>${d}</strong> 동</td><td>${dTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used'); filters.dong=['${d}']; setupFilterPopups(); applyFiltersAndSort();">${dUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty'); filters.dong=['${d}']; setupFilterPopups(); applyFiltersAndSort();">${dEmpty}</td><td>${dRate}%</td></tr>`;
         });
         detailHtml += `</tbody></table></div>`;
 
@@ -1476,7 +1478,7 @@ window.calculateAndRenderUsage = function() {
         const poses = Object.keys(posStats).sort((a,b) => a.localeCompare(b, undefined, {numeric: true}));
         poses.forEach(p => {
             const pTotal = posStats[p].total; const pUsed = posStats[p].used; const pEmpty = pTotal - pUsed; const pRate = ((pUsed / pTotal) * 100).toFixed(1);
-            detailHtml += `<tr><td><strong>${p}</strong> 위치</td><td>${pTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="setFilter('pos', '${p}'); applyUsageFilter('all', 'used')">${pUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="setFilter('pos', '${p}'); applyUsageFilter('all', 'empty')">${pEmpty}</td><td>${pRate}%</td></tr>`;
+            detailHtml += `<tr><td><strong>${p}</strong> 위치</td><td>${pTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'used'); filters.pos=['${p}']; setupFilterPopups(); applyFiltersAndSort();">${pUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('all', 'empty'); filters.pos=['${p}']; setupFilterPopups(); applyFiltersAndSort();">${pEmpty}</td><td>${pRate}%</td></tr>`;
         });
         detailHtml += `</tbody></table></div>`;
         detailHtml += `</div>`; 
@@ -1586,14 +1588,17 @@ function updateFilterButtonStates() {
         else btnId.classList.add('active');
     }
     
-    ['code', 'dong', 'pos', 'stock'].forEach(type => {
+    ['code', 'dong', 'pos', 'stock', 'stock2f'].forEach(type => {
         const btn = document.getElementById('btn-filter-' + type);
         if (btn) {
             if (type === 'code') {
-                const active = filters.code !== 'all' || filters.reserved === 'only' || filters.preassigned === 'only';
+                const active = (filters.code && filters.code.length > 0) || 
+                               (filters.reserved && filters.reserved.includes('only')) || 
+                               (filters.preassigned && filters.preassigned.includes('only'));
                 if (active) btn.classList.add('active'); else btn.classList.remove('active');
             } else {
-                if (filters[type] === 'all') btn.classList.remove('active');
+                const arr = filters[type];
+                if (!Array.isArray(arr) || arr.length === 0) btn.classList.remove('active');
                 else btn.classList.add('active');
             }
         }
@@ -1604,7 +1609,8 @@ function updateFilterButtonStates() {
         if (!col.startsWith('cus_')) return;
         const btn = document.getElementById('btn-filter-' + col);
         if (btn) {
-            if (!filters[col] || filters[col] === 'all') btn.classList.remove('active');
+            const arr = filters[col];
+            if (!Array.isArray(arr) || arr.length === 0) btn.classList.remove('active');
             else btn.classList.add('active');
         }
     });
@@ -1617,13 +1623,15 @@ function setupFilterPopups() {
     
     updateLocPopupUI();
     
-    const isReservedOnly = filters.reserved === 'only';
-    const isPreassignedOnly = filters.preassigned === 'only';
-    const codeAll = filters.code === 'all' && !isReservedOnly && !isPreassignedOnly;
+    const isReservedOnly = filters.reserved.includes('only');
+    const isPreassignedOnly = filters.preassigned.includes('only');
+    const isEmpty = filters.code.includes('empty');
+    const isNotEmpty = filters.code.includes('not-empty');
+    const codeAll = filters.code.length === 0 && !isReservedOnly && !isPreassignedOnly;
     let codeHtml = getSortButtonsHtml('code') +
         `<div class="filter-option ${codeAll ? 'selected' : ''}" onclick="setCodeTagFilter('all')">${codeAll ? '✔️ ' : ''}전체보기</div>` +
-        `<div class="filter-option ${filters.code === 'empty' ? 'selected' : ''}" onclick="setCodeTagFilter('empty')">${filters.code === 'empty' ? '✔️ ' : ''}빈칸</div>` +
-        `<div class="filter-option ${filters.code === 'not-empty' ? 'selected' : ''}" onclick="setCodeTagFilter('not-empty')">${filters.code === 'not-empty' ? '✔️ ' : ''}내용있음</div>` +
+        `<div class="filter-option ${isEmpty ? 'selected' : ''}" onclick="setCodeTagFilter('empty')">${isEmpty ? '✔️ ' : ''}빈칸</div>` +
+        `<div class="filter-option ${isNotEmpty ? 'selected' : ''}" onclick="setCodeTagFilter('not-empty')">${isNotEmpty ? '✔️ ' : ''}내용있음</div>` +
         `<div class="filter-divider"></div>` +
         `<div class="filter-option ${isReservedOnly ? 'selected' : ''}" onclick="setCodeTagFilter('당일지정')">${isReservedOnly ? '✔️ ' : ''}📌 당일지정</div>` +
         `<div class="filter-option ${isPreassignedOnly ? 'selected' : ''}" onclick="setCodeTagFilter('선지정')">${isPreassignedOnly ? '✔️ ' : ''}📦 선지정</div>`;
@@ -1631,21 +1639,37 @@ function setupFilterPopups() {
     if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
     if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
     const dongs = [...new Set(originalData.map(d => (d.dong || '').toString()))].filter(Boolean).sort();
-    let dongHtml = getSortButtonsHtml('dong') + `<div class="filter-option ${filters.dong === 'all' ? 'selected' : ''}" onclick="setFilter('dong', 'all')">${filters.dong === 'all' ? '✔️ ' : ''}전체보기</div>`;
-    dongs.forEach(d => { dongHtml += `<div class="filter-option ${filters.dong === d ? 'selected' : ''}" onclick="setFilter('dong', '${d}')">${filters.dong === d ? '✔️ ' : ''}${d}</div>`; });
+    const dongAll = filters.dong.length === 0;
+    let dongHtml = getSortButtonsHtml('dong') + `<div class="filter-option ${dongAll ? 'selected' : ''}" onclick="setFilter('dong', 'all')">${dongAll ? '✔️ ' : ''}전체보기</div>`;
+    dongs.forEach(d => { 
+        const sel = filters.dong.includes(d);
+        dongHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('dong', '${d}')">${sel ? '✔️ ' : ''}${d}</div>`; 
+    });
     if(dongPop) dongPop.innerHTML = dongHtml;
     const poses = [...new Set(originalData.map(d => (d.pos || '').toString()))].filter(Boolean).sort();
-    let posHtml = getSortButtonsHtml('pos') + `<div class="filter-option ${filters.pos === 'all' ? 'selected' : ''}" onclick="setFilter('pos', 'all')">${filters.pos === 'all' ? '✔️ ' : ''}전체보기</div>`;
-    poses.forEach(p => { posHtml += `<div class="filter-option ${filters.pos === p ? 'selected' : ''}" onclick="setFilter('pos', '${p}')">${filters.pos === p ? '✔️ ' : ''}${p}</div>`; });
+    const posAll = filters.pos.length === 0;
+    let posHtml = getSortButtonsHtml('pos') + `<div class="filter-option ${posAll ? 'selected' : ''}" onclick="setFilter('pos', 'all')">${posAll ? '✔️ ' : ''}전체보기</div>`;
+    poses.forEach(p => { 
+        const sel = filters.pos.includes(p);
+        posHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('pos', '${p}')">${sel ? '✔️ ' : ''}${p}</div>`; 
+    });
     if(posPop) posPop.innerHTML = posHtml;
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
-    let stockHtml = getSortButtonsHtml('stock') + `<div class="filter-option ${filters.stock === 'all' ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${filters.stock === 'all' ? '✔️ ' : ''}전체보기</div>`;
-    stocks.forEach(s => { stockHtml += `<div class="filter-option ${filters.stock === s ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${filters.stock === s ? '✔️ ' : ''}${s}</div>`; });
+    const stockAll = filters.stock.length === 0;
+    let stockHtml = getSortButtonsHtml('stock') + `<div class="filter-option ${stockAll ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${stockAll ? '✔️ ' : ''}전체보기</div>`;
+    stocks.forEach(s => { 
+        const sel = filters.stock.includes(s);
+        stockHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${sel ? '✔️ ' : ''}${s}</div>`; 
+    });
     if(stockPop) stockPop.innerHTML = stockHtml;
-    const stock2fPop = document.getElementById('pop-stock2f');
+   const stock2fPop = document.getElementById('pop-stock2f');
     const stocks2f = [...new Set(originalData.map(d => (d.stock2f || '0').toString()))].sort((a, b) => Number(a) - Number(b));
-    let stock2fHtml = getSortButtonsHtml('stock2f') + `<div class="filter-option ${filters.stock2f === 'all' ? 'selected' : ''}" onclick="setFilter('stock2f', 'all')">${filters.stock2f === 'all' ? '✔️ ' : ''}전체보기</div>`;
-    stocks2f.forEach(s => { stock2fHtml += `<div class="filter-option ${filters.stock2f === s ? 'selected' : ''}" onclick="setFilter('stock2f', '${s}')">${filters.stock2f === s ? '✔️ ' : ''}${s}</div>`; });
+    const stock2fAll = !filters.stock2f || filters.stock2f.length === 0;
+    let stock2fHtml = getSortButtonsHtml('stock2f') + `<div class="filter-option ${stock2fAll ? 'selected' : ''}" onclick="setFilter('stock2f', 'all')">${stock2fAll ? '✔️ ' : ''}전체보기</div>`;
+    stocks2f.forEach(s => { 
+        const sel = filters.stock2f && filters.stock2f.includes(s);
+        stock2fHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock2f', '${s}')">${sel ? '✔️ ' : ''}${s}</div>`; 
+    });
     if(stock2fPop) stock2fPop.innerHTML = stock2fHtml;
 
     updateFilterButtonStates();
@@ -1656,14 +1680,18 @@ function setupFilterPopups() {
         const pop = document.getElementById(`pop-${col}`);
         if (!pop) return;
         const key = col.replace('cus_', '');
-        const curVal = filters[col] || 'all';
+        if (!Array.isArray(filters[col])) filters[col] = [];
+        const arr = filters[col];
+        const curAll = arr.length === 0;
 
         // ★ 옵션추가항목1: 빈칸/내용있음 전용 필터
         if (key === '옵션추가항목1') {
+            const isE = arr.includes('empty');
+            const isN = arr.includes('not-empty');
             let html = getSortButtonsHtml(col) +
-                `<div class="filter-option ${curVal === 'all' ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curVal === 'all' ? '✔️ ' : ''}전체보기</div>` +
-                `<div class="filter-option ${curVal === 'empty' ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${curVal === 'empty' ? '✔️ ' : ''}빈칸</div>` +
-                `<div class="filter-option ${curVal === 'not-empty' ? 'selected' : ''}" onclick="setFilter('${col}', 'not-empty')">${curVal === 'not-empty' ? '✔️ ' : ''}내용있음</div>`;
+                `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}전체보기</div>` +
+                `<div class="filter-option ${isE ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${isE ? '✔️ ' : ''}빈칸</div>` +
+                `<div class="filter-option ${isN ? 'selected' : ''}" onclick="setFilter('${col}', 'not-empty')">${isN ? '✔️ ' : ''}내용있음</div>`;
             pop.innerHTML = html;
             return;
         }
@@ -1673,16 +1701,18 @@ function setupFilterPopups() {
         }))].filter(Boolean).sort();
 
         let html = getSortButtonsHtml(col) +
-            `<div class="filter-option ${curVal === 'all' ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curVal === 'all' ? '✔️ ' : ''}전체보기</div>`;
+            `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}전체보기</div>`;
 
         // ★ 입고대기: 빈칸 옵션 추가
         if (key === '입고대기') {
-            html += `<div class="filter-option ${curVal === 'empty' ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${curVal === 'empty' ? '✔️ ' : ''}빈칸</div>`;
+            const isE = arr.includes('empty');
+            html += `<div class="filter-option ${isE ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${isE ? '✔️ ' : ''}빈칸</div>`;
         }
 
         vals.forEach(v => {
             const escaped = v.replace(/'/g, "\\'");
-            html += `<div class="filter-option ${curVal === v ? 'selected' : ''}" onclick="setFilter('${col}', '${escaped}')">${curVal === v ? '✔️ ' : ''}${v}</div>`;
+            const sel = arr.includes(v);
+            html += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('${col}', '${escaped}')">${sel ? '✔️ ' : ''}${v}</div>`;
         });
         pop.innerHTML = html;
     });
@@ -1699,28 +1729,52 @@ window.toggleLocFilter = (val) => {
     applyFiltersAndSort();
     window.showFilterResetBtn();
 };
+// ★ v3.57: 모든 필터 배열 토글 방식
 window.setFilter = (type, value) => { 
-    filters[type] = value; 
+    if (!Array.isArray(filters[type])) filters[type] = [];
+    if (value === 'all') {
+        filters[type] = [];
+    } else {
+        // 특수값 상호 배제: empty ↔ not-empty 는 하나만 선택
+        if (value === 'empty' || value === 'not-empty') {
+            const opposite = value === 'empty' ? 'not-empty' : 'empty';
+            filters[type] = filters[type].filter(v => v !== opposite);
+        }
+        // 토글
+        if (filters[type].includes(value)) {
+            filters[type] = filters[type].filter(v => v !== value);
+        } else {
+            filters[type].push(value);
+        }
+    }
     setupFilterPopups(); 
     applyFiltersAndSort(); 
-    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+    // ★ 다중 선택 지원을 위해 팝업 자동 닫힘 제거 (사용자가 원할 때 닫음)
     window.showFilterResetBtn();
 };
+
 window.setCodeTagFilter = (mode) => {
-    if (mode === '당일지정') {
-        filters.code = 'all'; filters.reserved = 'only'; filters.preassigned = 'all';
-    } else if (mode === '선지정') {
-        filters.code = 'all'; filters.reserved = 'all'; filters.preassigned = 'only';
+    // mode: 'all', 'empty', 'not-empty', '당일지정', '선지정'
+    if (mode === 'all') {
+        filters.code = []; filters.reserved = []; filters.preassigned = [];
     } else if (mode === 'empty') {
-        filters.code = 'empty'; filters.reserved = 'all'; filters.preassigned = 'all';
+        // empty ↔ not-empty 상호 배제
+        filters.code = filters.code.filter(v => v !== 'not-empty');
+        if (filters.code.includes('empty')) filters.code = filters.code.filter(v => v !== 'empty');
+        else filters.code.push('empty');
     } else if (mode === 'not-empty') {
-        filters.code = 'not-empty'; filters.reserved = 'all'; filters.preassigned = 'all';
-    } else {
-        filters.code = 'all'; filters.reserved = 'all'; filters.preassigned = 'all';
+        filters.code = filters.code.filter(v => v !== 'empty');
+        if (filters.code.includes('not-empty')) filters.code = filters.code.filter(v => v !== 'not-empty');
+        else filters.code.push('not-empty');
+    } else if (mode === '당일지정') {
+        if (filters.reserved.includes('only')) filters.reserved = [];
+        else filters.reserved = ['only'];
+    } else if (mode === '선지정') {
+        if (filters.preassigned.includes('only')) filters.preassigned = [];
+        else filters.preassigned = ['only'];
     }
     setupFilterPopups();
     applyFiltersAndSort();
-    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
     window.showFilterResetBtn();
 };
 
@@ -1732,19 +1786,30 @@ window.showFilterResetBtn = function() {
 
 function applyFiltersAndSort() {
     let filtered = originalData.filter(item => {
+        // ★ v3.57: 모든 필터 배열 기반 (OR 조건)
         if (filters.loc.length > 0 && !filters.loc.includes(item.id.charAt(0))) return false;
-        if (filters.dong !== 'all' && (item.dong || '').toString() !== filters.dong) return false;
-        if (filters.pos !== 'all' && (item.pos || '').toString() !== filters.pos) return false;
-        const hasCode = (item.code && item.code !== item.id && item.code.trim() !== "") || (item.name && item.name.trim() !== "");
-        if (filters.code === 'empty' && hasCode) return false;
-        if (filters.code === 'not-empty' && !hasCode) return false;
-        if (filters.stock !== 'all' && (item.stock || '0').toString() !== filters.stock) return false;
-        if (filters.stock2f && filters.stock2f !== 'all' && (item.stock2f || '0').toString() !== filters.stock2f) return false;
-        if (filters.reserved === 'only' && item.codeTag !== '당일지정') return false;
-        if (filters.preassigned === 'only' && item.codeTag !== '선지정') return false;
-        // 커스텀 헤더 필터
+        if (filters.dong.length > 0 && !filters.dong.includes((item.dong || '').toString())) return false;
+        if (filters.pos.length > 0 && !filters.pos.includes((item.pos || '').toString())) return false;
+        
+        // code: 'empty'/'not-empty' 특수값 배열
+        if (filters.code.length > 0) {
+            const hasCode = (item.code && item.code !== item.id && item.code.trim() !== "") || (item.name && item.name.trim() !== "");
+            const matchEmpty = filters.code.includes('empty') && !hasCode;
+            const matchNotEmpty = filters.code.includes('not-empty') && hasCode;
+            if (!matchEmpty && !matchNotEmpty) return false;
+        }
+        
+        if (filters.stock.length > 0 && !filters.stock.includes((item.stock || '0').toString())) return false;
+        if (filters.stock2f.length > 0 && !filters.stock2f.includes((item.stock2f || '0').toString())) return false;
+        
+        if (filters.reserved.length > 0 && filters.reserved.includes('only') && item.codeTag !== '당일지정') return false;
+        if (filters.preassigned.length > 0 && filters.preassigned.includes('only') && item.codeTag !== '선지정') return false;
+        
+        // 커스텀 헤더 필터 (cus_*)
         for (const col in filters) {
-            if (!col.startsWith('cus_') || filters[col] === 'all') continue;
+            if (!col.startsWith('cus_')) continue;
+            const arr = filters[col];
+            if (!Array.isArray(arr) || arr.length === 0) continue;
             const key = col.replace('cus_', '');
             let val = (item.rawData && item.rawData[key]) ? item.rawData[key].toString().trim() : '';
             // ★ 입고대기 컬럼은 오더+사입 합계 기준으로 필터
@@ -1752,10 +1817,15 @@ function applyFiltersAndSort() {
                 const code = (item.code && item.code !== item.id) ? item.code : '';
                 val = code && incomingTotalByCode[code] ? incomingTotalByCode[code].toString() : '';
             }
-            // ★ 빈칸/내용있음 필터 지원
-            if (filters[col] === 'empty') { if (val !== '') return false; }
-            else if (filters[col] === 'not-empty') { if (val === '') return false; }
-            else { if (val !== filters[col]) return false; }
+            // 매칭: 'empty' / 'not-empty' 특수값 또는 정확 일치 값
+            let matched = false;
+            for (const f of arr) {
+                if (f === 'empty' && val === '') matched = true;
+                else if (f === 'not-empty' && val !== '') matched = true;
+                else if (f === val) matched = true;
+                if (matched) break;
+            }
+            if (!matched) return false;
         }
         return true;
     });
