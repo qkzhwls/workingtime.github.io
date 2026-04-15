@@ -2694,12 +2694,31 @@ function _ttShowEditor(tip, key, target) {
         currentVal = _ttGetStored(key, 'manual');
     }
     
+    // ★ v3.56: <br> → \n 역변환 (메모장처럼 표시)
+    const displayVal = currentVal.replace(/<br\s*\/?>/gi, '\n');
+    
     const labelText = target === 'desc' ? '📖 설명 편집' : '📝 메뉴얼 편집';
     
     tabBody.innerHTML = `
         <div class="tt-editor">
             <div class="tt-editor-label">${labelText}</div>
-            <textarea class="tt-editor-textarea" placeholder="HTML 태그 사용 가능 (<b>굵게</b>, <br>, <span style='color:#80deea;'>색상</span> 등)"></textarea>
+            <div class="tt-toolbar">
+                <button type="button" class="tt-tb-btn" data-action="bold" title="굵게">𝐁</button>
+                <div class="tt-tb-color-wrap">
+                    <button type="button" class="tt-tb-btn" data-action="color-toggle" title="색상">🎨</button>
+                    <div class="tt-tb-palette">
+                        <button type="button" class="tt-color-swatch" data-color="#ff5252" style="background:#ff5252;" title="빨강"></button>
+                        <button type="button" class="tt-color-swatch" data-color="#e65100" style="background:#e65100;" title="주황"></button>
+                        <button type="button" class="tt-color-swatch" data-color="#fbc02d" style="background:#fbc02d;" title="노랑"></button>
+                        <button type="button" class="tt-color-swatch" data-color="#2e7d32" style="background:#2e7d32;" title="초록"></button>
+                        <button type="button" class="tt-color-swatch" data-color="#1976d2" style="background:#1976d2;" title="파랑"></button>
+                        <button type="button" class="tt-color-swatch tt-color-none" data-color="" title="색상 제거">✕</button>
+                    </div>
+                </div>
+                <button type="button" class="tt-tb-btn" data-action="br" title="줄바꿈 삽입">↵</button>
+                <button type="button" class="tt-tb-btn" data-action="hr" title="구분선 삽입">━</button>
+            </div>
+            <textarea class="tt-editor-textarea" placeholder="메모장처럼 자유롭게 입력하세요.&#10;엔터로 줄바꿈, 위 버튼으로 서식 적용"></textarea>
             <div class="tt-editor-btns">
                 <button type="button" class="tt-btn-cancel">❌ 취소</button>
                 <button type="button" class="tt-btn-save">💾 저장</button>
@@ -2708,12 +2727,91 @@ function _ttShowEditor(tip, key, target) {
     `;
     
     const textarea = tabBody.querySelector('.tt-editor-textarea');
-    textarea.value = currentVal; // HTML 이스케이프 이슈 방지: value로 세팅
+    textarea.value = displayVal;
     textarea.focus();
     
-    // 모든 마우스/키보드 이벤트 전파 차단 (닫힘 방지 보조)
+    // 모든 마우스/키보드 이벤트 전파 차단
     ['click','mousedown','mouseup','mousemove','keydown','keyup'].forEach(ev => {
         textarea.addEventListener(ev, (e) => e.stopPropagation());
+    });
+    
+    // ★ v3.56: 서식 툴바 헬퍼 - 커서 위치 또는 선택 영역에 태그 삽입
+    function _ttInsertWrap(openTag, closeTag) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const val = textarea.value;
+        const selected = val.substring(start, end);
+        const before = val.substring(0, start);
+        const after = val.substring(end);
+        const newText = before + openTag + selected + closeTag + after;
+        textarea.value = newText;
+        // 선택 영역이 있었으면 그 뒤로 커서, 없으면 태그 사이로
+        if (selected) {
+            const newPos = start + openTag.length + selected.length + closeTag.length;
+            textarea.setSelectionRange(newPos, newPos);
+        } else {
+            const newPos = start + openTag.length;
+            textarea.setSelectionRange(newPos, newPos);
+        }
+        textarea.focus();
+    }
+    
+    function _ttInsertText(text) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const val = textarea.value;
+        textarea.value = val.substring(0, start) + text + val.substring(end);
+        const newPos = start + text.length;
+        textarea.setSelectionRange(newPos, newPos);
+        textarea.focus();
+    }
+    
+    // 서식 버튼 이벤트
+    tabBody.querySelectorAll('.tt-tb-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const action = btn.getAttribute('data-action');
+            if (action === 'bold') {
+                _ttInsertWrap('<b>', '</b>');
+            } else if (action === 'br') {
+                _ttInsertText('<br>');
+            } else if (action === 'hr') {
+                _ttInsertText('<br>━━━━━━━━━<br>');
+            } else if (action === 'color-toggle') {
+                const palette = tabBody.querySelector('.tt-tb-palette');
+                palette.classList.toggle('open');
+            }
+        });
+    });
+    
+    // 색상 팔레트 클릭
+    tabBody.querySelectorAll('.tt-color-swatch').forEach(swatch => {
+        swatch.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const color = swatch.getAttribute('data-color');
+            if (color) {
+                _ttInsertWrap(`<span style="color:${color};">`, '</span>');
+            } else {
+                // 색상 제거: 선택 영역의 color span 태그만 제거
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const val = textarea.value;
+                const selected = val.substring(start, end);
+                const cleaned = selected.replace(/<span\s+style="color:[^"]*;?">/gi, '').replace(/<\/span>/gi, '');
+                textarea.value = val.substring(0, start) + cleaned + val.substring(end);
+                textarea.setSelectionRange(start, start + cleaned.length);
+            }
+            tabBody.querySelector('.tt-tb-palette').classList.remove('open');
+            textarea.focus();
+        });
+    });
+    
+    // 팔레트 외부 클릭 시 닫기
+    tabBody.addEventListener('click', (e) => {
+        if (!e.target.closest('.tt-tb-color-wrap')) {
+            const palette = tabBody.querySelector('.tt-tb-palette');
+            if (palette) palette.classList.remove('open');
+        }
     });
     
     tabBody.querySelector('.tt-btn-cancel').addEventListener('click', (e) => {
@@ -2725,7 +2823,9 @@ function _ttShowEditor(tip, key, target) {
     
     tabBody.querySelector('.tt-btn-save').addEventListener('click', async (e) => {
         e.stopPropagation();
-        const newVal = textarea.value.trim();
+        // ★ v3.56: \n (엔터) → <br> 자동 변환 후 저장
+        const rawVal = textarea.value.trim();
+        const newVal = rawVal.replace(/\r?\n/g, '<br>');
         const storeKey = key + '__' + target;
         if (newVal) {
             customTooltips[storeKey] = newVal;
