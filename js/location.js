@@ -2571,10 +2571,6 @@ window.cancelPreAssignMode = function() {
     document.getElementById('pre-assign-banner').style.display = 'none';
 };
 
-// =============================
-// ★ v3.53: 툴팁 편집 시스템
-// =============================
-
 window.cancelPreAssignMode = function() {
     window.isPreAssignMode = false;
     window.selectedPreAssignItem = null;
@@ -2776,7 +2772,9 @@ document.addEventListener('mouseout', function(e) {
     if (rt && (rt.closest && (rt.closest('.info-tip[data-tip-key]') || rt.closest('.info-tip-content')))) return;
     _ttScheduleHide();
 }, true);
-};
+
+// =============================
+// 🗺️ 도면 보기 (거리뷰)
 
 // =============================
 // 🗺️ 도면 보기 (거리뷰)
