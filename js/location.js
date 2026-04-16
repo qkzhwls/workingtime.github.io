@@ -1576,7 +1576,7 @@ function updateLocPopupUI() {
     const prefixes = [...prefixSet].sort((a, b) => (a === '★' ? -1 : (b === '★' ? 1 : a.localeCompare(b))));
     let locHtml = getSortButtonsHtml('id');
     const isAllSelected = filters.loc.length === 0;
-    locHtml += `<div class="filter-option ${isAllSelected ? 'selected' : ''}" onclick="toggleLocFilter('all')">${isAllSelected ? '✔️ ' : ''}전체보기</div>`;
+    locHtml += `<div class="filter-option ${isAllSelected ? 'selected' : ''}" onclick="toggleLocFilter('all')">${isAllSelected ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     prefixes.forEach(p => { const isSelected = filters.loc.includes(p); locHtml += `<div class="filter-option ${isSelected ? 'selected' : ''}" onclick="toggleLocFilter('${p}')">${isSelected ? '✔️ ' : ''}${p} 구역</div>`; });
     locPop.innerHTML = locHtml;
 }
@@ -1629,7 +1629,7 @@ function setupFilterPopups() {
     const isNotEmpty = filters.code.includes('not-empty');
     const codeAll = filters.code.length === 0 && !isReservedOnly && !isPreassignedOnly;
     let codeHtml = getSortButtonsHtml('code') +
-        `<div class="filter-option ${codeAll ? 'selected' : ''}" onclick="setCodeTagFilter('all')">${codeAll ? '✔️ ' : ''}전체보기</div>` +
+       `<div class="filter-option ${codeAll ? 'selected' : ''}" onclick="setCodeTagFilter('all')">${codeAll ? '✔️ ' : ''}🔄 전체선택/해제</div>` +
         `<div class="filter-option ${isEmpty ? 'selected' : ''}" onclick="setCodeTagFilter('empty')">${isEmpty ? '✔️ ' : ''}빈칸</div>` +
         `<div class="filter-option ${isNotEmpty ? 'selected' : ''}" onclick="setCodeTagFilter('not-empty')">${isNotEmpty ? '✔️ ' : ''}내용있음</div>` +
         `<div class="filter-divider"></div>` +
@@ -1640,7 +1640,7 @@ function setupFilterPopups() {
     if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
     const dongs = [...new Set(originalData.map(d => (d.dong || '').toString()))].filter(Boolean).sort();
     const dongAll = filters.dong.length === 0;
-    let dongHtml = getSortButtonsHtml('dong') + `<div class="filter-option ${dongAll ? 'selected' : ''}" onclick="setFilter('dong', 'all')">${dongAll ? '✔️ ' : ''}전체보기</div>`;
+    let dongHtml = getSortButtonsHtml('dong') + `<div class="filter-option ${dongAll ? 'selected' : ''}" onclick="setFilter('dong', 'all')">${dongAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     dongs.forEach(d => { 
         const sel = filters.dong.includes(d);
         dongHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('dong', '${d}')">${sel ? '✔️ ' : ''}${d}</div>`; 
@@ -1648,7 +1648,7 @@ function setupFilterPopups() {
     if(dongPop) dongPop.innerHTML = dongHtml;
     const poses = [...new Set(originalData.map(d => (d.pos || '').toString()))].filter(Boolean).sort();
     const posAll = filters.pos.length === 0;
-    let posHtml = getSortButtonsHtml('pos') + `<div class="filter-option ${posAll ? 'selected' : ''}" onclick="setFilter('pos', 'all')">${posAll ? '✔️ ' : ''}전체보기</div>`;
+    let posHtml = getSortButtonsHtml('pos') + `<div class="filter-option ${posAll ? 'selected' : ''}" onclick="setFilter('pos', 'all')">${posAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     poses.forEach(p => { 
         const sel = filters.pos.includes(p);
         posHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('pos', '${p}')">${sel ? '✔️ ' : ''}${p}</div>`; 
@@ -1656,7 +1656,7 @@ function setupFilterPopups() {
     if(posPop) posPop.innerHTML = posHtml;
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
     const stockAll = filters.stock.length === 0;
-    let stockHtml = getSortButtonsHtml('stock') + `<div class="filter-option ${stockAll ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${stockAll ? '✔️ ' : ''}전체보기</div>`;
+    let stockHtml = getSortButtonsHtml('stock') + `<div class="filter-option ${stockAll ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${stockAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     stocks.forEach(s => { 
         const sel = filters.stock.includes(s);
         stockHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${sel ? '✔️ ' : ''}${s}</div>`; 
@@ -1665,7 +1665,7 @@ function setupFilterPopups() {
    const stock2fPop = document.getElementById('pop-stock2f');
     const stocks2f = [...new Set(originalData.map(d => (d.stock2f || '0').toString()))].sort((a, b) => Number(a) - Number(b));
     const stock2fAll = !filters.stock2f || filters.stock2f.length === 0;
-    let stock2fHtml = getSortButtonsHtml('stock2f') + `<div class="filter-option ${stock2fAll ? 'selected' : ''}" onclick="setFilter('stock2f', 'all')">${stock2fAll ? '✔️ ' : ''}전체보기</div>`;
+    let stock2fHtml = getSortButtonsHtml('stock2f') + `<div class="filter-option ${stock2fAll ? 'selected' : ''}" onclick="setFilter('stock2f', 'all')">${stock2fAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     stocks2f.forEach(s => { 
         const sel = filters.stock2f && filters.stock2f.includes(s);
         stock2fHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock2f', '${s}')">${sel ? '✔️ ' : ''}${s}</div>`; 
@@ -1689,7 +1689,7 @@ function setupFilterPopups() {
             const isE = arr.includes('empty');
             const isN = arr.includes('not-empty');
             let html = getSortButtonsHtml(col) +
-                `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}전체보기</div>` +
+                `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}🔄 전체선택/해제</div>` +
                 `<div class="filter-option ${isE ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${isE ? '✔️ ' : ''}빈칸</div>` +
                 `<div class="filter-option ${isN ? 'selected' : ''}" onclick="setFilter('${col}', 'not-empty')">${isN ? '✔️ ' : ''}내용있음</div>`;
             pop.innerHTML = html;
@@ -1697,8 +1697,19 @@ function setupFilterPopups() {
         }
 
         const vals = [...new Set(originalData.map(d => {
+            // ★ v3.57fix: 입고대기는 incomingTotalByCode 기준으로 필터값 수집
+            if (key === '입고대기') {
+                const code = (d.code && d.code !== d.id) ? d.code : '';
+                const v = code && incomingTotalByCode[code] ? incomingTotalByCode[code].toString() : '';
+                return v;
+            }
             return (d.rawData && d.rawData[key]) ? d.rawData[key].toString().trim() : '';
-        }))].filter(Boolean).sort();
+        }))].filter(Boolean).sort((a, b) => {
+            // ★ 숫자 정렬 (문자열 "1", "10", "100" → 숫자 순)
+            const na = Number(a), nb = Number(b);
+            if (!isNaN(na) && !isNaN(nb)) return na - nb;
+            return a.localeCompare(b);
+        });
 
         let html = getSortButtonsHtml(col) +
             `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}전체보기</div>`;
@@ -1733,6 +1744,9 @@ window.toggleLocFilter = (val) => {
 window.setFilter = (type, value) => { 
     if (!Array.isArray(filters[type])) filters[type] = [];
     if (value === 'all') {
+        // ★ v3.57fix: 전체선택/해제 토글
+        // 현재 필터가 비어있으면(=전체 표시 중) → 아무것도 안 함 (이미 전체)
+        // 현재 필터에 값이 있으면 → 비움 (전체 해제 → 전체 표시)
         filters[type] = [];
     } else {
         // 특수값 상호 배제: empty ↔ not-empty 는 하나만 선택
