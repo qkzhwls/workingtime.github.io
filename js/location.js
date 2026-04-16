@@ -1574,7 +1574,7 @@ function updateLocPopupUI() {
     if (!locPop) return;
     let prefixSet = new Set(originalData.map(d => d.id.charAt(0))); prefixSet.add('★');
     const prefixes = [...prefixSet].sort((a, b) => (a === '★' ? -1 : (b === '★' ? 1 : a.localeCompare(b))));
-    let locHtml = getSortButtonsHtml('id');
+    let locHtml = window.getFilterSearchHtml('pop-id') + getSortButtonsHtml('id');
     const isAllSelected = filters.loc.length === 0;
     locHtml += `<div class="filter-option ${isAllSelected ? 'selected' : ''}" onclick="toggleLocFilter('all')">${isAllSelected ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     prefixes.forEach(p => { const isSelected = filters.loc.includes(p); locHtml += `<div class="filter-option ${isSelected ? 'selected' : ''}" onclick="toggleLocFilter('${p}')">${isSelected ? '✔️ ' : ''}${p} 구역</div>`; });
@@ -1628,7 +1628,7 @@ function setupFilterPopups() {
     const isEmpty = filters.code.includes('empty');
     const isNotEmpty = filters.code.includes('not-empty');
     const codeAll = filters.code.length === 0 && !isReservedOnly && !isPreassignedOnly;
-    let codeHtml = getSortButtonsHtml('code') +
+    let codeHtml = window.getFilterSearchHtml('pop-code') + getSortButtonsHtml('code') +
        `<div class="filter-option ${codeAll ? 'selected' : ''}" onclick="setCodeTagFilter('all')">${codeAll ? '✔️ ' : ''}🔄 전체선택/해제</div>` +
         `<div class="filter-option ${isEmpty ? 'selected' : ''}" onclick="setCodeTagFilter('empty')">${isEmpty ? '✔️ ' : ''}빈칸</div>` +
         `<div class="filter-option ${isNotEmpty ? 'selected' : ''}" onclick="setCodeTagFilter('not-empty')">${isNotEmpty ? '✔️ ' : ''}내용있음</div>` +
@@ -1636,11 +1636,11 @@ function setupFilterPopups() {
         `<div class="filter-option ${isReservedOnly ? 'selected' : ''}" onclick="setCodeTagFilter('당일지정')">${isReservedOnly ? '✔️ ' : ''}📌 당일지정</div>` +
         `<div class="filter-option ${isPreassignedOnly ? 'selected' : ''}" onclick="setCodeTagFilter('선지정')">${isPreassignedOnly ? '✔️ ' : ''}📦 선지정</div>`;
     if(codePop) codePop.innerHTML = codeHtml;
-    if(namePop) namePop.innerHTML = getSortButtonsHtml('name');
-    if(optionPop) optionPop.innerHTML = getSortButtonsHtml('option');
+    if(namePop) namePop.innerHTML = window.getFilterSearchHtml('pop-name') + getSortButtonsHtml('name');
+    if(optionPop) optionPop.innerHTML = window.getFilterSearchHtml('pop-option') + getSortButtonsHtml('option');
     const dongs = [...new Set(originalData.map(d => (d.dong || '').toString()))].filter(Boolean).sort();
     const dongAll = filters.dong.length === 0;
-    let dongHtml = getSortButtonsHtml('dong') + `<div class="filter-option ${dongAll ? 'selected' : ''}" onclick="setFilter('dong', 'all')">${dongAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
+    let dongHtml = window.getFilterSearchHtml('pop-dong') + getSortButtonsHtml('dong') + `<div class="filter-option ${dongAll ? 'selected' : ''}" onclick="setFilter('dong', 'all')">${dongAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     dongs.forEach(d => { 
         const sel = filters.dong.includes(d);
         dongHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('dong', '${d}')">${sel ? '✔️ ' : ''}${d}</div>`; 
@@ -1648,7 +1648,7 @@ function setupFilterPopups() {
     if(dongPop) dongPop.innerHTML = dongHtml;
     const poses = [...new Set(originalData.map(d => (d.pos || '').toString()))].filter(Boolean).sort();
     const posAll = filters.pos.length === 0;
-    let posHtml = getSortButtonsHtml('pos') + `<div class="filter-option ${posAll ? 'selected' : ''}" onclick="setFilter('pos', 'all')">${posAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
+    let posHtml = window.getFilterSearchHtml('pop-pos') + getSortButtonsHtml('pos') + `<div class="filter-option ${posAll ? 'selected' : ''}" onclick="setFilter('pos', 'all')">${posAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     poses.forEach(p => { 
         const sel = filters.pos.includes(p);
         posHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('pos', '${p}')">${sel ? '✔️ ' : ''}${p}</div>`; 
@@ -1656,7 +1656,7 @@ function setupFilterPopups() {
     if(posPop) posPop.innerHTML = posHtml;
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
     const stockAll = filters.stock.length === 0;
-    let stockHtml = getSortButtonsHtml('stock') + `<div class="filter-option ${stockAll ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${stockAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
+    let stockHtml = window.getFilterSearchHtml('pop-stock') + getSortButtonsHtml('stock') + `<div class="filter-option ${stockAll ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${stockAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     stocks.forEach(s => { 
         const sel = filters.stock.includes(s);
         stockHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${sel ? '✔️ ' : ''}${s}</div>`; 
@@ -1665,7 +1665,7 @@ function setupFilterPopups() {
    const stock2fPop = document.getElementById('pop-stock2f');
     const stocks2f = [...new Set(originalData.map(d => (d.stock2f || '0').toString()))].sort((a, b) => Number(a) - Number(b));
     const stock2fAll = !filters.stock2f || filters.stock2f.length === 0;
-    let stock2fHtml = getSortButtonsHtml('stock2f') + `<div class="filter-option ${stock2fAll ? 'selected' : ''}" onclick="setFilter('stock2f', 'all')">${stock2fAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
+    let stock2fHtml = window.getFilterSearchHtml('pop-stock2f') + getSortButtonsHtml('stock2f') + `<div class="filter-option ${stock2fAll ? 'selected' : ''}" onclick="setFilter('stock2f', 'all')">${stock2fAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     stocks2f.forEach(s => { 
         const sel = filters.stock2f && filters.stock2f.includes(s);
         stock2fHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock2f', '${s}')">${sel ? '✔️ ' : ''}${s}</div>`; 
@@ -1742,7 +1742,7 @@ function setupFilterPopups() {
             });
             
             // 정렬 + 전체선택/해제
-            let html = getSortButtonsHtml(col) +
+            let html = window.getFilterSearchHtml(`pop-${col}`) + getSortButtonsHtml(col) +
                 `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
             
             // 빈칸 옵션 (있을 경우만)
@@ -1934,6 +1934,120 @@ window.toggleDateGroup = function(col, level, keyStr) {
     setupFilterPopups();
     applyFiltersAndSort();
     window.showFilterResetBtn();
+};
+// ★ v3.60: 필터 검색 기능
+// 각 팝업의 검색 쿼 저장 (팝업이 열려있는 동안만 유효)
+window._filterSearchQuery = window._filterSearchQuery || {};
+
+// 검색 쿼리 업데이트 및 리스트 재렌더링 트리거
+window.updateFilterSearch = function(popId, query) {
+    window._filterSearchQuery[popId] = query || '';
+    const pop = document.getElementById(popId);
+    if (!pop) return;
+    
+    // 일반 필터: filter-option 표시/숨김
+    // 날짜 필터: 계층 구조면 평탄화 토글
+    const isDateFilter = !!pop.querySelector('.date-node');
+    
+    if (isDateFilter) {
+        // 날짜 필터: 검색 시 평탄화 모드로 재렌더링
+        window.renderDateFilterFlat(popId, query);
+    } else {
+        // 일반 필터: 옵션 표시/숨김
+        const q = (query || '').toLowerCase();
+        pop.querySelectorAll('.filter-option').forEach(opt => {
+            // 정렬 버튼(⬆️/⬇️)과 전체선택/해제는 항상 표시
+            const text = opt.textContent || '';
+            if (text.includes('오름차순') || text.includes('내림차순') || text.includes('전체선택/해제')) {
+                opt.style.display = '';
+                return;
+            }
+            if (!q) {
+                opt.style.display = '';
+            } else {
+                // ✔️ 앞자리 마크 제외하고 비교
+                const cleanText = text.replace(/^✔️\s*/, '').toLowerCase();
+                opt.style.display = cleanText.includes(q) ? '' : 'none';
+            }
+        });
+        // 구분선은 항상 표시
+        pop.querySelectorAll('.filter-divider').forEach(d => { d.style.display = ''; });
+    }
+};
+
+// 날짜 필터 평탄화 렌더링 (검색 모드)
+window.renderDateFilterFlat = function(popId, query) {
+    const pop = document.getElementById(popId);
+    if (!pop) return;
+    
+    const q = (query || '').toLowerCase().trim();
+    
+    // 검색어가 없으면 원래 계층 구조 복구 = setupFilterPopups 재호출
+    if (!q) {
+        setupFilterPopups();
+        // 재호출 후 검색창 값도 복원
+        const input = pop.querySelector('.filter-search-input');
+        if (input) input.value = '';
+        return;
+    }
+    
+    // 기존 모든 날짜 수집 (data-label 속성 기반)
+    const allDates = [];
+    pop.querySelectorAll('.date-day-row .date-label').forEach(label => {
+        const d = label.textContent.trim();
+        if (d && !allDates.includes(d)) allDates.push(d);
+    });
+    
+    if (allDates.length === 0) return;
+    
+    // col 추출 (pop-cus_마지막배송일 → cus_마지막배송일)
+    const col = popId.replace(/^pop-/, '');
+    const arr = Array.isArray(filters[col]) ? filters[col] : [];
+    
+    // 평탄화 + 필터링
+    const matched = allDates.filter(d => d.toLowerCase().includes(q)).sort().reverse();
+    
+    // 검색창 부분만 남기고 나머지 제거 후 재생성
+    const searchWrap = pop.querySelector('.filter-search-wrap');
+    const searchHtml = searchWrap ? searchWrap.outerHTML : '';
+    
+    // 정렬 버튼 + 전체선택/해제 + 검색 결과
+    let html = searchHtml + getSortButtonsHtml(col);
+    
+    if (matched.length === 0) {
+        html += `<div class="filter-option" style="color:#999; font-style:italic; cursor:default;">검색 결과 없음</div>`;
+    } else {
+        matched.forEach(d => {
+            const sel = arr.includes(d);
+            const dayCheck = sel ? '✔️' : '☐';
+            html += `<div class="date-row date-day-row ${sel ? 'selected' : ''}" style="padding-left:15px;" onclick="event.stopPropagation(); setFilter('${col}', '${d}');">
+                <span class="date-check">${dayCheck}</span>
+                <span class="date-label">${d}</span>
+            </div>`;
+        });
+    }
+    
+    pop.innerHTML = html;
+    
+    // 검색창에 포커스 유지
+    const newInput = pop.querySelector('.filter-search-input');
+    if (newInput) {
+        newInput.value = query;
+        newInput.focus();
+        // 커서를 맨 끝으로
+        newInput.setSelectionRange(query.length, query.length);
+    }
+};
+
+// 검색창 HTML 생성 헬퍼
+window.getFilterSearchHtml = function(popId) {
+    const curQuery = (window._filterSearchQuery && window._filterSearchQuery[popId]) || '';
+    return `<div class="filter-search-wrap" onclick="event.stopPropagation();">
+        <input type="text" class="filter-search-input" placeholder="🔍 검색..." value="${curQuery}"
+               onkeydown="event.stopPropagation();"
+               oninput="event.stopPropagation(); updateFilterSearch('${popId}', this.value);">
+        ${curQuery ? `<button type="button" class="filter-search-clear" onclick="event.stopPropagation(); this.previousElementSibling.value=''; updateFilterSearch('${popId}', '');">✕</button>` : ''}
+    </div>`;
 };
 
 window.setCodeTagFilter = (mode) => {
