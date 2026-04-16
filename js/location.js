@@ -1712,7 +1712,7 @@ function setupFilterPopups() {
         });
 
         let html = getSortButtonsHtml(col) +
-            `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}전체보기</div>`;
+            `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
 
         // ★ 입고대기: 빈칸 옵션 추가
         if (key === '입고대기') {
@@ -1745,9 +1745,21 @@ window.setFilter = (type, value) => {
     if (!Array.isArray(filters[type])) filters[type] = [];
     if (value === 'all') {
         // ★ v3.57fix: 전체선택/해제 토글
-        // 현재 필터가 비어있으면(=전체 표시 중) → 아무것도 안 함 (이미 전체)
-        // 현재 필터에 값이 있으면 → 비움 (전체 해제 → 전체 표시)
-        filters[type] = [];
+        if (filters[type].length > 0) {
+            // 선택된 게 있으면 → 전체 해제 (빈 배열 = 전체 표시)
+            filters[type] = [];
+        } else {
+            // 아무것도 선택 안 된 상태면 → 전체 값 수집해서 모두 선택
+            const pop = document.getElementById('pop-' + type);
+            if (pop) {
+                const allVals = [];
+                pop.querySelectorAll('.filter-option[onclick]').forEach(opt => {
+                    const m = opt.getAttribute('onclick').match(/setFilter\([^,]+,\s*'([^']+)'\)/);
+                    if (m && m[1] !== 'all') allVals.push(m[1]);
+                });
+                filters[type] = allVals;
+            }
+        }
     } else {
         // 특수값 상호 배제: empty ↔ not-empty 는 하나만 선택
         if (value === 'empty' || value === 'not-empty') {
