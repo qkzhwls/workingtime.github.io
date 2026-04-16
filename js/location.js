@@ -1696,6 +1696,7 @@ function setupFilterPopups() {
             return;
         }
 
+        // ★ 값 수집
         const vals = [...new Set(originalData.map(d => {
             // ★ v3.57fix: 입고대기는 incomingTotalByCode 기준으로 필터값 수집
             if (key === '입고대기') {
@@ -1704,8 +1705,106 @@ function setupFilterPopups() {
                 return v;
             }
             return (d.rawData && d.rawData[key]) ? d.rawData[key].toString().trim() : '';
-        }))].filter(Boolean).sort((a, b) => {
-            // ★ 숫자 정렬 (문자열 "1", "10", "100" → 숫자 순)
+        }))].filter(Boolean);
+
+        // ★ v3.59: 날짜 필터 자동 감지 (70% 이상 YYYY-MM-DD 형식이면 날짜 필터)
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        const dateValsCount = vals.filter(v => dateRegex.test(v)).length;
+        const isDateFilter = vals.length > 0 && (dateValsCount / vals.length) >= 0.7;
+
+        if (isDateFilter) {
+            // 유효한 날짜만 필터링
+            const dateVals = vals.filter(v => dateRegex.test(v));
+            // 빈칸 여부 (rawData에서 빈 값인 행이 있는지 체크)
+            const hasEmpty = originalData.some(d => {
+                const v = (d.rawData && d.rawData[key]) ? d.rawData[key].toString().trim() : '';
+                return v === '';
+            });
+            
+            // 년/월별로 그룹핑
+            const byYear = {}; // { '2026': { '04': ['2026-04-15','2026-04-16'], '03': [...] }, ... }
+            dateVals.forEach(d => {
+                const [y, m] = d.split('-');
+                if (!byYear[y]) byYear[y] = {};
+                if (!byYear[y][m]) byYear[y][m] = [];
+                byYear[y][m].push(d);
+            });
+            
+            // 년도 최신순, 월 최신순, 일 최신순 정렬
+            const years = Object.keys(byYear).sort().reverse();
+            years.forEach(y => {
+                const months = Object.keys(byYear[y]).sort().reverse();
+                const sortedMonths = {};
+                months.forEach(m => {
+                    sortedMonths[m] = byYear[y][m].sort().reverse();
+                });
+                byYear[y] = sortedMonths;
+            });
+            
+            // 정렬 + 전체선택/해제
+            let html = getSortButtonsHtml(col) +
+                `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
+            
+            // 빈칸 옵션 (있을 경우만)
+            if (hasEmpty) {
+                const isE = arr.includes('empty');
+                html += `<div class="filter-option ${isE ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${isE ? '✔️ ' : ''}📋 빈칸</div>`;
+            }
+            
+            // 년도 계층 구조
+            years.forEach(y => {
+                const yearDates = [];
+                Object.keys(byYear[y]).forEach(m => { yearDates.push(...byYear[y][m]); });
+                const yearAllSelected = yearDates.every(d => arr.includes(d));
+                const yearPartialSelected = !yearAllSelected && yearDates.some(d => arr.includes(d));
+                const yearCheck = yearAllSelected ? '✔️' : (yearPartialSelected ? '🟦' : '☐');
+                
+                html += `<div class="date-node date-year" data-col="${col}" data-year="${y}">
+                    <div class="date-row date-year-row">
+                        <span class="date-toggle" onclick="event.stopPropagation(); window.toggleDateNode(this);">▶</span>
+                        <span class="date-check" onclick="event.stopPropagation(); window.toggleDateGroup('${col}', 'year', '${y}');">${yearCheck}</span>
+                        <span class="date-label">${y}</span>
+                    </div>
+                    <div class="date-children" style="display:none;">`;
+                
+                // 월 계층
+                Object.keys(byYear[y]).forEach(m => {
+                    const monthDates = byYear[y][m];
+                    const monthAllSelected = monthDates.every(d => arr.includes(d));
+                    const monthPartialSelected = !monthAllSelected && monthDates.some(d => arr.includes(d));
+                    const monthCheck = monthAllSelected ? '✔️' : (monthPartialSelected ? '🟦' : '☐');
+                    
+                    html += `<div class="date-node date-month" data-col="${col}" data-year="${y}" data-month="${m}">
+                        <div class="date-row date-month-row">
+                            <span class="date-toggle" onclick="event.stopPropagation(); window.toggleDateNode(this);">▶</span>
+                            <span class="date-check" onclick="event.stopPropagation(); window.toggleDateGroup('${col}', 'month', '${y}-${m}');">${monthCheck}</span>
+                            <span class="date-label">${m}월</span>
+                        </div>
+                        <div class="date-children" style="display:none;">`;
+                    
+                    // 일 체크박스
+                    monthDates.forEach(d => {
+                        const sel = arr.includes(d);
+                        const dayCheck = sel ? '✔️' : '☐';
+                        html += `<div class="date-row date-day-row ${sel ? 'selected' : ''}" onclick="event.stopPropagation(); setFilter('${col}', '${d}');">
+                            <span class="date-check">${dayCheck}</span>
+                            <span class="date-label">${d}</span>
+                        </div>`;
+                    });
+                    
+                    html += `</div></div>`;
+                });
+                
+                html += `</div></div>`;
+            });
+            
+            pop.innerHTML = html;
+            return;
+        }
+
+        // ★ 일반 필터 (기존 로직)
+        const normalVals = vals.sort((a, b) => {
+            // 숫자 정렬 (문자열 "1", "10", "100" → 숫자 순)
             const na = Number(a), nb = Number(b);
             if (!isNaN(na) && !isNaN(nb)) return na - nb;
             return a.localeCompare(b);
@@ -1720,7 +1819,7 @@ function setupFilterPopups() {
             html += `<div class="filter-option ${isE ? 'selected' : ''}" onclick="setFilter('${col}', 'empty')">${isE ? '✔️ ' : ''}빈칸</div>`;
         }
 
-        vals.forEach(v => {
+        normalVals.forEach(v => {
             const escaped = v.replace(/'/g, "\\'");
             const sel = arr.includes(v);
             html += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('${col}', '${escaped}')">${sel ? '✔️ ' : ''}${v}</div>`;
@@ -1776,6 +1875,64 @@ window.setFilter = (type, value) => {
     setupFilterPopups(); 
     applyFiltersAndSort(); 
     // ★ 다중 선택 지원을 위해 팝업 자동 닫힘 제거 (사용자가 원할 때 닫음)
+    window.showFilterResetBtn();
+};
+
+// ★ v3.59: 날짜 계층 필터 - 펼침/접힘 토글
+window.toggleDateNode = function(toggleEl) {
+    const node = toggleEl.closest('.date-node');
+    if (!node) return;
+    const children = node.querySelector('.date-children');
+    if (!children) return;
+    const isOpen = children.style.display === 'block';
+    children.style.display = isOpen ? 'none' : 'block';
+    toggleEl.textContent = isOpen ? '▶' : '▼';
+};
+
+// ★ v3.59: 날짜 그룹(년/월) 단위 토글 선택/해제
+window.toggleDateGroup = function(col, level, keyStr) {
+    if (!Array.isArray(filters[col])) filters[col] = [];
+    
+    // 해당 그룹에 속하는 모든 날짜 수집
+    const pop = document.getElementById('pop-' + col);
+    if (!pop) return;
+    
+    let targetDates = [];
+    if (level === 'year') {
+        // 해당 년도의 모든 일자
+        const yearNode = pop.querySelector(`.date-year[data-year="${keyStr}"]`);
+        if (yearNode) {
+            yearNode.querySelectorAll('.date-day-row').forEach(row => {
+                const label = row.querySelector('.date-label');
+                if (label) targetDates.push(label.textContent.trim());
+            });
+        }
+    } else if (level === 'month') {
+        // 'YYYY-MM' 형식
+        const [y, m] = keyStr.split('-');
+        const monthNode = pop.querySelector(`.date-month[data-year="${y}"][data-month="${m}"]`);
+        if (monthNode) {
+            monthNode.querySelectorAll('.date-day-row').forEach(row => {
+                const label = row.querySelector('.date-label');
+                if (label) targetDates.push(label.textContent.trim());
+            });
+        }
+    }
+    
+    if (targetDates.length === 0) return;
+    
+    // 전부 선택되어 있으면 → 전부 해제, 아니면 → 전부 선택
+    const allSelected = targetDates.every(d => filters[col].includes(d));
+    if (allSelected) {
+        filters[col] = filters[col].filter(v => !targetDates.includes(v));
+    } else {
+        targetDates.forEach(d => {
+            if (!filters[col].includes(d)) filters[col].push(d);
+        });
+    }
+    
+    setupFilterPopups();
+    applyFiltersAndSort();
     window.showFilterResetBtn();
 };
 
