@@ -234,6 +234,29 @@
             border-radius: 0 0 4px 4px;
             border-top: none;
         }
+        /* v3.59: 날짜 계층 필터 */
+        .date-node { font-size: 13px; }
+        .date-row {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 10px; cursor: pointer;
+            user-select: none;
+        }
+        .date-row:hover { background: #f0f2ff; color: var(--primary); }
+        .date-year-row { font-weight: bold; color: #333; }
+        .date-month-row { padding-left: 25px; font-weight: 600; color: #555; }
+        .date-day-row { padding-left: 45px; color: #666; }
+        .date-day-row.selected { background: #eef1ff; color: var(--primary); font-weight: bold; }
+        .date-toggle {
+            display: inline-block; width: 14px; text-align: center;
+            font-size: 10px; color: #999;
+        }
+        .date-toggle:hover { color: var(--primary); }
+        .date-check {
+            display: inline-block; width: 18px; text-align: center;
+            font-size: 12px;
+        }
+        .date-label { flex: 1; }
+        .date-children { background: #fafafa; }
     </style>    
 </head>
 <body onclick="closeAllPopups()">
@@ -295,7 +318,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.58 (작업메뉴 툴팁)</div>
+            <div class="version-badge">🚀 Ver 3.59 (날짜 계층 필터)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
