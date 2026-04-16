@@ -257,6 +257,44 @@
         }
         .date-label { flex: 1; }
         .date-children { background: #fafafa; }
+        /* v3.60: 필터 검색창 */
+        .filter-search-wrap {
+            display: flex; align-items: center;
+            padding: 8px 10px 6px 10px;
+            background: #fafafa;
+            border-bottom: 1px solid #eee;
+            position: sticky; top: 0;
+            z-index: 5;
+        }
+        .filter-search-input {
+            flex: 1;
+            padding: 5px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .filter-search-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(61, 90, 254, 0.15);
+        }
+        .filter-search-clear {
+            margin-left: 5px;
+            padding: 3px 7px;
+            background: #eceff1;
+            color: #555;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .filter-search-clear:hover {
+            background: #ffcdd2;
+            color: #c62828;
+            border-color: #ef9a9a;
+        }
     </style>    
 </head>
 <body onclick="closeAllPopups()">
@@ -318,7 +356,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.59 (날짜 계층 필터)</div>
+            <div class="version-badge">🚀 Ver 3.60 (필터 검색)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -598,6 +636,12 @@
             const isVisible = pop.style.display === 'block';
             closeAllPopups();
             if (!isVisible && pop) {
+                // ★ v3.60: 팝업을 새로 열 때는 검색 쿼리 초기화
+                if (window._filterSearchQuery) window._filterSearchQuery[id] = '';
+                // 검색창이 있으면 값 비우기
+                const input = pop.querySelector('.filter-search-input');
+                if (input) input.value = '';
+                
                 const rect = e.target.getBoundingClientRect();
                 pop.style.display = 'block';
                 pop.style.top = (rect.bottom + window.scrollY + 5) + 'px';
