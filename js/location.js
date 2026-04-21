@@ -1810,7 +1810,7 @@ function setupFilterPopups() {
             return a.localeCompare(b);
         });
 
-        let html = getSortButtonsHtml(col) +
+        let html = window.getFilterSearchHtml(`pop-${col}`) + getSortButtonsHtml(col) +
             `<div class="filter-option ${curAll ? 'selected' : ''}" onclick="setFilter('${col}', 'all')">${curAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
 
         // ★ 입고대기: 빈칸 옵션 추가
