@@ -2602,8 +2602,16 @@ async function updateDatabaseA(rows, mode = 'daily') {
                 
                 if (cleanLocId) { 
                     if (!existingLocMap[cleanLocId]) {
-                        skipCount++;
-                        continue; 
+                        // ★ permanent 모드: 낯선 로케이션도 새로 생성 허용
+                        if (mode === 'permanent') {
+                            existingLocMap[cleanLocId] = { 
+                                id: cleanLocId, dong: '', pos: '', code: '', name: '', 
+                                option: '', stock: '0', stock2f: '0' 
+                            };
+                        } else {
+                            skipCount++;
+                            continue;
+                        }
                     }
 
                     const zoneDocId = getZoneDocId(cleanLocId);
