@@ -3559,6 +3559,3 @@ function renderCorridor(idx) {
         </div>
     `;
 }
-
-window.addEventListener('keydown', function(e) { if (e.key === 'F5' || (e.ctrlKey && (e.key === 'r' || e.key === 'R'))) { e.preventDefault(); alert("🚨 실시간 동기화 중입니다."); } });
-window.addEventListener('beforeunload', function(e) { e.preventDefault(); e.returnValue = ''; });
