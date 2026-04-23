@@ -147,7 +147,12 @@ async function fetchCSV(url) {
     let headerIdx = -1, headers = [];
     for (let i = 0; i < Math.min(20, rawData.length); i++) {
         const cl = rawData[i].map(h => cleanKey(h));
-        if (cl.includes('상품코드')) { headerIdx = i; headers = cl; break; }
+        // ★ 상품코드 또는 어드민상품코드 둘 다 인식
+        if (cl.includes('상품코드') || cl.includes('어드민상품코드')) { 
+            headerIdx = i; 
+            headers = cl; 
+            break; 
+        }
     }
     const result = [];
     for (let i = headerIdx + 1; i < rawData.length; i++) {
