@@ -3402,7 +3402,7 @@ function renderCorridor(idx) {
             box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:99999;display:none;" class="sv-tip">
             <div style="font-weight:bold;color:#3d5afe;">${loc.id}</div>
             <div style="color:#555;">${status}</div>
-            ${hasContent(loc) ? `<div style="color:#333;"><b>상품명</b>: ${loc.name || '-'}</div><div style="color:#1976d2;"><b>재고</b>: ${loc.stock || '0'}개</div>` : ''}
+            ${hasContent(loc) ? `<div style="color:#333;"><b>상품명</b>: ${loc.name || '-'}</div>${loc.option ? `<div style="color:#666;"><b>옵션</b>: ${loc.option}</div>` : ''}<div style="color:#1976d2;"><b>재고</b>: ${loc.stock || '0'}개</div>` : ''}
             ${isPreAssigned ? `<div style="color:#bf360c;"><b>선지정코드</b>: ${loc.preAssignedCode || '-'}</div>` : ''}
         </div>`;
     }
