@@ -168,6 +168,11 @@
             overflow: hidden;
         }
         .info-tip.tip-open .info-tip-content { display: block; }
+        /* 툴팁이 열렸을 때 같은 페이지의 다른 ℹ️ 아이콘들을 흐리게 */
+        body:has(.info-tip.tip-open) .info-tip:not(.tip-open) {
+            opacity: 0.15;
+            pointer-events: none;
+        }
         .info-tip b { color: #80deea; }
         
         /* v3.54: 툴팁 탭 */
