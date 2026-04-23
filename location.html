@@ -365,18 +365,18 @@
                 <div class="upload-menu" id="main-tools-menu" onclick="event.stopPropagation()" style="width: 270px;">
     
                     <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold;">📊 기본 데이터 관리</div>
-                    <label onclick="document.getElementById('excel-upload-a').click(); return false;">
+                    <label for="excel-upload-a">
                         <span style="color:var(--primary);">📥 로케이션 일일 최신화 (재고업뎃)<span class="info-tip" data-tip-key="menu-daily" onclick="event.stopPropagation();">i<span class="info-tip-content">📥 <b>일일 최신화</b><br>재고관리 시스템에서 추출한 일일 재고/상품 엑셀 파일을 업로드합니다.<br><br>기존 데이터는 모두 비워지고 엑셀의 최신 재고 정보로 덮어씁니다.<br><br>※ 선지정된 자리는 보호됩니다.</span></span></span>
                         <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
     
                     <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">💡 로케이션 변경 추천</div>
     
-                    <label style="border-bottom: 1px solid #eee;" onclick="document.getElementById('excel-upload-zikjin').click(); return false;">
+                   <label style="border-bottom: 1px solid #eee;" for="excel-upload-zikjin">
                         <span style="color:#1976d2;">📂 1-1. 직진배송 데이터 업로드<span class="info-tip" data-tip-key="menu-zikjin" onclick="event.stopPropagation();">i<span class="info-tip-content">📂 <b>직진배송 데이터</b><br>직진배송 엑셀 파일을 업로드합니다.<br><br>로케이션 변경 추천 점수 계산의 <b>'직진배송'</b> 항목에 사용됩니다.</span></span></span>
                         <input type="file" id="excel-upload-zikjin" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
-                    <label style="border-bottom: 1px solid #eee;" onclick="document.getElementById('excel-upload-weekly').click(); return false;">
+                    <label style="border-bottom: 1px solid #eee;" for="excel-upload-weekly">
                         <span style="color:#d32f2f;">📂 1-2. 주차별 데이터 업로드<span class="info-tip" data-tip-key="menu-weekly" onclick="event.stopPropagation();">i<span class="info-tip-content">📂 <b>주차별 데이터</b><br>주차별 배송/발주 엑셀 파일을 업로드합니다.<br><br>점수 계산의 <b>'주차별'</b> 및 <b>'상승세'</b> 항목에 사용됩니다.</span></span></span>
                         <input type="file" id="excel-upload-weekly" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
