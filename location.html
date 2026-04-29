@@ -29,7 +29,7 @@
 
         .header-actions { display: flex; gap: 10px; align-items: center; }
         
-        /* ✨ 버전 뱃지 업데이트 (Ver 3.80) */
+        /* ✨ 버전 뱃지 스타일 업데이트 */
         .version-badge { background: #e0f7fa; color: #006064; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; border: 1px solid #80deea; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
 
         .upload-dropdown { position: relative; display: inline-block; }
@@ -91,246 +91,587 @@
         .filter-popup { display: none; position: absolute; background: white; border: 1px solid #999; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 9999; min-width: 160px; max-height: 350px; overflow-y: auto; text-align: left; padding: 8px 0; }
         .filter-option { padding: 8px 15px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
         .filter-option:hover { background: #f0f2ff; color: var(--primary); }
-        .filter-option.selected { font-weight: bold; color: var(--primary); background: #f0f4ff; }
-        .filter-divider { height: 1px; background: #eee; margin: 5px 0; }
-        .filter-search-box { padding: 8px 12px; position: sticky; top: 0; background: white; border-bottom: 1px solid #eee; z-index: 5; }
-        .filter-search-box input { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 13px; }
+        .filter-option.selected { font-weight: bold; color: var(--primary); background: #eef1ff; }
+        .filter-divider { height: 1px; background: #ddd; margin: 4px 0; }
 
-        .info-tip { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; background: #999; color: white; border-radius: 50%; font-size: 10px; font-style: normal; cursor: pointer; margin-left: 5px; vertical-align: middle; position: relative; transition: background 0.2s; }
-        .info-tip:hover { background: var(--primary); }
-        .info-tip.tip-open { background: var(--primary); z-index: 10002; }
-        .info-tip-content { display: none; position: fixed; background: white; border: 1px solid #333; padding: 12px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.4); font-size: 13px; line-height: 1.5; color: #333; min-width: 250px; max-width: 450px; z-index: 10003; white-space: normal; text-align: left; }
-        .info-tip.tip-open .info-tip-content { display: block; }
-        .info-tip.tt-editing { background: #f44336 !important; }
-        body:has(.info-tip.tip-open) .info-tip:not(.tip-open) { opacity: 0.15; }
+        .checkbox-cell { width: 40px; }
+        .loc-check { cursor: pointer; width: 16px; height: 16px; }
 
-        .pre-assign-badge { display: inline-block; padding: 2px 6px; background: #e8f5e9; color: #2e7d32; border: 1px solid #81c784; border-radius: 4px; font-size: 11px; font-weight: bold; margin-left: 5px; }
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: white; padding: 25px; border-radius: 10px; width: 400px;
+            max-height: 85vh; overflow-y: auto;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .modal-header { font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #333; }
+        .modal-body { display: flex; flex-direction: column; gap: 12px; }
+        .modal-body label { font-size: 13px; font-weight: bold; color: #555; margin-bottom: -5px; }
+        .modal-body input { padding: 8px 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        .modal-body input[readonly] { background: #eee; color: #666; cursor: not-allowed; }
+        .modal-footer { margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px; }
+        .btn-modal-save { padding: 8px 16px; background: var(--primary); color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn-modal-cancel { padding: 8px 16px; background: #888; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
 
-        #view-map { position: relative; overflow: auto; background: #f0f0f0; padding: 20px; box-sizing: border-box; height: calc(100vh - 120px); border-radius: 12px; margin: 0 20px 10px 20px; border: 1px solid #ccc; display: none; }
-        .map-section { display: flex; flex-direction: column; gap: 25px; align-items: center; }
-        .map-row { display: flex; gap: 40px; justify-content: center; }
-        .rack-grid { display: grid; gap: 2px; background: #ddd; border: 1px solid #bbb; padding: 2px; height: fit-content; }
-        .cell { width: 32px; height: 24px; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; cursor: pointer; position: relative; transition: 0.1s; }
-        .cell:hover { filter: brightness(0.9); transform: scale(1.05); z-index: 5; }
-        .cell.occupied { background: #c8e6c9; color: #1b5e20; border: 1px solid #66bb6a; }
-        .cell.empty { background: #f0f0f0; color: #999; border: 1px solid #ccc; }
-        .cell.reserved { background: #fff9c4; color: #fbc02d; border: 1px solid #fdd835; }
-        .cell.preassigned { background: #e1f5fe; color: #0288d1; border: 1px solid #4fc3f7; }
+        .loc-copy-cell { cursor: copy; font-weight: bold; font-size: 15px; transition: color 0.2s; }
+        .loc-copy-cell:hover { color: var(--primary); text-decoration: underline; }
+        .badge-reserved { display: inline-block; background: #ff9800; color: white; font-weight: bold; font-size: 11px; padding: 3px 6px; border-radius: 4px; margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .badge-incoming { display: inline-block; background: #e65100; color: white; font-weight: bold; font-size: 11px; padding: 3px 6px; border-radius: 4px; margin-top: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         
-        .pos-label { position: absolute; left: -25px; width: 20px; text-align: center; font-size: 11px; color: #777; font-weight: bold; }
-        .num-label { position: absolute; top: -18px; width: 100%; text-align: center; font-size: 10px; color: #888; }
+        #toast { visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center; border-radius: 8px; padding: 12px; position: fixed; z-index: 10001; left: 50%; bottom: 30px; transform: translateX(-50%); font-size: 14px; opacity: 0; transition: opacity 0.3s, bottom 0.3s; }
+        #toast.show { visibility: visible; opacity: 1; bottom: 50px; }
 
-        #loading-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.85); display:none; flex-direction:column; align-items:center; justify-content:center; z-index:99999; font-weight:bold; }
-        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--primary); border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 10px; }
+        .loading-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75); z-index: 999999; flex-direction: column; justify-content: center; align-items: center; color: white; backdrop-filter: blur(3px); }
+        .spinner { border: 6px solid rgba(255,255,255,0.3); border-top: 6px solid var(--primary); border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; margin-bottom: 20px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loading-text { font-size: 18px; font-weight: bold; letter-spacing: 1px; }
+        .loading-subtext { font-size: 13px; color: #ccc; margin-top: 10px; }
 
-        #incoming-sidebar { position: fixed; right: -420px; top: 0; width: 400px; height: 100%; background: white; box-shadow: -4px 0 15px rgba(0,0,0,0.1); z-index: 10005; transition: 0.3s ease-out; display: flex; flex-direction: column; }
-        #incoming-sidebar.open { right: 0; }
-        .sidebar-header { padding: 20px; background: #333; color: white; display: flex; justify-content: space-between; align-items: center; }
-        .sidebar-content { flex: 1; overflow-y: auto; padding: 15px; }
-        .incoming-item { background: #f8f9fa; border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 10px; cursor: pointer; transition: 0.2s; }
-        .incoming-item:hover { border-color: var(--primary); background: #f0f4ff; }
-        .incoming-item.selected { border-color: var(--primary); background: #eef1ff; box-shadow: 0 0 0 2px var(--primary); }
-
-        .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #333; color: white; padding: 10px 25px; border-radius: 30px; font-size: 14px; z-index: 100000; display: none; animation: fadeInOut 2.5s forwards; }
-        @keyframes fadeInOut { 0% { opacity:0; transform: translate(-50%, 20px); } 15% { opacity:1; transform: translate(-50%, 0); } 85% { opacity:1; transform: translate(-50%, 0); } 100% { opacity:0; transform: translate(-50%, -20px); } }
-
-        .btn-sync-incoming { padding: 6px 12px; background: #4caf50; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; display: flex; align-items: center; gap: 5px; }
-        .btn-sync-incoming:hover { background: #43a047; }
+        .map-legend { display:inline-flex; align-items:center; padding:3px 10px; border-radius:4px; font-size:12px; font-weight:bold; color:#333; }
+        .incoming-sidebar { position: fixed; right: -360px; top: 0; width: 340px; height: 100vh; background: #fafafa; box-shadow: -4px 0 15px rgba(0,0,0,0.15); z-index: 9999; transition: right 0.3s ease; display: flex; flex-direction: column; }
+        .incoming-sidebar.open { right: 0; }
+        .incoming-header { background: #e65100; color: white; padding: 15px 20px; font-weight: bold; font-size: 16px; display: flex; justify-content: space-between; align-items: center; }
         
-        .incoming-badge { background: #ff5252; color: white; padding: 2px 6px; border-radius: 10px; font-size: 11px; font-weight: bold; vertical-align: middle; margin-left: 4px; }
-    </style>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+        .incoming-filters { padding: 15px; background: #f5f5f5; border-bottom: 1px solid #ddd; display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+        .incoming-filters > div { display: flex; justify-content: space-between; align-items: center; }
+        .incoming-filters select { padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; width: 160px; background: white; font-weight:bold; color:#333; }
+        
+        .incoming-list { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .incoming-item { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 12px; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .incoming-item:hover { border-color: #e65100; transform: translateY(-2px); box-shadow: 0 4px 8px rgba(230,81,0,0.15); }
+        
+        .pre-assign-banner { display: none; position: fixed; top: 15px; left: 50%; transform: translateX(-50%); background: #e65100; color: white; padding: 12px 25px; border-radius: 30px; font-weight: bold; z-index: 10002; box-shadow: 0 4px 15px rgba(0,0,0,0.3); align-items: center; gap: 20px; font-size: 15px; }
+        .pre-assign-banner button { background: white; color: #e65100; border: none; padding: 6px 15px; border-radius: 20px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        .pre-assign-banner button:hover { background: #ffe0b2; }
+        /* ℹ️ 호버 툴팁 공통 스타일 */
+        .info-tip { 
+            position: relative; display: inline-block; 
+            cursor: help; margin-left: 4px; 
+            width: 16px; height: 16px; line-height: 16px; 
+            text-align: center; border-radius: 50%; 
+            background: #b0bec5; color: white; 
+            font-size: 11px; font-weight: bold; 
+            font-style: normal; vertical-align: middle;
+        }
+        .info-tip:hover { background: var(--primary); }
+        .info-tip .info-tip-content {
+            display: none; position: fixed; 
+            background: #263238; color: white; 
+            padding: 0; border-radius: 8px; 
+            font-size: 12px; font-weight: normal; font-style: normal;
+            line-height: 1.6; text-align: left;
+            white-space: normal; width: 320px; max-width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 9999999; pointer-events: auto;
+            overflow: hidden;
+        }
+        .info-tip.tip-open .info-tip-content { display: block; }
+        /* 툴팁이 열렸을 때 같은 페이지의 다른 ℹ️ 아이콘들을 흐리게 */
+        body:has(.info-tip.tip-open) .info-tip:not(.tip-open) {
+            opacity: 0.15;
+            pointer-events: none;
+        }
+        .info-tip b { color: #80deea; }
+        
+        /* v3.54: 툴팁 탭 */
+        .tt-tabs { display: flex; background: #1a2327; border-bottom: 1px solid #37474f; }
+        .tt-tab-btn { flex: 1; padding: 8px; background: none; border: none; color: #90a4ae; font-size: 12px; font-weight: bold; cursor: pointer; transition: 0.15s; }
+        .tt-tab-btn:hover { background: #263238; color: #80deea; }
+        .tt-tab-btn.active { background: #263238; color: #80deea; border-bottom: 2px solid #80deea; }
+        .tt-tab-content { padding: 10px 14px; min-height: 60px; max-height: 280px; overflow-y: auto; }
+        .tt-tab-content.hidden { display: none; }
+        .tt-empty { color: #90a4ae; font-style: italic; text-align: center; padding: 20px 0; }
+        .tt-btn-edit { display: block; margin: 10px auto 0; padding: 5px 14px; background: #3d5afe; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        .tt-btn-edit:hover { background: #5870ff; }
+        .tt-editor textarea { width: 100%; min-height: 120px; padding: 8px; background: #1a2327; color: white; border: 1px solid #455a64; border-radius: 4px; font-family: monospace; font-size: 11px; box-sizing: border-box; resize: vertical; }
+        .tt-editor-btns { display: flex; gap: 6px; margin-top: 8px; justify-content: flex-end; }
+        .tt-btn-save { padding: 5px 12px; background: #4caf50; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        .tt-btn-cancel { padding: 5px 12px; background: #78909c; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        /* v3.55: 설명 탭 편집 + 복원 + 편집 모드 표시 */
+        .tt-view-wrap { display: flex; flex-direction: column; gap: 8px; }
+        .tt-view-body { min-height: 40px; }
+        .tt-btn-row { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+        .tt-btn-reset { padding: 5px 10px; background: #546e7a; color: white; border: none; border-radius: 4px; font-size: 11px; font-weight: bold; cursor: pointer; }
+        .tt-btn-reset:hover { background: #78909c; }
+        .tt-editor-label { font-size: 11px; color: #80deea; font-weight: bold; margin-bottom: 4px; }
+        
+        /* 편집 중 시각 표시 (테두리 강조) */
+        .info-tip.tt-editing .info-tip-content {
+            border: 2px solid #80deea;
+            box-shadow: 0 0 20px rgba(128, 222, 234, 0.5), 0 4px 12px rgba(0,0,0,0.5);
+        }
+        /* v3.56: 서식 툴바 */
+        .tt-toolbar {
+            display: flex; gap: 4px; padding: 6px; background: #1a2327;
+            border: 1px solid #455a64; border-radius: 4px 4px 0 0;
+            border-bottom: none; margin-bottom: 0;
+        }
+        .tt-tb-btn {
+            padding: 4px 9px; background: #37474f; color: white;
+            border: 1px solid #546e7a; border-radius: 3px;
+            font-size: 12px; font-weight: bold; cursor: pointer;
+            min-width: 28px; transition: 0.15s;
+        }
+        .tt-tb-btn:hover { background: #546e7a; color: #80deea; }
+        .tt-tb-color-wrap { position: relative; display: inline-block; }
+        .tt-tb-palette {
+            display: none; position: absolute; top: 100%; left: 0;
+            background: #263238; border: 1px solid #546e7a; border-radius: 4px;
+            padding: 5px; margin-top: 3px; z-index: 10;
+            grid-template-columns: repeat(6, 1fr); gap: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+        .tt-tb-palette.open { display: grid; }
+        .tt-color-swatch {
+            width: 20px; height: 20px; border: 1px solid #455a64;
+            border-radius: 3px; cursor: pointer; padding: 0;
+            transition: transform 0.1s;
+        }
+        .tt-color-swatch:hover { transform: scale(1.2); border-color: white; }
+        .tt-color-swatch.tt-color-none {
+            background: white; color: #333; font-size: 11px; font-weight: bold;
+            display: flex; align-items: center; justify-content: center;
+        }
+        /* 툴바 바로 아래 textarea는 위쪽 border-radius 제거 */
+        .tt-editor .tt-toolbar + .tt-editor-textarea {
+            border-radius: 0 0 4px 4px;
+            border-top: none;
+        }
+        /* v3.59: 날짜 계층 필터 */
+        .date-node { font-size: 13px; }
+        .date-row {
+            display: flex; align-items: center; gap: 6px;
+            padding: 5px 10px; cursor: pointer;
+            user-select: none;
+        }
+        .date-row:hover { background: #f0f2ff; color: var(--primary); }
+        .date-year-row { font-weight: bold; color: #333; }
+        .date-month-row { padding-left: 25px; font-weight: 600; color: #555; }
+        .date-day-row { padding-left: 45px; color: #666; }
+        .date-day-row.selected { background: #eef1ff; color: var(--primary); font-weight: bold; }
+        .date-toggle {
+            display: inline-block; width: 14px; text-align: center;
+            font-size: 10px; color: #999;
+        }
+        .date-toggle:hover { color: var(--primary); }
+        .date-check {
+            display: inline-block; width: 18px; text-align: center;
+            font-size: 12px;
+        }
+        .date-label { flex: 1; }
+        .date-children { background: #fafafa; }
+        /* v3.60: 필터 검색창 */
+        .filter-search-wrap {
+            display: flex; align-items: center;
+            padding: 8px 10px 6px 10px;
+            background: #fafafa;
+            border-bottom: 1px solid #eee;
+            position: sticky; top: 0;
+            z-index: 5;
+        }
+        .filter-search-input {
+            flex: 1;
+            padding: 5px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .filter-search-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(61, 90, 254, 0.15);
+        }
+        .filter-search-clear {
+            margin-left: 5px;
+            padding: 3px 7px;
+            background: #eceff1;
+            color: #555;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-size: 11px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .filter-search-clear:hover {
+            background: #ffcdd2;
+            color: #c62828;
+            border-color: #ef9a9a;
+        }
+    </style>    
 </head>
 <body onclick="closeAllPopups()">
-
-    <div id="loading-overlay">
-        <div class="spinner"></div>
-        <div id="loading-text">데이터를 불러오는 중...</div>
+    <div id="pre-assign-banner" class="pre-assign-banner">
+        <span>📦 선지정 모드: <span id="pre-assign-banner-text" style="color:#ffe0b2; text-decoration:underline;"></span> 지정할 빈칸을 클릭하세요!</span>
+        <button onclick="cancelPreAssignMode()">작업 취소</button>
     </div>
 
-    <div id="toast-container" class="toast"></div>
-
-    <header class="controls-header">
-        <div style="display:flex; align-items:center; gap:15px;">
-            <div class="tabs">
-                <button class="tab-btn active" onclick="switchView('list')">📋 리스트 보기</button>
-                <button class="tab-btn" onclick="switchView('map')">🗺️ 도면 보기</button>
+    <div id="incoming-sidebar" class="incoming-sidebar">
+        <div class="incoming-header">
+            <span>📦 입고 대기 목록 (신규)</span>
+            <button onclick="toggleIncomingSidebar()" style="background:none; border:none; color:white; font-size:24px; cursor:pointer;">×</button>
+        </div>
+        <div style="display:flex; justify-content:space-between; padding: 10px 15px; background: #fff; border-bottom: 1px solid #ddd; gap:10px;">
+            <button onclick="syncIncomingData()" style="flex:1; padding:6px 10px; background:#ff9800; color:white; border:none; border-radius:4px; font-size:12px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">🔄 시트 동기화</button>
+            <button onclick="openSheetModal(event)" style="flex:1; padding:6px 10px; background:#607d8b; color:white; border:none; border-radius:4px; font-size:12px; cursor:pointer; font-weight:bold; box-shadow:0 2px 4px rgba(0,0,0,0.1);">⚙️ 링크 설정</button>
+        </div>
+        <div style="padding:10px 15px; background:#fff3e0; border-bottom:1px solid #ffe0b2; font-size:11px; color:#e65100; line-height:1.5;">
+            <div style="font-weight:bold; margin-bottom:4px;">📌 목록 표시 조건</div>
+            <div style="color:#bf360c; font-weight:normal;">
+                ✅ 미입고수량이 <b>1개 이상</b>인 상품<br>
+                ✅ 도착예상일(또는 표시날짜)이 <b>오늘 이후</b>인 상품<br>
+                ✅ 아직 <b>로케이션 배정 전</b>인 상품<br>
+                ✅ <b>선지정되지 않은</b> 상품
             </div>
-            <div class="version-badge" id="version-badge">Ver 3.80 (툴팁 클릭형/상품코드 지정값 필터)</div>
+            <div style="margin-top:5px; padding-top:5px; border-top:1px dashed #ffb74d; color:#999; font-weight:normal; font-size:10px;">
+                ※ 위 조건에 해당하는 상품만 자동으로 표시됩니다.
+            </div>
+        </div>
+        <div class="incoming-filters">
+            <div>
+                <b>📂 분류</b>
+                <select id="filter-source" onchange="renderIncomingQueue()">
+                    <option value="all">전체보기 (제작+사입)</option>
+                    <option value="제작">제작 (오더리스트)</option>
+                    <option value="사입">사입 (사입리스트)</option>
+                </select>
+            </div>
+            <div>
+                <b>🔄 정렬</b>
+                <select id="sort-incoming" onchange="renderIncomingQueue()">
+                    <option value="qty-desc">미입고수량 많은 순</option>
+                    <option value="date-asc">출고예상일 빠른 순</option>
+                </select>
+            </div>
+        </div>
+        <div id="incoming-list" class="incoming-list">
+            </div>
+    </div>
+
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loading-text">데이터 동기화 중입니다...</div>
+        <div class="loading-subtext">창을 닫거나 새로고침하지 마세요.</div>
+    </div>
+
+    <div id="firebase-guide" style="display:none;"><pre>match /Locations/{document=**} { allow read, write: if true; }</pre></div>
+
+    <div class="controls-header">
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchView('list')">데이터 리스트</button>
+            <button class="tab-btn" onclick="switchView('map')">도면 보기</button>
+            
             <div class="usage-container">
-                <button class="btn-usage" onclick="toggleUsagePopup(event)">📊 창고 사용률</button>
-                <div id="usage-popup" class="usage-popup"></div>
+                <button class="btn-usage" onclick="toggleUsagePopup(event)">📊 사용률</button>
+                <div class="usage-popup" id="usage-popup" onclick="event.stopPropagation()"></div>
             </div>
         </div>
         
         <div class="header-actions">
-            <button class="btn-sync-incoming" onclick="syncIncomingData()">🔄 입고예정 동기화</button>
+            <div class="version-badge">🚀 Ver 3.60 (필터 검색)</div>
+            
+            <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
+
             <div class="upload-dropdown">
-                <button class="btn-main-upload" onclick="toggleUploadMenu(event)">📤 데이터 업로드 ▼</button>
-                <div id="upload-menu" class="upload-menu">
-                    <label>📄 3층 로케이션 (통합) <input type="file" onchange="handleFileUpload(event, 'total')"></label>
-                    <label>🚚 직진배송 (WMS) <input type="file" onchange="handleFileUpload(event, 'zikjin')"></label>
-                    <label>📅 주차별 데이터 <input type="file" onchange="handleFileUpload(event, 'weekly')"></label>
-                    <label>📥 입고대기 데이터 <input type="file" onchange="handleFileUpload(event, 'incoming')"></label>
-                    <div class="menu-divider"></div>
-                    <div class="menu-item" onclick="openRecommendModal()">💡 로케이션 추천받기</div>
-                    <div class="menu-item" onclick="openSheetModal()">⚙️ 구글시트 링크 설정</div>
-                    <div class="menu-item" onclick="openSettingsModal()">🛠️ 전체 환경설정</div>
+                <button class="btn-main-upload" onclick="toggleUploadMenu(event, 'main-tools-menu')">🛠️ 작업 메뉴 ▼</button>
+                <div class="upload-menu" id="main-tools-menu" onclick="event.stopPropagation()" style="width: 270px;">
+    
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold;">📊 기본 데이터 관리</div>
+                    <label for="excel-upload-a">
+                        <span style="color:var(--primary);">📥 로케이션 일일 최신화 (재고업뎃)<span class="info-tip" data-tip-key="menu-daily" onclick="event.stopPropagation();">i<span class="info-tip-content">📥 <b>일일 최신화</b><br>재고관리 시스템에서 추출한 일일 재고/상품 엑셀 파일을 업로드합니다.<br><br>기존 데이터는 모두 비워지고 엑셀의 최신 재고 정보로 덮어씁니다.<br><br>※ 선지정된 자리는 보호됩니다.</span></span></span>
+                        <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
+                    </label>
+    
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">💡 로케이션 변경 추천</div>
+    
+                   <label style="border-bottom: 1px solid #eee;" for="excel-upload-zikjin">
+                        <span style="color:#1976d2;">📂 1-1. 직진배송 데이터 업로드<span class="info-tip" data-tip-key="menu-zikjin" onclick="event.stopPropagation();">i<span class="info-tip-content">📂 <b>직진배송 데이터</b><br>직진배송 엑셀 파일을 업로드합니다.<br><br>로케이션 변경 추천 점수 계산의 <b>'직진배송'</b> 항목에 사용됩니다.</span></span></span>
+                        <input type="file" id="excel-upload-zikjin" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
+                    </label>
+                    <label style="border-bottom: 1px solid #eee;" for="excel-upload-weekly">
+                        <span style="color:#d32f2f;">📂 1-2. 주차별 데이터 업로드<span class="info-tip" data-tip-key="menu-weekly" onclick="event.stopPropagation();">i<span class="info-tip-content">📂 <b>주차별 데이터</b><br>주차별 배송/발주 엑셀 파일을 업로드합니다.<br><br>점수 계산의 <b>'주차별'</b> 및 <b>'상승세'</b> 항목에 사용됩니다.</span></span></span>
+                        <input type="file" id="excel-upload-weekly" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
+                    </label>
+    
+                    <div class="menu-item" style="text-align:center; color:var(--primary);" onclick="window.openRecommendModal(); closeAllPopups();">
+                        🚀 <strong>2. 로케이션 변경 리스트 보기</strong><span class="info-tip" data-tip-key="menu-recommend" onclick="event.stopPropagation();">i<span class="info-tip-content">🚀 <b>로케이션 변경 리스트</b><br>업로드된 직진배송/주차별 데이터를 기반으로 계산된 추천 리스트를 확인합니다.<br><br>각 상품별로 최적의 빈 로케이션이 추천되며, 이동 방향(전진/후퇴/수평/신규)도 함께 표시됩니다.</span></span>
+                    </div>
+
+                    <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">📦 입고 관리</div>
+                    <div class="menu-item" style="text-align:center; color:#e65100; font-size: 14px;" onclick="toggleIncomingSidebar(event)">
+                        📋 <strong>입고대기 선지정 패널 열기</strong><span class="info-tip" data-tip-key="menu-incoming" onclick="event.stopPropagation();">i<span class="info-tip-content">📋 <b>입고대기 선지정 패널</b><br>입고 예정 상품들을 빈 로케이션에 미리 찜(선지정)할 수 있는 사이드바를 엽니다.<br><br>선지정된 자리는 로케이션 변경 추천에서 보호되며, 다른 작업자가 사용할 수 없습니다.</span></span>
+                    </div>
+
                 </div>
             </div>
-            <button class="btn-settings" onclick="toggleIncomingSidebar(event)">📥 대기열 <span id="incoming-count-badge" class="incoming-badge" style="display:none;">0</span></button>
-        </div>
-    </header>
 
-    <div id="view-list" class="list-container">
-        <table class="list-table">
-            <thead id="table-head"></thead>
-            <tbody id="table-body">
-                <tr><td colspan="10" style="padding:50px; color:#999; font-weight:bold;" id="firebase-guide">데이터를 연결하는 중입니다...</td></tr>
-            </tbody>
-        </table>
-    </div>
-
-    <div id="view-map">
-        <div id="map-controls" style="margin-bottom:15px; display:flex; justify-content:center; gap:20px; align-items:center; background:white; padding:10px; border-radius:8px; border:1px solid #ccc;">
-            <div style="font-weight:bold; color:var(--primary);">🗺️ 도면 설정</div>
-            <label style="font-size:13px; cursor:pointer;"><input type="checkbox" id="map-show-text" checked onchange="renderMap()"> 로케이션명 표시</label>
-            <label style="font-size:13px; cursor:pointer;"><input type="checkbox" id="map-show-code" onchange="renderMap()"> 상품코드 표시</label>
-            <div style="display:flex; align-items:center; gap:5px;">
-                <span style="font-size:13px;">셀 크기:</span>
-                <input type="range" min="20" max="60" value="32" oninput="renderMap()" id="map-cell-size">
-            </div>
-        </div>
-        <div id="map-body" class="map-section"></div>
-    </div>
-
-    <div id="incoming-sidebar">
-        <div class="sidebar-header">
-            <h3 style="margin:0;">📥 입고대기 상품 리스트</h3>
-            <button onclick="toggleIncomingSidebar()" style="background:none; border:none; color:white; font-size:24px; cursor:pointer;">×</button>
-        </div>
-        <div class="sidebar-content" id="incoming-list"></div>
-        <div id="pre-assign-status" style="padding:15px; background:#f0f4ff; border-top:1px solid #d0d7ff; display:none;">
-            <div style="font-weight:bold; font-size:13px; margin-bottom:10px; color:var(--primary);">📍 선지정 모드 활성화 중</div>
-            <div id="pre-assign-info" style="font-size:12px; color:#555; margin-bottom:10px;">선택한 상품: <span id="pa-code" style="font-weight:bold; color:#000;">-</span></div>
-            <button onclick="cancelPreAssign()" style="width:100%; padding:8px; background:#666; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">모드 종료</button>
+            <button class="btn-settings" onclick="openSettingsModal(event)">⚙️ 환경설정</button>
         </div>
     </div>
 
-    <div id="edit-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10010;" onclick="closeEditModal(event)">
-        <div style="background:white; padding:25px; border-radius:12px; width:400px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" onclick="event.stopPropagation()">
-            <h2 style="margin:0 0 20px 0; border-bottom:2px solid var(--primary); padding-bottom:10px; color:var(--primary); font-size:20px;">📍 로케이션 정보 수정</h2>
-            <div style="display:flex; flex-direction:column; gap:15px;" id="edit-form">
-                <input type="hidden" id="edit-id">
-                <div style="display:flex; align-items:center;"><label style="width:80px; font-weight:bold;">로케이션</label><span id="edit-id-view" style="font-weight:900; font-size:16px;"></span></div>
-                <div style="display:flex; align-items:center;"><label style="width:80px; font-weight:bold;">상품코드</label><input type="text" id="edit-code" class="action-input" style="flex:1;"></div>
-                <div style="display:flex; align-items:center;"><label style="width:80px; font-weight:bold;">상품명</label><input type="text" id="edit-name" class="action-input" style="flex:1;"></div>
-                <div style="display:flex; align-items:center;"><label style="width:80px; font-weight:bold;">옵션</label><input type="text" id="edit-option" class="action-input" style="flex:1;"></div>
-                <div style="display:flex; align-items:center;"><label style="width:80px; font-weight:bold;">재고수량</label><input type="number" id="edit-stock" class="action-input" style="flex:1;"></div>
-                <div style="display:flex; align-items:center;"><label style="width:80px; font-weight:bold;">2층재고</label><input type="number" id="edit-stock2f" class="action-input" style="flex:1;"></div>
-                <div style="margin-top:10px; display:flex; gap:10px;">
-                    <button onclick="saveEdit()" style="flex:2; padding:12px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">저장하기</button>
-                    <button onclick="clearEdit()" style="flex:1; padding:12px; background:#f44336; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">비우기</button>
+    <div id="view-list" class="content-view active">
+        <div class="list-container" id="list-container">
+            <table class="list-table">
+                <thead>
+                    <tr id="dynamic-thead-tr">
+                        <th class="checkbox-cell"><input type="checkbox" id="check-all" class="loc-check" onclick="toggleAllCheckboxes(this)"></th>
+                        <th style="width: 80px;"><div class="th-content"><span class="title-text">동</span></div></th>
+                    </tr>
+                </thead>
+                <tbody id="location-list-body">
+                    <tr><td colspan="10" style="text-align:center; padding: 50px; color:#888;">데이터를 불러오는 중입니다...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="view-map" class="content-view" style="display:none;">
+        <div id="map-root" style="margin: 0 20px 10px 20px;">
+            <!-- 범례 -->
+            <div style="display:flex; align-items:center; gap:16px; padding:10px 15px; background:#fff; border:1px solid #ddd; border-radius:10px; margin-bottom:10px; flex-wrap:wrap;">
+                <span style="font-weight:bold; font-size:13px; color:#555;">범례:</span>
+                <span class="map-legend" style="background:#f0f0f0; border:1.5px solid #bbb;">빈칸</span>
+                <span class="map-legend" style="background:#c8e6c9; border:1.5px solid #66bb6a; color:#1b5e20;">상품있음</span>
+                <span class="map-legend" style="background:#fff9c4; border:1.5px solid #f9a825; color:#e65100;">예약중</span>
+                <span class="map-legend" style="background:#ffe0b2; border:1.5px solid #fb8c00; color:#bf360c;">선지정</span>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+                    <label style="font-size:12px; color:#555; font-weight:bold;">칸 크기:</label>
+                    <input type="range" id="map-cell-size" min="30" max="120" value="54" style="width:80px;" oninput="updateMapCellSize(this.value)">
+                    <span id="map-cell-size-label" style="font-size:12px; color:#333; font-weight:bold;">54px</span>
+                </div>
+            </div>
+            <!-- 구역 탭 -->
+            <div id="map-zone-tabs" style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;"></div>
+            <!-- 도면 본체 -->
+            <div id="map-body" style="background:#fff; border:1px solid #ddd; border-radius:10px; padding:15px; overflow:auto; max-height:calc(100vh - 220px);"></div>
+        </div>
+        <!-- 툴팁 -->
+        <div id="map-tooltip" style="
+            display:none; position:fixed; z-index:99999;
+            background:#fff; border:1px solid #bbb; border-radius:8px;
+            box-shadow:0 4px 16px rgba(0,0,0,0.18); padding:12px 15px;
+            min-width:180px; max-width:280px; pointer-events:none; font-size:13px; line-height:1.7;
+        "></div>
+    </div>
+
+    <div id="dynamic-popups"></div>
+
+    <div id="settings-modal" class="modal-overlay" onclick="closeSettingsModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">⚙️ 시스템 환경설정</div>
+            
+            <div style="margin-bottom: 25px;">
+                <h4 style="margin-bottom: 10px; font-size:14px; border-bottom: 2px solid #eee; padding-bottom: 5px; color:var(--primary);">1. 빈 로케이션 추가 / 삭제</h4>
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <input type="text" id="setting-new-loc" class="action-input" placeholder="예: A-1-001" style="flex:1;" onkeypress="if(event.key === 'Enter') addSingleLocationFromSetting()">
+                    <button class="btn-add" onclick="addSingleLocationFromSetting()">➕ 개별 추가</button>
+                </div>
+                <div style="font-size: 12px; color: #555; background:#f9f9f9; padding:8px; border-radius:6px; border:1px solid #ddd;">
+                    ※ 삭제 방법: 바깥의 메인 데이터 리스트에서 체크박스를 선택한 후 아래 버튼을 누르세요.<br>
+                    <button class="btn-delete-bulk" style="margin-top:8px; width:100%;" onclick="deleteSelectedLocations()">🗑️ 선택 항목 일괄 삭제</button>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 25px;">
+                <h4 style="margin-bottom: 10px; font-size:14px; border-bottom: 2px solid #eee; padding-bottom: 5px; color:var(--primary);">2. 화면 표시 헤더(열) 설정</h4>
+                <div style="font-size:11px; color:#888; margin-bottom:8px;">※ 체크한 항목만 리스트 화면에 표시됩니다. (주황색은 엑셀에서 새로 추가된 항목)</div>
+                <div id="setting-headers-container" style="display: flex; flex-wrap: wrap; gap: 10px; max-height: 120px; overflow-y: auto; padding: 12px; border: 1px solid #ccc; border-radius: 5px; background:#fcfcfc;">
+                </div>
+            </div>
+
+            <div style="margin-bottom: 10px;">
+                <h4 style="margin-bottom: 10px; font-size:14px; border-bottom: 2px solid #eee; padding-bottom: 5px; color:#e65100;">3. 구조(동/위치/칸수) 영구 세팅 업로드</h4>
+                <div style="font-size:11px; color:#555; background:#fff3e0; padding:8px; border-radius:6px; border:1px solid #ffe0b2; margin-bottom:10px; line-height:1.4;">
+                    ※ 주의: 이 버튼은 <strong>최초 로케이션/동/위치/칸수 세팅</strong>을 하거나 랙 구조를 아예 변경할 때만 사용하세요. 기존의 동/위치/칸수가 덮어쓰기 됩니다.<br>
+                    📋 엑셀 컬럼: <strong>로케이션, 동, 위치, 칸수</strong> (칸수 = 앵글 한 줄에 들어가는 칸 수, 다운로드 시 ★★-01(4)/ S561045 형식 복원에 사용)
+                </div>
+                <label style="display:block; text-align:center; padding:10px 15px; background:#e65100; color:white; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s;">
+                    📂 영구 보전 데이터(엑셀) 업로드
+                    <input type="file" id="excel-upload-permanent" accept=".xls,.xlsx,.csv,.html,.htm" style="display:none;">
+                </label>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn-modal-cancel" onclick="closeSettingsModal()">닫기</button>
+                <button class="btn-modal-save" onclick="saveHeaderSettings()">헤더 설정 저장</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="edit-modal" class="modal-overlay" onclick="closeEditModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-header">상품 정보 수동 수정</div>
+            <div class="modal-body">
+                <label>로케이션 (수정 불가)</label><input type="text" id="modal-id" readonly>
+                <label>동</label><input type="text" id="modal-dong" placeholder="예: 1">
+                <label>위치</label><input type="text" id="modal-pos" placeholder="예: 1">
+                <label>상품코드</label><input type="text" id="modal-code" placeholder="상품코드 입력">
+                <label>상품명</label><input type="text" id="modal-name" placeholder="상품명 입력">
+                <label>옵션</label><input type="text" id="modal-option" placeholder="옵션 입력">
+                <label>정상재고</label><input type="number" id="modal-stock" placeholder="0">
+            </div>
+            <div class="modal-footer" style="justify-content: space-between;">
+                <button id="btn-modal-unassign" class="btn-modal-cancel" style="background:#e65100; display:none;" onclick="cancelPreAssignment()">선지정 취소</button>
+                <div style="display:flex; gap:10px; margin-left:auto;">
+                    <button class="btn-modal-cancel" onclick="closeEditModal()">취소</button>
+                    <button class="btn-modal-save" onclick="saveManualEdit()">저장</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <div id="sheet-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10010;" onclick="closeSheetModal(event)">
-        <div style="background:white; padding:25px; border-radius:12px; width:550px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" onclick="event.stopPropagation()">
-            <h2 style="margin:0 0 20px 0; border-bottom:2px solid var(--primary); padding-bottom:10px; color:var(--primary); font-size:20px;">⚙️ 구글시트 링크 설정</h2>
-            <p style="font-size:13px; color:#666; margin-bottom:20px;">시트의 <b>[파일 > 공유 > 웹에 게시]</b>에서 <b>[쉼표로 구분된 값(.csv)]</b> 링크를 붙여넣으세요.</p>
-            <div style="display:flex; flex-direction:column; gap:15px;">
-                <div style="display:flex; flex-direction:column; gap:5px;">
-                    <label style="font-weight:bold; font-size:14px;">📦 오더/사입 관리 시트 (입고대기용)</label>
-                    <input type="text" id="modal-sheet-url-order" class="action-input" style="width:100%;" placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv">
+    <div id="sheet-modal" class="modal-overlay" onclick="closeSheetModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 450px;">
+            <div class="modal-header">입고예정 구글시트 연동 설정 (2개)</div>
+            <div class="modal-body">
+                <label style="color:var(--primary);">① 오더리스트(제작) CSV 링크</label>
+                <input type="text" id="modal-sheet-url-order" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
+                
+                <label style="color:var(--primary); margin-top:15px;">② 사입리스트 CSV 링크</label>
+                <input type="text" id="modal-sheet-url-buy" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv">
+                
+                <div style="font-size:11px; color:#666; margin-top:10px; line-height:1.4; background:#f9f9f9; padding:10px; border-radius:6px; border:1px solid #ddd;">
+                    ※ 각 원본 시트의 해당 탭(시트)을 선택한 후 <strong>[파일] > [공유] > [웹에 게시]</strong> 클릭<br>
+                    ※ 형식을 '웹페이지'가 아닌 <strong>'CSV'</strong>로 변경한 뒤 각각 생성된 링크를 칸에 맞게 붙여넣으세요.
                 </div>
-                <div style="display:flex; flex-direction:column; gap:5px;">
-                    <label style="font-weight:bold; font-size:14px;">🛍️ 주차별/직진 판매 시트 (추천용)</label>
-                    <input type="text" id="modal-sheet-url-buy" class="action-input" style="width:100%;" placeholder="https://docs.google.com/spreadsheets/d/.../pub?output=csv">
-                </div>
-                <button onclick="saveSheetUrl()" style="margin-top:10px; padding:12px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">링크 저장 및 즉시 반영</button>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal-cancel" onclick="closeSheetModal()">취소</button>
+                <button class="btn-modal-save" onclick="saveSheetUrl()">저장</button>
             </div>
         </div>
     </div>
 
-    <div id="recommend-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10010;" onclick="closeRecommendModal(event)">
-        <div style="background:white; padding:25px; border-radius:12px; width:1000px; max-height:90vh; overflow:hidden; display:flex; flex-direction:column; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" onclick="event.stopPropagation()">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <h2 style="margin:0; color:var(--primary); font-size:22px;">💡 지능형 로케이션 추천 시스템</h2>
-                <div style="display:flex; gap:10px;">
-                    <button class="btn-usage" onclick="openRatioModal(event)" style="background:#607d8b;">⚙️ 알고리즘 설정</button>
-                    <button onclick="closeRecommendModal()" style="background:none; border:none; font-size:24px; cursor:pointer;">×</button>
-                </div>
+    <div id="recommend-modal" class="modal-overlay" onclick="closeRecommendModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 980px; max-width: 96vw; padding: 25px 20px;">
+            <div class="modal-header" style="color: #4caf50; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                💡 로케이션 변경 리스트
+                <button onclick="window.showRecommendation()" style="padding:6px 12px; font-size:13px; background:#4caf50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🔍 계산</button>
+                <button onclick="window.openRatioModal()" style="padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">⚙️ 점수반영비율 설정</button>
+                <button onclick="window.show2FRecommendation()" style="padding:6px 12px; font-size:13px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🏢 2F 이동 추천</button>
             </div>
-            <div style="margin-bottom:15px; font-size:13px; color:#555; background:#f0f4ff; padding:10px; border-radius:6px;">
-                📌 <b>알고리즘:</b> 직진배송, 주차별 판매량, 전일대비 상승세를 종합하여 점수를 매깁니다. <b>빈칸 중 최적의 동/구역/위치</b> 순서로 추천합니다.
+            <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
+                ※ 선지정으로 찜해둔 자리는 물건이 없더라도 이 추천 목록에서 완벽히 보호(제외)됩니다.
             </div>
-            <div style="flex:1; overflow:auto; border:1px solid #ddd; border-radius:8px;">
-                <table class="list-table" style="min-width:900px;">
-                    <thead style="position:sticky; top:0; z-index:5;">
-                        <tr style="background:#f1f1f1;">
-                            <th style="width:50px;">순위</th>
-                            <th style="width:120px;">상품코드</th>
-                            <th style="width:180px;">상품명</th>
-                            <th style="width:80px;">총점</th>
-                            <th style="width:150px;">데이터 분석</th>
-                            <th style="width:120px;">현재 위치</th>
-                            <th style="background:#eef1ff; color:var(--primary); font-weight:900;">✨ 추천 빈 로케이션</th>
+            <div class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
+                    <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <tr>
+                            <th style="width: 80px; border-top:none; font-size:13px;">순위(점수)<span class="info-tip" data-tip-key="rec-score">i<span class="info-tip-content">📊 <b>점수 계산 방식</b><br>세 가지 데이터의 가중 평균입니다:<br>• <b>직진배송</b>: 최근 직진배송 수량<br>• <b>주차별</b>: 기간 배송/발주 수량<br>• <b>상승세</b>: 최근 3주 vs 이전 3주 증가분<br><br>⚙️ <b>점수반영비율 설정</b>에서 각 비율을 조정할 수 있습니다.<br>마우스를 각 상품의 점수 위에 올리면 세부 내역이 보입니다.</span></span></th>
+                            <th style="width: 120px; border-top:none; font-size:13px;">상품코드</th>
+                            <th style="border-top:none; font-size:13px;">상품명</th>
+                            <th style="width: 80px; border-top:none; font-size:13px; background:#fff8e1; color:#e65100;">이동수량<span class="info-tip" data-tip-key="rec-move-qty">i<span class="info-tip-content">📦 <b>3층에서 옮길 수량</b><br>= 정상재고 - 2층창고재고<br>(같은 상품코드의 모든 로케이션 합계)</span></span></th>
+                            <th style="width: 130px; border-top:none; font-size:13px;">현재 위치</th>
+                            <th style="width: 180px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ 추천 로케이션<span class="info-tip" data-tip-key="rec-target-loc">i<span class="info-tip-content">🎯 <b>우선순위 알고리즘</b>으로 추천된 빈 자리입니다.<br>• 구역(★→A→B...) 우선<br>• 동 우선순위 (설정 가능)<br>• 위치 우선순위 (설정 가능)<br><br>뱃지 의미:<br>🔺<b>전진</b>: 더 좋은 위치로 이동<br>🔻<b>후퇴</b>: 덜 좋은 위치 (빈자리 부족)<br>➖<b>수평</b>: 비슷한 우선순위<br>✨<b>신규</b>: 처음 배치되는 상품</span></span></th>
                         </tr>
                     </thead>
                     <tbody id="recommend-tbody"></tbody>
                 </table>
             </div>
-        </div>
-    </div>
-
-    <div id="settings-modal" style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:10020;" onclick="closeSettingsModal(event)">
-        <div style="background:white; padding:30px; border-radius:15px; width:700px; max-height:85vh; overflow-y:auto; box-shadow: 0 4px 25px rgba(0,0,0,0.4);" onclick="event.stopPropagation()">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #333; padding-bottom:15px; margin-bottom:20px;">
-                <h2 style="margin:0; font-size:22px; color:#333;">🛠️ 시스템 전체 환경설정</h2>
-                <button onclick="closeSettingsModal()" style="background:none; border:none; font-size:24px; cursor:pointer;">×</button>
+            
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+                <button onclick="downloadRecommendationExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📥 엑셀 다운로드</button>
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="closeRecommendModal()">닫기</button>
             </div>
             
-            <div style="margin-bottom:25px;">
-                <h3 style="font-size:16px; margin-bottom:12px; color:var(--primary); display:flex; align-items:center; gap:8px;">📊 리스트 표시 컬럼 설정</h3>
-                <div id="column-settings-grid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; background:#f9f9f9; padding:15px; border-radius:8px; border:1px solid #eee;"></div>
-            </div>
+        </div>
+    </div>
 
-            <div style="margin-bottom:25px;">
-                <h3 style="font-size:16px; margin-bottom:12px; color:#f44336; display:flex; align-items:center; gap:8px;">⚠️ 데이터 초기화 관리</h3>
-                <div style="background:#fff5f5; border:1px solid #ffcdd2; padding:15px; border-radius:8px;">
-                    <p style="margin:0 0 10px 0; font-size:13px; color:#c62828; font-weight:bold;">데이터 삭제는 되돌릴 수 없습니다. 주의하세요.</p>
-                    <div style="display:flex; flex-wrap:wrap; gap:10px;">
-                        <button onclick="confirmBulkDelete('total')" style="padding:10px 15px; background:#f44336; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;">🚮 3층 로케이션 전체 삭제</button>
-                        <button onclick="confirmBulkDelete('zikjin')" style="padding:10px 15px; background:#757575; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;">🗑️ 직진배송 데이터 삭제</button>
-                        <button onclick="confirmBulkDelete('weekly')" style="padding:10px 15px; background:#757575; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;">🗑️ 주차별 데이터 삭제</button>
-                        <button onclick="confirmBulkDelete('incoming')" style="padding:10px 15px; background:#757575; color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold; font-size:13px;">🗑️ 입고대기 데이터 삭제</button>
-                    </div>
+    <div id="toast"></div>
+
+    <!-- 2F 이동 추천 모달 -->
+    <div id="modal-2f" class="modal-overlay" onclick="if(event.target.id==='modal-2f') document.getElementById('modal-2f').style.display='none'">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 1050px; max-width: 96vw; padding: 25px 20px;">
+            <div class="modal-header" style="color: #7b1fa2; display: flex; align-items: center; gap: 10px; flex-wrap:wrap;">
+                🏢 2F 이동 추천 리스트
+                <button onclick="document.getElementById('modal-2f').style.display='none'" style="margin-left:auto; background:none; border:none; font-size:24px; cursor:pointer;">×</button>
+            </div>
+            <div style="background:#f3e5f5; border:1px solid #ce93d8; border-radius:8px; padding:12px 15px; margin-bottom:15px;">
+                <div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
+                    <label style="font-size:13px; font-weight:bold; color:#4a148c;">📅 기준 기간:<span class="info-tip" data-tip-key="2f-period">i<span class="info-tip-content">⏱️ <b>마지막배송일 기준</b><br>여기서 설정한 기간 <b>이상</b> 배송이 없었던 상품을 2F 이동 대상으로 추천합니다.<br><br>예: "3개월"로 설정하면 3개월 이상 배송 기록이 없는 상품이 표시됩니다.<br><br>※ 마지막배송일이 아예 없는 상품(기록없음)도 포함됩니다.</span></span></label>
+                    <input type="number" id="2f-period-value" value="1" min="1" style="width:50px; padding:5px; text-align:center; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                    <select id="2f-period-unit" style="padding:5px 10px; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                        <option value="week">주</option>
+                        <option value="month" selected>개월</option>
+                    </select>
+                    <span style="font-size:12px; color:#666;">이상 배송 없는 상품</span>
+                    <label style="font-size:13px; font-weight:bold; color:#4a148c; margin-left:10px;">📦 재고 기준:</label>
+                    <input type="number" id="2f-stock-limit" value="999999" min="0" style="width:80px; padding:5px; text-align:center; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
+                    <span style="font-size:12px; color:#666;">개 이하</span>
+                    <button onclick="window.calc2FList()" style="padding:8px 16px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔍 조회</button>
                 </div>
             </div>
-
-            <div style="display:flex; justify-content:center;">
-                <button onclick="saveAllSettings()" style="width:100%; padding:15px; background:#333; color:white; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:16px;">💾 모든 설정 저장 및 새로고침</button>
+            <div style="font-size:11px; color:#666; margin-bottom:10px;">
+                ※ 마지막배송일 기준으로 설정 기간 동안 배송이 없고, 재고가 기준 이하인 상품을 2F 이동 대상으로 추천합니다.
+            </div>
+            <div class="modal-body" style="max-height: 50vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
+                    <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <tr>
+                            <th style="width:40px; border-top:none;"><input type="checkbox" id="2f-check-all" onclick="window.toggle2FCheckAll(this)"></th>
+                            <th style="width:50px; border-top:none; font-size:13px;">No</th>
+                            <th style="width:120px; border-top:none; font-size:13px;">상품코드</th>
+                            <th style="border-top:none; font-size:13px;">상품명</th>
+                            <th style="width:100px; border-top:none; font-size:13px;">옵션</th>
+                            <th style="width:70px; border-top:none; font-size:13px;">정상재고</th>
+                            <th style="width:100px; border-top:none; font-size:13px; cursor:pointer;" onclick="window.sort2FList()">마지막배송일 <span id="2f-sort-icon">▲</span></th>
+                            <th style="width:100px; border-top:none; font-size:13px;">현재위치</th>
+                            <th style="width:180px; background:#f3e5f5; border-top:none; font-size:13px;">변경값<span class="info-tip" data-tip-key="2f-change-value">i<span class="info-tip-content">🏷️ <b>2F 이동 시 넣을 값</b><br>형식: <b>2F-상품코드 옵션추가항목1</b><br><br>이 값을 복사해서 재고관리 시스템의 로케이션 컬럼에 붙여넣으면, 해당 상품이 2층 창고로 이동된 것으로 처리됩니다.</span></span></th>
+                        </tr>
+                    </thead>
+                    <tbody id="2f-tbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+                <div style="display:flex; gap:8px;">
+                    <button onclick="window.download2FExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">📥 엑셀 다운로드 (체크 시 선택만)</button>
+                </div>
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="document.getElementById('modal-2f').style.display='none'">닫기</button>
             </div>
         </div>
     </div>
 
-    <div id="custom-popups-container"></div>
-
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script type="module" src="js/location.js"></script>
     <script>
-        function toggleUploadMenu(e) {
-            e.stopPropagation();
-            const menu = document.getElementById('upload-menu');
-            const isVisible = menu.style.display === 'block';
-            closeAllPopups();
-            menu.style.display = isVisible ? 'none' : 'block';
+        function switchView(view) {
+            document.getElementById('view-list').style.display = view === 'list' ? 'block' : 'none';
+            document.getElementById('view-map').style.display = view === 'map' ? 'block' : 'none';
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+            if (view === 'map' && typeof window.renderMap === 'function') window.renderMap();
         }
 
-        function closeAllPopups() {
+        function toggleFilterPopup(e, id) {
+            e.stopPropagation();
+            const pop = document.getElementById(id);
+            const isVisible = pop.style.display === 'block';
+            closeAllPopups();
+            if (!isVisible && pop) {
+                // ★ v3.60: 팝업을 새로 열 때는 검색 쿼리 초기화
+                if (window._filterSearchQuery) window._filterSearchQuery[id] = '';
+                // 검색창이 있으면 값 비우기
+                const input = pop.querySelector('.filter-search-input');
+                if (input) input.value = '';
+                
+                const rect = e.target.getBoundingClientRect();
+                pop.style.display = 'block';
+                pop.style.top = (rect.bottom + window.scrollY + 5) + 'px';
+                pop.style.left = (rect.left + window.scrollX - 50) + 'px'; 
+            }
+        }
+
+        function toggleUploadMenu(e, menuId) {
+            e.stopPropagation();
+            const menu = document.getElementById(menuId);
+            const isVisible = menu.style.display === 'block';
+            closeAllPopups(); 
+            if (!isVisible) { menu.style.display = 'block'; }
+        }
+
+        window.closeAllPopups = function() {
             document.querySelectorAll('.filter-popup').forEach(p => p.style.display = 'none');
             const usagePop = document.getElementById('usage-popup');
             if(usagePop) usagePop.style.display = 'none';
