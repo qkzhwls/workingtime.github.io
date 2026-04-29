@@ -2196,7 +2196,27 @@ window.handleRowClick = async function(event, locId) {
         } catch(e) { console.error(e); alert("선지정 저장 오류"); }
         return;
     }
-    openEditModal(locId);
+    
+    // v3.90: 모달 대신 선지정 해제 로직으로 대체
+    const targetData = originalData.find(d => d.id === locId);
+    if (!targetData) return;
+
+    if (targetData.preAssigned === true) {
+        if (confirm(`[${locId}] 선지정을 해제하시겠습니까?`)) {
+            try {
+                const zoneDocId = getZoneDocId(locId);
+                setDoc(doc(db, LOC_COLLECTION, zoneDocId), { 
+                    [locId]: { 
+                        preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', preAssignedAt: 0, 
+                        codeTag: '', codeTagAt: 0, code: '', name: '', option: '', stock: '0', updatedAt: new Date() 
+                    } 
+                }, { merge: true });
+                showToast("선지정이 해제되었습니다.");
+            } catch(e) { 
+                console.error(e); 
+            }
+        }
+    }
 };
 
 // ★ 가상 스크롤 전역 상태
@@ -2836,46 +2856,6 @@ window.deleteSelectedLocations = async () => {
         }
         if (batchCount > 0) await batch.commit();
         alert(`🗑️ 삭제 완료`); 
-    } catch (error) { console.error(error); }
-};
-
-window.openEditModal = (id) => {
-    const targetData = originalData.find(d => d.id === id);
-    if (!targetData) return;
-    document.getElementById('modal-id').value = targetData.id;
-    document.getElementById('modal-dong').value = targetData.dong || '';
-    document.getElementById('modal-pos').value = targetData.pos || '';
-    document.getElementById('modal-code').value = targetData.code || '';
-    document.getElementById('modal-name').value = targetData.name || '';
-    document.getElementById('modal-option').value = targetData.option || '';
-    document.getElementById('modal-stock').value = targetData.stock || '0';
-    const unassignBtn = document.getElementById('btn-modal-unassign');
-    unassignBtn.style.display = targetData.preAssigned ? 'inline-block' : 'none';
-    document.getElementById('edit-modal').style.display = 'flex';
-};
-
-window.saveManualEdit = async () => {
-    const id = document.getElementById('modal-id').value;
-    const updateData = {
-        dong: document.getElementById('modal-dong').value.trim(), pos: document.getElementById('modal-pos').value.trim(), code: document.getElementById('modal-code').value.trim(),
-        name: document.getElementById('modal-name').value.trim(), option: document.getElementById('modal-option').value.trim(), stock: document.getElementById('modal-stock').value.trim(),
-        reserved: false, reservedAt: 0, reservedBy: '', updatedAt: new Date()
-    };
-    try { 
-        const zoneDocId = getZoneDocId(id);
-        await setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [id]: updateData }, { merge: true }); 
-        document.getElementById('edit-modal').style.display = 'none'; 
-    } catch (error) { console.error(error); }
-};
-
-window.cancelPreAssignment = async () => {
-    const id = document.getElementById('modal-id').value;
-    if(!confirm(`[${id}] 선지정을 취소하시겠습니까?`)) return;
-    try {
-        const zoneDocId = getZoneDocId(id);
-        await setDoc(doc(db, LOC_COLLECTION, zoneDocId), { [id]: { preAssigned: false, preAssignedCode: '', preAssignedName: '', preAssignedQty: '', preAssignedAt: 0, codeTag: '', codeTagAt: 0, code: '', name: '', option: '', stock: '0', updatedAt: new Date() } }, { merge: true });
-        document.getElementById('edit-modal').style.display = 'none';
-        showToast("취소되었습니다.");
     } catch (error) { console.error(error); }
 };
 
