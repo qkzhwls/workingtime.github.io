@@ -370,7 +370,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.60 (필터 검색)</div>
+            <div class="version-badge">🚀 Ver 3.70 (툴팁 클릭 간섭 해결)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -380,18 +380,18 @@
     
                     <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold;">📊 기본 데이터 관리</div>
                     <label for="excel-upload-a">
-                        <span style="color:var(--primary);">📥 로케이션 일일 최신화 (재고업뎃)<span class="info-tip" data-tip-key="menu-daily" onclick="event.stopPropagation();">i<span class="info-tip-content">📥 <b>일일 최신화</b><br>재고관리 시스템에서 추출한 일일 재고/상품 엑셀 파일을 업로드합니다.<br><br>기존 데이터는 모두 비워지고 엑셀의 최신 재고 정보로 덮어씁니다.<br><br>※ 선지정된 자리는 보호됩니다.</span></span></span>
+                        <span style="color:var(--primary);">📥 로케이션 일일 최신화 (재고업뎃)<span class="info-tip" data-tip-key="menu-daily" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content" onclick="event.stopPropagation(); event.preventDefault();">📥 <b>일일 최신화</b><br>재고관리 시스템에서 추출한 일일 재고/상품 엑셀 파일을 업로드합니다.<br><br>기존 데이터는 모두 비워지고 엑셀의 최신 재고 정보로 덮어씁니다.<br><br>※ 선지정된 자리는 보호됩니다.</span></span></span>
                         <input type="file" id="excel-upload-a" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
     
                     <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">💡 로케이션 변경 추천</div>
     
                    <label style="border-bottom: 1px solid #eee;" for="excel-upload-zikjin">
-                        <span style="color:#1976d2;">📂 1-1. 직진배송 데이터 업로드<span class="info-tip" data-tip-key="menu-zikjin" onclick="event.stopPropagation();">i<span class="info-tip-content">📂 <b>직진배송 데이터</b><br>직진배송 엑셀 파일을 업로드합니다.<br><br>로케이션 변경 추천 점수 계산의 <b>'직진배송'</b> 항목에 사용됩니다.</span></span></span>
+                        <span style="color:#1976d2;">📂 1-1. 직진배송 데이터 업로드<span class="info-tip" data-tip-key="menu-zikjin" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content" onclick="event.stopPropagation(); event.preventDefault();">📂 <b>직진배송 데이터</b><br>직진배송 엑셀 파일을 업로드합니다.<br><br>로케이션 변경 추천 점수 계산의 <b>'직진배송'</b> 항목에 사용됩니다.</span></span></span>
                         <input type="file" id="excel-upload-zikjin" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
                     <label style="border-bottom: 1px solid #eee;" for="excel-upload-weekly">
-                        <span style="color:#d32f2f;">📂 1-2. 주차별 데이터 업로드<span class="info-tip" data-tip-key="menu-weekly" onclick="event.stopPropagation();">i<span class="info-tip-content">📂 <b>주차별 데이터</b><br>주차별 배송/발주 엑셀 파일을 업로드합니다.<br><br>점수 계산의 <b>'주차별'</b> 및 <b>'상승세'</b> 항목에 사용됩니다.</span></span></span>
+                        <span style="color:#d32f2f;">📂 1-2. 주차별 데이터 업로드<span class="info-tip" data-tip-key="menu-weekly" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content" onclick="event.stopPropagation(); event.preventDefault();">📂 <b>주차별 데이터</b><br>주차별 배송/발주 엑셀 파일을 업로드합니다.<br><br>점수 계산의 <b>'주차별'</b> 및 <b>'상승세'</b> 항목에 사용됩니다.</span></span></span>
                         <input type="file" id="excel-upload-weekly" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
     
@@ -429,7 +429,6 @@
 
     <div id="view-map" class="content-view" style="display:none;">
         <div id="map-root" style="margin: 0 20px 10px 20px;">
-            <!-- 범례 -->
             <div style="display:flex; align-items:center; gap:16px; padding:10px 15px; background:#fff; border:1px solid #ddd; border-radius:10px; margin-bottom:10px; flex-wrap:wrap;">
                 <span style="font-weight:bold; font-size:13px; color:#555;">범례:</span>
                 <span class="map-legend" style="background:#f0f0f0; border:1.5px solid #bbb;">빈칸</span>
@@ -442,12 +441,9 @@
                     <span id="map-cell-size-label" style="font-size:12px; color:#333; font-weight:bold;">54px</span>
                 </div>
             </div>
-            <!-- 구역 탭 -->
             <div id="map-zone-tabs" style="display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;"></div>
-            <!-- 도면 본체 -->
             <div id="map-body" style="background:#fff; border:1px solid #ddd; border-radius:10px; padding:15px; overflow:auto; max-height:calc(100vh - 220px);"></div>
         </div>
-        <!-- 툴팁 -->
         <div id="map-tooltip" style="
             display:none; position:fixed; z-index:99999;
             background:#fff; border:1px solid #bbb; border-radius:8px;
@@ -562,7 +558,7 @@
                             <th style="width: 80px; border-top:none; font-size:13px;">순위(점수)<span class="info-tip" data-tip-key="rec-score">i<span class="info-tip-content">📊 <b>점수 계산 방식</b><br>세 가지 데이터의 가중 평균입니다:<br>• <b>직진배송</b>: 최근 직진배송 수량<br>• <b>주차별</b>: 기간 배송/발주 수량<br>• <b>상승세</b>: 최근 3주 vs 이전 3주 증가분<br><br>⚙️ <b>점수반영비율 설정</b>에서 각 비율을 조정할 수 있습니다.<br>마우스를 각 상품의 점수 위에 올리면 세부 내역이 보입니다.</span></span></th>
                             <th style="width: 120px; border-top:none; font-size:13px;">상품코드</th>
                             <th style="border-top:none; font-size:13px;">상품명</th>
-                            <th style="width: 80px; border-top:none; font-size:13px; background:#fff8e1; color:#e65100;">이동수량<span class="info-tip" data-tip-key="rec-move-qty">i<span class="info-tip-content">📦 <b>3층에서 옮길 수량</b><br>= 정상재고 - 2층창고재고<br>(같은 상품코드의 모든 로케이션 합계)</span></span></th>
+                            <th style="width: 80px; border-top:none; font-size:13px; background:#fff8e1; color:#e65100;">이동수량<span class="info-tip" data-tip-key="rec-move-qty">i<span class="info-tip-content">📦 <b>3층에서 옮길 수량</b><br Bryan>= 정상재고 - 2층창고재고<br>(같은 상품코드의 모든 로케이션 합계)</span></span></th>
                             <th style="width: 130px; border-top:none; font-size:13px;">현재 위치</th>
                             <th style="width: 180px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ 추천 로케이션<span class="info-tip" data-tip-key="rec-target-loc">i<span class="info-tip-content">🎯 <b>우선순위 알고리즘</b>으로 추천된 빈 자리입니다.<br>• 구역(★→A→B...) 우선<br>• 동 우선순위 (설정 가능)<br>• 위치 우선순위 (설정 가능)<br><br>뱃지 의미:<br>🔺<b>전진</b>: 더 좋은 위치로 이동<br>🔻<b>후퇴</b>: 덜 좋은 위치 (빈자리 부족)<br>➖<b>수평</b>: 비슷한 우선순위<br>✨<b>신규</b>: 처음 배치되는 상품</span></span></th>
                         </tr>
@@ -581,7 +577,6 @@
 
     <div id="toast"></div>
 
-    <!-- 2F 이동 추천 모달 -->
     <div id="modal-2f" class="modal-overlay" onclick="if(event.target.id==='modal-2f') document.getElementById('modal-2f').style.display='none'">
         <div class="modal-content" onclick="event.stopPropagation()" style="width: 1050px; max-width: 96vw; padding: 25px 20px;">
             <div class="modal-header" style="color: #7b1fa2; display: flex; align-items: center; gap: 10px; flex-wrap:wrap;">
