@@ -3273,8 +3273,8 @@ document.addEventListener('click', function(e) {
     const tip = e.target.closest('.info-tip[data-tip-key]');
     const content = e.target.closest('.info-tip-content');
 
-    // 1. ℹ️ 아이콘(또는 툴팁 트리거) 클릭 시
-    if (tip) {
+    // 1. ℹ️ 아이콘(또는 툴팁 트리거) 클릭 시 (단, 툴팁 본문 내부 클릭은 제외)
+    if (tip && !content) {
         e.stopPropagation(); e.preventDefault(); // 외부 클릭 닫기 방지 + label 등 부모 기본동작 차단
         
         // 초기화 로직 (기존 유지)
