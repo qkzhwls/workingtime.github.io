@@ -2090,6 +2090,32 @@ window.showFilterResetBtn = function() {
     if (btn) btn.style.display = 'none';
 };
 
+// ★ v3.94: 모든 필터를 한 번에 해제
+window.clearAllFilters = function(e) {
+    if (e) e.stopPropagation();
+    
+    // 기본 필터 키 모두 빈 배열로 초기화
+    filters = { loc: [], code: [], stock: [], stock2f: [], dong: [], pos: [], reserved: [], preassigned: [] };
+    
+    // 동적으로 추가된 커스텀 헤더 필터(cus_*)도 모두 제거
+    Object.keys(filters).forEach(key => {
+        if (key.startsWith('cus_')) delete filters[key];
+    });
+    
+    // 검색 쿼리도 초기화
+    if (window._filterSearchQuery) window._filterSearchQuery = {};
+    
+    // 팝업/메뉴 모두 닫기
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+    
+    // 필터 UI 갱신 + 테이블 재렌더링
+    setupFilterPopups();
+    applyFiltersAndSort();
+    
+    // 사용자에게 알림
+    showToast("✅ 모든 필터가 해제되었습니다.");
+};
+
 function applyFiltersAndSort() {
     let filtered = originalData.filter(item => {
         // ★ v3.57: 모든 필터 배열 기반 (OR 조건)
