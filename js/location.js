@@ -2430,6 +2430,24 @@ const smartParseToJSON = function(rawData) {
 
 const universalExcelReader = (file) => {
     return new Promise((resolve) => {
+        // ★ v3.95: 진단 헬퍼 - 텍스트에서 어떤 케이스인지 판단
+        const diagnoseText = (text, parsedJson) => {
+            if (!text) return 'unknown';
+            // A. 프레임셋 HTML 감지
+            if (text.includes('c_rgszSh') || text.includes('Excel Workbook Frameset') || /\.files\/sheet\d+\.htm/.test(text)) {
+                return 'frameset';
+            }
+            // 데이터 행 분석
+            if (parsedJson && parsedJson.length === 0) {
+                return 'empty-table';
+            }
+            if (parsedJson && parsedJson.length > 0) {
+                const isValid = parsedJson.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['품목코드'] || row['바코드']);
+                if (!isValid) return 'no-required-header';
+            }
+            return 'unknown';
+        };
+
         const bufferReader = new FileReader();
         bufferReader.onload = (eBuf) => {
             let json = [];
@@ -2442,7 +2460,7 @@ const universalExcelReader = (file) => {
 
             const isValid = json.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['품목코드'] || row['바코드']);
             if (json.length > 0 && isValid) {
-                return resolve(json);
+                return resolve({ rows: json, diagnosis: 'ok' });
             }
 
             const textReader = new FileReader();
@@ -2454,7 +2472,11 @@ const universalExcelReader = (file) => {
                         const utfJson = smartParseToJSON(rawData);
                         const isValidUtf = utfJson.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['품목코드'] || row['바코드']);
                         if (utfJson.length > 0 && isValidUtf) {
-                            return resolve(utfJson);
+                            return resolve({ rows: utfJson, diagnosis: 'ok' });
+                        }
+                        const utfDiag = diagnoseText(text, utfJson);
+                        if (utfDiag !== 'unknown') {
+                            return resolve({ rows: [], diagnosis: utfDiag });
                         }
                     } catch(err) {}
                 }
@@ -2464,9 +2486,18 @@ const universalExcelReader = (file) => {
                     try {
                         let eucText = eEuc.target.result;
                         const rawData = extractDataFromHTML(eucText); 
-                        resolve(smartParseToJSON(rawData));
+                        const eucJson = smartParseToJSON(rawData);
+                        const isValidEuc = eucJson.some(row => row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['로케이션'] || row['품목코드'] || row['바코드']);
+                        if (eucJson.length > 0 && isValidEuc) {
+                            return resolve({ rows: eucJson, diagnosis: 'ok' });
+                        }
+                        const eucDiag = diagnoseText(text, eucJson);
+                        if (eucDiag !== 'unknown') {
+                            return resolve({ rows: [], diagnosis: eucDiag });
+                        }
+                        resolve({ rows: [], diagnosis: 'unknown' });
                     } catch(err) {
-                        resolve([]);
+                        resolve({ rows: [], diagnosis: 'unknown' });
                     }
                 };
                 eucReader.readAsText(file, 'euc-kr');
@@ -2477,15 +2508,52 @@ const universalExcelReader = (file) => {
     });
 };
 
+// ★ v3.95: 업로드별 필수 헤더 안내 + 진단 코드별 alert 메시지 헬퍼
+const _uploadHeaderGuide = {
+    'permanent': '로케이션, 동, 위치, 칸수',
+    'daily':     '로케이션, 상품코드, 상품명, 옵션, 정상재고, 2층창고재고',
+    'zikjin':    '상품코드(또는 어드민상품코드/대표상품코드 등), 수량',
+    'weekly':    '상품코드(또는 어드민상품코드/대표상품코드 등), 기간배송수량 또는 기간발주수량'
+};
+
+function _showUploadDiagnosisAlert(diagnosis, uploadType) {
+    const headers = _uploadHeaderGuide[uploadType] || '';
+    let msg = '';
+    if (diagnosis === 'frameset') {
+        msg = "🚨 잘못된 파일 형식입니다.\n\n" +
+              "이 파일은 Excel에서 '웹 페이지(*.htm)' 형식으로 저장된 파일입니다.\n" +
+              "실제 데이터가 별도 폴더에 분리되어 있어 시스템에서 읽을 수 없습니다.\n\n" +
+              "✅ 해결 방법:\n" +
+              "1. 파일을 Excel로 엽니다\n" +
+              "2. [다른 이름으로 저장] → 형식을 'Excel 통합 문서(*.xlsx)' 로 선택\n" +
+              "3. 다시 업로드해주세요";
+    } else if (diagnosis === 'empty-table') {
+        msg = "⚠️ 파일에 데이터 행이 없습니다.\n\n" +
+              "헤더(첫 행)는 있지만 실제 데이터가 입력되지 않은 빈 파일입니다.\n" +
+              "데이터가 입력된 파일을 업로드해주세요.";
+    } else if (diagnosis === 'no-required-header') {
+        msg = "⚠️ 파일에서 필수 컬럼을 찾을 수 없습니다.\n\n" +
+              "이 업로드에 필요한 헤더: " + headers + "\n\n" +
+              "✅ 해결 방법:\n" +
+              "- 파일의 첫 행에 위 헤더가 정확히 입력되어 있는지 확인\n" +
+              "- 한글이 깨져 보이면 UTF-8 또는 EUC-KR로 다시 저장";
+    } else {
+        msg = "⚠️ 데이터가 없습니다.\n\n" +
+              "파일 형식 또는 내용을 다시 확인해주세요.\n" +
+              "(예상 헤더: " + headers + ")";
+    }
+    alert(msg);
+}
+
 const fileInputZikjin = document.getElementById('excel-upload-zikjin');
 if (fileInputZikjin) {
     fileInputZikjin.addEventListener('change', async function(e) {
         const file = e.target.files[0]; if (!file) return;
         window.showLoading('직진배송 데이터를 분석 중입니다...');
         try {
-            const json = await universalExcelReader(file);
-            if(json.length > 0) await updateDatabaseB(json, 'ZikjinData', e.target, false);
-            else { window.hideLoading(); alert("데이터가 없습니다. (파일 형식 또는 헤더 확인)"); e.target.value=''; }
+            const result = await universalExcelReader(file);
+            if(result.rows.length > 0) await updateDatabaseB(result.rows, 'ZikjinData', e.target, false);
+            else { window.hideLoading(); _showUploadDiagnosisAlert(result.diagnosis, 'zikjin'); e.target.value=''; }
         } catch(err) { window.hideLoading(); alert("오류 발생"); e.target.value=''; }
     });
 }
@@ -2496,9 +2564,9 @@ if (fileInputWeekly) {
         const file = e.target.files[0]; if (!file) return;
         window.showLoading('주차별 데이터를 분석 중입니다...');
         try {
-            const json = await universalExcelReader(file);
-            if(json.length > 0) await updateDatabaseB(json, 'WeeklyData', e.target, false);
-            else { window.hideLoading(); alert("데이터가 없습니다. (파일 형식 또는 헤더 확인)"); e.target.value=''; }
+            const result = await universalExcelReader(file);
+            if(result.rows.length > 0) await updateDatabaseB(result.rows, 'WeeklyData', e.target, false);
+            else { window.hideLoading(); _showUploadDiagnosisAlert(result.diagnosis, 'weekly'); e.target.value=''; }
         } catch(err) { window.hideLoading(); alert("오류 발생"); e.target.value=''; }
     });
 }
@@ -2509,9 +2577,9 @@ if (fileInputA) {
         const file = e.target.files[0]; if (!file) return;
         window.showLoading('일일 재고/상품 데이터를 최신화 중입니다...');
         try {
-            const json = await universalExcelReader(file);
-            if(json.length > 0) await updateDatabaseA(json, 'daily');
-            else { window.hideLoading(); alert("데이터가 없습니다."); }
+            const result = await universalExcelReader(file);
+            if(result.rows.length > 0) await updateDatabaseA(result.rows, 'daily');
+            else { window.hideLoading(); _showUploadDiagnosisAlert(result.diagnosis, 'daily'); }
         } catch(err) { window.hideLoading(); alert("오류 발생"); }
         finally { e.target.value=''; }
     });
@@ -2523,9 +2591,9 @@ if (fileInputPerm) {
         const file = e.target.files[0]; if (!file) return;
         window.showLoading('도면(동/위치) 영구 데이터를 덮어쓰기 세팅 중입니다...');
         try {
-            const json = await universalExcelReader(file);
-            if(json.length > 0) await updateDatabaseA(json, 'permanent');
-            else { window.hideLoading(); alert("데이터가 없습니다."); }
+            const result = await universalExcelReader(file);
+            if(result.rows.length > 0) await updateDatabaseA(result.rows, 'permanent');
+            else { window.hideLoading(); _showUploadDiagnosisAlert(result.diagnosis, 'permanent'); }
         } catch(err) { window.hideLoading(); alert("오류 발생"); }
         finally { e.target.value=''; }
     });
