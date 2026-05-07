@@ -1299,6 +1299,16 @@ window.syncIncomingData = async () => {
 
         combinedData = [...orderData, ...buyData];
 
+        // ★ v3.96: '오더취소' 상품코드 수집
+        const cancelledCodes = new Set();
+        combinedData.forEach(row => {
+            const status = (row['상태'] || '').toString().trim();
+            if (status === '오더취소') {
+                const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim();
+                if (code) cancelledCodes.add(code);
+            }
+        });
+
         const finalJson = combinedData.map(row => {
             let code = row['어드민상품코드'] || row['상품코드'] || '';
             let name = row['상품명'] || row['공급처상품명'] || '';
@@ -1330,9 +1340,15 @@ window.syncIncomingData = async () => {
                 '검수창고도착일': row.source === '사입' ? formatExcelDate(rawArrivalDate) : '',
                 '도착예상일': formatExcelDate(row['도착예상일'] || ''),
                 '표시날짜': date,
-                'source': row.source || '기타'
+                'source': row.source || '기타',
+                '상태': (row['상태'] || '').toString().trim()
             };
-        }).filter(row => row['상품코드'] && row['상품코드'].toString().trim() !== '' && Number(row['입고대기수량']) > 0 && row['표시날짜'] && row['표시날짜'].toString().trim() !== '');
+        }).filter(row => 
+            row['상품코드'] && row['상품코드'].toString().trim() !== '' && 
+            Number(row['입고대기수량']) > 0 && 
+            row['표시날짜'] && row['표시날짜'].toString().trim() !== '' &&
+            row['상태'] !== '오더취소'  // ★ v3.96: 오더취소 상품은 IncomingData에서 제외
+        );
 
         if (finalJson.length > 0) {
             await updateDatabaseB(finalJson, 'IncomingData', null, true);
@@ -1342,10 +1358,158 @@ window.syncIncomingData = async () => {
             window.hideLoading(); 
             alert("입고 대기(수량 1개 이상) 상품이 없거나 데이터를 찾지 못했습니다."); 
         }
+
+        // ★ v3.96: 오더취소된 상품 중 선지정된 자리 찾기 → 모달 자동 표시
+        if (cancelledCodes.size > 0) {
+            const cancelledPreAssigns = originalData.filter(loc => 
+                loc.preAssigned === true && 
+                loc.preAssignedCode && 
+                cancelledCodes.has(loc.preAssignedCode.toString().trim())
+            );
+            
+            if (cancelledPreAssigns.length > 0) {
+                window.showCancelledPreAssignModal(cancelledPreAssigns);
+            }
+        }
     } catch (error) { 
         window.hideLoading(); 
         alert(`🚨 연결 실패!\n데이터를 가져오지 못했습니다.\n(${error.message})`); 
         console.error("데이터 동기화 실패:", error);
+    }
+};
+
+// ★ v3.96: 오더취소 선지정 모달 표시
+window.showCancelledPreAssignModal = function(items) {
+    if (!items || items.length === 0) return;
+    
+    // 전역 변수로 보관 (해제 함수에서 참조)
+    window._cancelledPreAssignItems = items;
+    
+    const tbody = document.getElementById('cancelled-preassign-tbody');
+    if (!tbody) return;
+    
+    let html = '';
+    items.forEach((loc, idx) => {
+        const rowBg = idx % 2 === 0 ? '#ffffff' : '#fff5f5';
+        const code = loc.preAssignedCode || '';
+        const name = loc.preAssignedName || '';
+        const option = loc.option || '';
+        const source = loc.preAssignedSource || '-';
+        
+        html += `
+            <tr style="background:${rowBg};">
+                <td style="font-weight:bold; color:#d32f2f;">${idx + 1}</td>
+                <td style="font-weight:bold; color:#1a237e; font-size:14px;">${loc.id}</td>
+                <td style="font-weight:bold; color:#1a237e;">${code}</td>
+                <td style="text-align:left; font-size:13px;">${name}</td>
+                <td style="font-size:12px;">${option}</td>
+                <td style="font-size:11px; color:#666;">${source}</td>
+                <td style="background:#ffebee;">
+                    <button onclick="window.releasePreAssign('${loc.id}')" style="padding:5px 10px; background:#d32f2f; color:white; border:none; border-radius:4px; font-size:11px; font-weight:bold; cursor:pointer;">🗑️ 해제</button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    tbody.innerHTML = html;
+    document.getElementById('cancelled-preassign-modal').style.display = 'flex';
+};
+
+// ★ v3.96: 개별 선지정 해제
+window.releasePreAssign = async function(locId) {
+    if (!locId) return;
+    if (!confirm(`[${locId}] 자리의 선지정을 해제하시겠습니까?`)) return;
+    
+    try {
+        const zoneDocId = getZoneDocId(locId);
+        await setDoc(doc(db, LOC_COLLECTION, zoneDocId), {
+            [locId]: {
+                preAssigned: false,
+                preAssignedCode: '',
+                preAssignedName: '',
+                preAssignedQty: '',
+                preAssignedAt: 0,
+                codeTag: '',
+                codeTagAt: 0,
+                code: '',
+                name: '',
+                option: '',
+                stock: '0',
+                updatedAt: new Date()
+            }
+        }, { merge: true });
+        
+        showToast(`[${locId}] 선지정 해제 완료`);
+        
+        // 모달의 해당 행 제거
+        if (window._cancelledPreAssignItems) {
+            window._cancelledPreAssignItems = window._cancelledPreAssignItems.filter(item => item.id !== locId);
+            
+            // 모두 해제됐으면 모달 닫기
+            if (window._cancelledPreAssignItems.length === 0) {
+                document.getElementById('cancelled-preassign-modal').style.display = 'none';
+                showToast(`✅ 모든 취소된 선지정 자리가 해제되었습니다.`);
+            } else {
+                // 남은 항목으로 모달 다시 그리기
+                window.showCancelledPreAssignModal(window._cancelledPreAssignItems);
+            }
+        }
+    } catch (e) {
+        console.error("선지정 해제 오류:", e);
+        alert("선지정 해제 중 오류가 발생했습니다.");
+    }
+};
+
+// ★ v3.96: 일괄 선지정 해제
+window.releaseAllCancelledPreAssigns = async function() {
+    const items = window._cancelledPreAssignItems || [];
+    if (items.length === 0) return;
+    if (!confirm(`총 ${items.length}건의 선지정을 모두 해제하시겠습니까?\n\n해제된 자리는 다시 빈 자리로 돌아갑니다.`)) return;
+    
+    window.showLoading(`${items.length}건의 선지정을 일괄 해제 중...`);
+    
+    try {
+        let batch = writeBatch(db);
+        let batchCount = 0;
+        
+        for (const loc of items) {
+            const zoneDocId = getZoneDocId(loc.id);
+            batch.set(doc(db, LOC_COLLECTION, zoneDocId), {
+                [loc.id]: {
+                    preAssigned: false,
+                    preAssignedCode: '',
+                    preAssignedName: '',
+                    preAssignedQty: '',
+                    preAssignedAt: 0,
+                    codeTag: '',
+                    codeTagAt: 0,
+                    code: '',
+                    name: '',
+                    option: '',
+                    stock: '0',
+                    updatedAt: new Date()
+                }
+            }, { merge: true });
+            batchCount++;
+            
+            // 400개마다 커밋
+            if (batchCount >= 400) {
+                await batch.commit();
+                batch = writeBatch(db);
+                batchCount = 0;
+            }
+        }
+        
+        if (batchCount > 0) await batch.commit();
+        
+        window.hideLoading();
+        document.getElementById('cancelled-preassign-modal').style.display = 'none';
+        window._cancelledPreAssignItems = [];
+        alert(`✅ 총 ${items.length}건의 선지정이 일괄 해제되었습니다.`);
+    } catch (e) {
+        window.hideLoading();
+        console.error("일괄 해제 오류:", e);
+        alert("일괄 해제 중 오류가 발생했습니다.");
     }
 };
 
