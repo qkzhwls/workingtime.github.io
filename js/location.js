@@ -1513,6 +1513,359 @@ window.releaseAllCancelledPreAssigns = async function() {
     }
 };
 
+// ===========================================
+// v3.97: 주문 페어 분석 (동선 최적화 인프라)
+// ===========================================
+
+// 주문 데이터 파일 업로드 핸들러
+const fileInputOrders = document.getElementById('excel-upload-orders');
+if (fileInputOrders) {
+    fileInputOrders.addEventListener('change', async function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        window.showLoading('📦 주문 데이터를 분석 중입니다...');
+        try {
+            const result = await universalExcelReader(file);
+            if (result.rows.length > 0) {
+                await window.processOrderData(result.rows);
+            } else {
+                window.hideLoading();
+                _showUploadDiagnosisAlert(result.diagnosis, 'orders');
+                e.target.value = '';
+            }
+        } catch (err) {
+            window.hideLoading();
+            console.error('주문 파일 처리 오류:', err);
+            alert('오류 발생: ' + err.message);
+            e.target.value = '';
+        } finally {
+            e.target.value = '';
+        }
+    });
+}
+
+// 주문 데이터 처리 메인 함수
+window.processOrderData = async function(rows) {
+    try {
+        // 1. 주문번호별로 상품코드 그룹화
+        const orderMap = {};
+        for (const row of rows) {
+            const orderNo = (row['주문번호'] || '').toString().trim();
+            const code = (row['상품코드'] || row['바코드'] || '').toString().trim();
+            const orderDate = (row['주문일'] || '').toString().trim();
+            if (!orderNo || !code) continue;
+            if (!orderMap[orderNo]) orderMap[orderNo] = { codes: new Set(), date: orderDate };
+            orderMap[orderNo].codes.add(code);
+        }
+
+        const orderNos = Object.keys(orderMap);
+        if (orderNos.length === 0) {
+            window.hideLoading();
+            alert('처리할 주문 데이터가 없습니다.');
+            return;
+        }
+
+        // 2. 페어 카운트 + 단독 카운트 집계
+        const pairCounts = {};   // "codeA__codeB" -> { count, lastDate }
+        const codeCounts = {};   // "code" -> { count, lastDate }
+        let totalOrders = 0;
+        let multiOrders = 0;
+        let latestDate = '';
+
+        for (const ono of orderNos) {
+            const obj = orderMap[ono];
+            const codes = [...obj.codes].sort();  // 정렬해서 일관된 페어 ID
+            const date = obj.date;
+            totalOrders++;
+            if (codes.length >= 2) multiOrders++;
+            if (date > latestDate) latestDate = date;
+
+            // 단독 카운트
+            for (const c of codes) {
+                if (!codeCounts[c]) codeCounts[c] = { count: 0, lastDate: '' };
+                codeCounts[c].count++;
+                if (date > codeCounts[c].lastDate) codeCounts[c].lastDate = date;
+            }
+
+            // 페어 카운트 (codes.length >= 2일 때만)
+            if (codes.length >= 2) {
+                for (let i = 0; i < codes.length; i++) {
+                    for (let j = i + 1; j < codes.length; j++) {
+                        const pairId = codes[i] + '__' + codes[j];
+                        if (!pairCounts[pairId]) pairCounts[pairId] = { count: 0, lastDate: '' };
+                        pairCounts[pairId].count++;
+                        if (date > pairCounts[pairId].lastDate) pairCounts[pairId].lastDate = date;
+                    }
+                }
+            }
+        }
+
+        // 3. 기존 Firebase 데이터 로드 (누적)
+        window.showLoading('💾 기존 누적 데이터와 병합 중...');
+        const existingPairs = {};
+        const existingStats = {};
+
+        const pairsSnap = await getDocs(collection(db, 'OrderPairs'));
+        pairsSnap.forEach(d => { existingPairs[d.id] = d.data(); });
+
+        const statsSnap = await getDocs(collection(db, 'OrderStats'));
+        statsSnap.forEach(d => { existingStats[d.id] = d.data(); });
+
+        // 4. 병합 (누적)
+        for (const code in codeCounts) {
+            const newData = codeCounts[code];
+            if (existingStats[code]) {
+                existingStats[code].count = (existingStats[code].count || 0) + newData.count;
+                if (newData.lastDate > (existingStats[code].lastDate || '')) {
+                    existingStats[code].lastDate = newData.lastDate;
+                }
+            } else {
+                existingStats[code] = { code, count: newData.count, lastDate: newData.lastDate };
+            }
+        }
+
+        for (const pairId in pairCounts) {
+            const newData = pairCounts[pairId];
+            const [codeA, codeB] = pairId.split('__');
+            if (existingPairs[pairId]) {
+                existingPairs[pairId].count = (existingPairs[pairId].count || 0) + newData.count;
+                if (newData.lastDate > (existingPairs[pairId].lastDate || '')) {
+                    existingPairs[pairId].lastDate = newData.lastDate;
+                }
+            } else {
+                existingPairs[pairId] = { codeA, codeB, count: newData.count, lastDate: newData.lastDate };
+            }
+        }
+
+        // 5. Firestore 저장 (배치)
+        window.showLoading('💾 Firebase에 저장 중...');
+        let batch = writeBatch(db);
+        let batchCount = 0;
+
+        // OrderStats 저장
+        for (const code in existingStats) {
+            const docRef = doc(db, 'OrderStats', code);
+            batch.set(docRef, existingStats[code], { merge: true });
+            batchCount++;
+            if (batchCount >= 400) {
+                await batch.commit();
+                batch = writeBatch(db);
+                batchCount = 0;
+            }
+        }
+
+        // OrderPairs 저장
+        for (const pairId in existingPairs) {
+            const docRef = doc(db, 'OrderPairs', pairId);
+            batch.set(docRef, existingPairs[pairId], { merge: true });
+            batchCount++;
+            if (batchCount >= 400) {
+                await batch.commit();
+                batch = writeBatch(db);
+                batchCount = 0;
+            }
+        }
+
+        if (batchCount > 0) await batch.commit();
+
+        // 6. 메타정보 갱신 (INFO_CONFIG)
+        const metaUpdate = {
+            orderAnalysisMeta: {
+                lastUploadDate: latestDate || new Date().toISOString().slice(0, 10),
+                lastUploadAt: Date.now(),
+                lastFileTotalOrders: totalOrders,
+                lastFileMultiOrders: multiOrders
+            }
+        };
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), metaUpdate, { merge: true });
+
+        window.hideLoading();
+
+        // 7. 자동 리포트 표시
+        alert(`✅ 주문 데이터 분석 완료!\n\n` +
+              `이번 파일: ${totalOrders}건 주문 (다중 구매 ${multiOrders}건)\n` +
+              `누적 페어: ${Object.keys(existingPairs).length}개\n` +
+              `누적 상품: ${Object.keys(existingStats).length}개\n\n` +
+              `자세한 리포트는 [📊 페어 분석 리포트 보기]에서 확인하세요.`);
+        window.openOrderAnalysisReport();
+    } catch (e) {
+        window.hideLoading();
+        console.error('processOrderData 오류:', e);
+        alert('주문 데이터 처리 중 오류가 발생했습니다.\n' + e.message);
+    }
+};
+
+// 분석 리포트 모달 열기
+window.openOrderAnalysisReport = async function() {
+    document.getElementById('order-analysis-modal').style.display = 'flex';
+    document.getElementById('order-analysis-summary').innerHTML = '<div style="text-align:center; color:#666;">데이터 로딩 중...</div>';
+    document.getElementById('order-analysis-tbody').innerHTML = '';
+
+    try {
+        // 메타정보
+        const configSnap = await getDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'));
+        const meta = configSnap.exists() ? (configSnap.data().orderAnalysisMeta || {}) : {};
+
+        // 데이터 로드
+        const pairsSnap = await getDocs(collection(db, 'OrderPairs'));
+        const statsSnap = await getDocs(collection(db, 'OrderStats'));
+
+        const pairs = [];
+        pairsSnap.forEach(d => pairs.push(d.data()));
+        const stats = {};
+        statsSnap.forEach(d => { stats[d.id] = d.data(); });
+
+        // 총 주문 수 추정 (단독 통계의 최대값 또는 합계 추정)
+        let totalOrdersEstimate = 0;
+        for (const code in stats) {
+            totalOrdersEstimate = Math.max(totalOrdersEstimate, stats[code].count || 0);
+        }
+
+        // lift 계산 + 신뢰 페어 필터 (count >= 5, lift >= 2.0)
+        const N = totalOrdersEstimate || 1;
+        const trustedPairs = [];
+        for (const p of pairs) {
+            const cA = (stats[p.codeA] || {}).count || 0;
+            const cB = (stats[p.codeB] || {}).count || 0;
+            if (cA === 0 || cB === 0) continue;
+            const lift = (p.count * N) / (cA * cB);
+            p.lift = lift;
+            p.countA = cA;
+            p.countB = cB;
+            if (p.count >= 5 && lift >= 2.0) trustedPairs.push(p);
+        }
+
+        // 정렬 (lift × count)
+        trustedPairs.sort((a, b) => (b.lift * b.count) - (a.lift * a.count));
+
+        // 요약
+        let summaryHtml = `
+            <div style="display:flex; justify-content:space-around; flex-wrap:wrap; gap:15px;">
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">최근 업로드</div>
+                    <div style="font-size:14px; color:#4a148c; font-weight:bold;">${meta.lastUploadDate || '-'}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">누적 상품 수</div>
+                    <div style="font-size:18px; color:#4a148c; font-weight:900;">${Object.keys(stats).length}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">누적 페어 수</div>
+                    <div style="font-size:18px; color:#4a148c; font-weight:900;">${pairs.length.toLocaleString()}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">🏆 신뢰 페어 (5회+, lift 2.0+)</div>
+                    <div style="font-size:22px; color:#7b1fa2; font-weight:900;">${trustedPairs.length}</div>
+                </div>
+            </div>
+        `;
+        document.getElementById('order-analysis-summary').innerHTML = summaryHtml;
+
+        // 테이블 렌더링 (TOP 30)
+        const top30 = trustedPairs.slice(0, 30);
+        let tbodyHtml = '';
+        if (top30.length === 0) {
+            tbodyHtml = '<tr><td colspan="7" style="padding:30px; text-align:center; color:#888;">신뢰 페어가 아직 없습니다.<br>더 많은 주문 데이터를 누적해주세요.</td></tr>';
+        } else {
+            // 현재 로케이션 정보 (originalData에서)
+            const codeToLoc = {};
+            originalData.forEach(d => {
+                if (d.code && d.code !== d.id) {
+                    if (!codeToLoc[d.code]) codeToLoc[d.code] = d.id;
+                }
+            });
+
+            top30.forEach((p, idx) => {
+                const rowBg = idx % 2 === 0 ? '#ffffff' : '#faf5ff';
+                const locA = codeToLoc[p.codeA] || '-';
+                const locB = codeToLoc[p.codeB] || '-';
+                
+                // 거리 추정 (구역 비교)
+                let distLabel = '';
+                if (locA === '-' || locB === '-') {
+                    distLabel = '<span style="color:#bbb;">위치없음</span>';
+                } else {
+                    const zoneA = locA.charAt(0);
+                    const zoneB = locB.charAt(0);
+                    if (zoneA === zoneB) {
+                        distLabel = '<span style="color:#2e7d32; font-weight:bold;">✅ 같은구역</span>';
+                    } else {
+                        distLabel = '<span style="color:#d32f2f; font-weight:bold;">❌ 다른구역</span>';
+                    }
+                }
+                
+                tbodyHtml += `
+                    <tr style="background:${rowBg};">
+                        <td style="font-weight:bold; color:#7b1fa2;">${idx + 1}</td>
+                        <td style="font-weight:bold; color:#1a237e; font-size:12px;">${p.codeA}<br><span style="font-size:10px; color:#888; font-weight:normal;">${locA}</span></td>
+                        <td style="font-weight:bold; color:#1a237e; font-size:12px;">${p.codeB}<br><span style="font-size:10px; color:#888; font-weight:normal;">${locB}</span></td>
+                        <td style="font-weight:bold; color:#e65100;">${p.count}회</td>
+                        <td style="font-weight:bold; color:#4a148c;">${p.lift.toFixed(2)}</td>
+                        <td style="font-size:11px; color:#666;">${p.lastDate || '-'}</td>
+                        <td>${distLabel}</td>
+                    </tr>
+                `;
+            });
+        }
+        document.getElementById('order-analysis-tbody').innerHTML = tbodyHtml;
+    } catch (e) {
+        console.error('리포트 로드 오류:', e);
+        document.getElementById('order-analysis-summary').innerHTML = 
+            '<div style="color:#d32f2f;">데이터 로드 실패: ' + e.message + '</div>';
+    }
+};
+
+// 누적 데이터 전체 초기화
+window.resetOrderAnalysis = async function() {
+    if (!confirm('정말로 누적된 모든 주문 페어 분석 데이터를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) return;
+    if (!confirm('마지막 확인입니다.\n\n모든 OrderPairs와 OrderStats가 삭제됩니다.\n계속하시겠습니까?')) return;
+
+    window.showLoading('🗑️ 누적 데이터 삭제 중...');
+    try {
+        // OrderPairs 전체 삭제
+        const pairsSnap = await getDocs(collection(db, 'OrderPairs'));
+        let batch = writeBatch(db);
+        let batchCount = 0;
+        pairsSnap.forEach(d => {
+            batch.delete(d.ref);
+            batchCount++;
+            if (batchCount >= 400) {
+                batch.commit();
+                batch = writeBatch(db);
+                batchCount = 0;
+            }
+        });
+        if (batchCount > 0) await batch.commit();
+
+        // OrderStats 전체 삭제
+        const statsSnap = await getDocs(collection(db, 'OrderStats'));
+        batch = writeBatch(db);
+        batchCount = 0;
+        statsSnap.forEach(d => {
+            batch.delete(d.ref);
+            batchCount++;
+            if (batchCount >= 400) {
+                batch.commit();
+                batch = writeBatch(db);
+                batchCount = 0;
+            }
+        });
+        if (batchCount > 0) await batch.commit();
+
+        // INFO_CONFIG의 메타정보도 초기화
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), {
+            orderAnalysisMeta: deleteField()
+        }, { merge: true });
+
+        window.hideLoading();
+        alert('✅ 누적 데이터가 모두 삭제되었습니다.');
+        document.getElementById('order-analysis-modal').style.display = 'none';
+    } catch (e) {
+        window.hideLoading();
+        console.error('초기화 오류:', e);
+        alert('초기화 중 오류가 발생했습니다.\n' + e.message);
+    }
+};
+
 window.saveCapacity2F = async function() {
     const input = document.getElementById('input-cap-2f');
     if (!input) return;
@@ -2677,7 +3030,8 @@ const _uploadHeaderGuide = {
     'permanent': '로케이션, 동, 위치, 칸수',
     'daily':     '로케이션, 상품코드, 상품명, 옵션, 정상재고, 2층창고재고',
     'zikjin':    '상품코드(또는 어드민상품코드/대표상품코드 등), 수량',
-    'weekly':    '상품코드(또는 어드민상품코드/대표상품코드 등), 기간배송수량 또는 기간발주수량'
+    'weekly':    '상품코드(또는 어드민상품코드/대표상품코드 등), 기간배송수량 또는 기간발주수량',
+    'orders':    '주문번호, 상품코드(또는 바코드), 주문일'
 };
 
 function _showUploadDiagnosisAlert(diagnosis, uploadType) {
