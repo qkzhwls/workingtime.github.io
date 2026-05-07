@@ -372,7 +372,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.95 (잘못된 파일 형식 안내 차별화)</div>
+            <div class="version-badge">🚀 Ver 3.96 (오더취소 선지정 자동 알림)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -557,6 +557,40 @@
                 <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="closeRecommendModal()">닫기</button>
             </div>
             
+        </div>
+    </div>
+
+    <div id="cancelled-preassign-modal" class="modal-overlay" onclick="if(event.target.id==='cancelled-preassign-modal') document.getElementById('cancelled-preassign-modal').style.display='none'">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 720px; max-width: 96vw; padding: 25px 20px;">
+            <div class="modal-header" style="color: #d32f2f; display: flex; align-items: center; gap: 10px;">
+                🚨 오더 취소된 선지정 상품 발견
+                <button onclick="document.getElementById('cancelled-preassign-modal').style.display='none'" style="margin-left:auto; background:none; border:none; font-size:24px; cursor:pointer;">×</button>
+            </div>
+            <div style="background:#ffebee; border:1px solid #ef9a9a; border-radius:8px; padding:12px 15px; margin-bottom:15px; font-size:13px; color:#b71c1c; line-height:1.6;">
+                <b>다음 상품들이 구글시트에서 "오더취소"로 표시되었습니다.</b><br>
+                현재 로케이션 관리 시스템에 선지정된 자리가 있어, 입고가 안 될 가능성이 큽니다.<br>
+                불필요한 자리가 점유되지 않도록 <b>해제</b>를 권장드립니다.
+            </div>
+            <div class="modal-body" style="max-height: 50vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
+                    <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <tr>
+                            <th style="width:50px; border-top:none; font-size:13px;">No</th>
+                            <th style="width:120px; border-top:none; font-size:13px;">선지정 위치</th>
+                            <th style="width:120px; border-top:none; font-size:13px;">상품코드</th>
+                            <th style="border-top:none; font-size:13px;">상품명</th>
+                            <th style="width:120px; border-top:none; font-size:13px;">옵션</th>
+                            <th style="width:80px; border-top:none; font-size:13px;">분류</th>
+                            <th style="width:90px; background:#ffebee; border-top:none; font-size:13px;">해제</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cancelled-preassign-tbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+                <button onclick="window.releaseAllCancelledPreAssigns()" style="padding:10px 18px; background:#d32f2f; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🗑️ 모두 해제</button>
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="document.getElementById('cancelled-preassign-modal').style.display='none'">닫기</button>
+            </div>
         </div>
     </div>
 
