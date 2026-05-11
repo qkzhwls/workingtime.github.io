@@ -1513,40 +1513,17 @@ window.releaseAllCancelledPreAssigns = async function() {
     }
 };
 
-// ===========================================
-// v3.97: 주문 페어 분석 (동선 최적화 인프라)
-// ===========================================
+// ===== v3.97a: 청크 압축 + 중복 방지 =====
+const ORDER_PAIRS_COLL = 'OrderPairsChunks';
+const ORDER_STATS_COLL = 'OrderStatsChunks';
+const PROCESSED_ORDERS_COLL = 'ProcessedOrders';
+const CHUNK_SIZE_PAIRS = 200;
+const CHUNK_SIZE_STATS = 200;
 
-// 주문 데이터 파일 업로드 핸들러
-const fileInputOrders = document.getElementById('excel-upload-orders');
-if (fileInputOrders) {
-    fileInputOrders.addEventListener('change', async function(e) {
-        const file = e.target.files[0]; if (!file) return;
-        window.showLoading('📦 주문 데이터를 분석 중입니다...');
-        try {
-            const result = await universalExcelReader(file);
-            if (result.rows.length > 0) {
-                await window.processOrderData(result.rows);
-            } else {
-                window.hideLoading();
-                _showUploadDiagnosisAlert(result.diagnosis, 'orders');
-                e.target.value = '';
-            }
-        } catch (err) {
-            window.hideLoading();
-            console.error('주문 파일 처리 오류:', err);
-            alert('오류 발생: ' + err.message);
-            e.target.value = '';
-        } finally {
-            e.target.value = '';
-        }
-    });
-}
-
-// 주문 데이터 처리 메인 함수
-window.processOrderData = async function(rows) {
+// 1단계: 업로드 미리보기 (중복 검사)
+window.previewOrderData = async function(rows) {
     try {
-        // 1. 주문번호별로 상품코드 그룹화
+        // 1. 주문번호별 그룹화
         const orderMap = {};
         for (const row of rows) {
             const orderNo = (row['주문번호'] || '').toString().trim();
@@ -1564,127 +1541,249 @@ window.processOrderData = async function(rows) {
             return;
         }
 
-        // 2. 페어 카운트 + 단독 카운트 집계
-        const pairCounts = {};   // "codeA__codeB" -> { count, lastDate }
-        const codeCounts = {};   // "code" -> { count, lastDate }
-        let totalOrders = 0;
-        let multiOrders = 0;
+        // 2. 기존 ProcessedOrders 조회
+        window.showLoading('💾 중복 주문 검사 중...');
+        const processedSet = new Set();
+        const processedSnap = await getDocs(collection(db, PROCESSED_ORDERS_COLL));
+        processedSnap.forEach(d => { processedSet.add(d.id); });
+
+        // 3. 신규/중복 분류
+        const newOrders = [];
+        const dupOrders = [];
+        for (const ono of orderNos) {
+            if (processedSet.has(ono)) dupOrders.push(ono);
+            else newOrders.push(ono);
+        }
+
+        // 4. 다중 구매 카운트 (신규만)
+        let newMulti = 0;
+        for (const ono of newOrders) {
+            if (orderMap[ono].codes.size >= 2) newMulti++;
+        }
+
+        // 5. 미리보기 데이터 보관
+        window._pendingOrderData = { orderMap, newOrders, dupOrders };
+
+        window.hideLoading();
+
+        // 6. 미리보기 모달 표시
+        const content = `
+            <div style="background:#f3e5f5; border:1px solid #ce93d8; border-radius:8px; padding:15px;">
+                <div style="display:flex; justify-content:space-around; flex-wrap:wrap; gap:10px;">
+                    <div style="text-align:center;">
+                        <div style="font-size:11px; color:#666;">파일 총 주문</div>
+                        <div style="font-size:20px; color:#4a148c; font-weight:900;">${orderNos.length.toLocaleString()}</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:11px; color:#666;">✨ 신규 주문</div>
+                        <div style="font-size:20px; color:#2e7d32; font-weight:900;">${newOrders.length.toLocaleString()}</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:11px; color:#666;">🔄 이미 처리됨</div>
+                        <div style="font-size:20px; color:#f57c00; font-weight:900;">${dupOrders.length.toLocaleString()}</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:11px; color:#666;">신규 다중구매</div>
+                        <div style="font-size:20px; color:#7b1fa2; font-weight:900;">${newMulti.toLocaleString()}</div>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:15px; padding:10px; background:#fafafa; border:1px solid #eee; border-radius:6px; font-size:12px; color:#555; line-height:1.6;">
+                ${newOrders.length === 0 ? '<b style="color:#d32f2f;">⚠️ 모든 주문이 이미 처리되었습니다.</b><br>이전에 같은 파일을 업로드했을 가능성이 큽니다.' : 
+                  dupOrders.length === 0 ? '<b style="color:#2e7d32;">✅ 모든 주문이 신규입니다.</b><br>"신규 주문만 처리" 버튼을 클릭하여 진행하세요.' :
+                  `<b>📌 처리 옵션</b><br>• <b>신규 주문만 처리</b>: 이미 처리된 ${dupOrders.length}건은 건너뛰고 새 ${newOrders.length}건만 누적<br>• <b>중복 무시하고 모두 처리</b>: 모든 ${orderNos.length}건 처리 (중복 카운트 발생)`}
+            </div>
+        `;
+        document.getElementById('order-preview-content').innerHTML = content;
+        document.getElementById('btn-process-new-orders').style.display = newOrders.length > 0 ? 'inline-block' : 'none';
+        document.getElementById('btn-process-all-orders').style.display = dupOrders.length > 0 ? 'inline-block' : 'none';
+        document.getElementById('order-preview-modal').style.display = 'flex';
+    } catch (e) {
+        window.hideLoading();
+        console.error('previewOrderData 오류:', e);
+        alert('미리보기 오류: ' + e.message);
+    }
+};
+
+// 2단계: 사용자 확인 후 실제 처리
+window.confirmProcessOrders = async function(mode) {
+    const pending = window._pendingOrderData;
+    if (!pending) return;
+    document.getElementById('order-preview-modal').style.display = 'none';
+
+    const targetOrderNos = (mode === 'all') 
+        ? Object.keys(pending.orderMap) 
+        : pending.newOrders;
+
+    if (targetOrderNos.length === 0) {
+        alert('처리할 주문이 없습니다.');
+        window._pendingOrderData = null;
+        return;
+    }
+
+    await window.processOrderData(pending.orderMap, targetOrderNos);
+    window._pendingOrderData = null;
+};
+
+// 3단계: 실제 페어 통계 계산 + Firebase 청크 압축 누적 저장
+window.processOrderData = async function(orderMap, targetOrderNos) {
+    try {
+        window.showLoading('📊 페어 통계 계산 중...');
+
+        // 1. 페어/단독 카운트 집계 (이번 처리분만)
+        const newCodeCounts = {};
+        const newPairCounts = {};
         let latestDate = '';
 
-        for (const ono of orderNos) {
+        for (const ono of targetOrderNos) {
             const obj = orderMap[ono];
-            const codes = [...obj.codes].sort();  // 정렬해서 일관된 페어 ID
+            if (!obj) continue;
+            const codes = [...obj.codes].sort();
             const date = obj.date;
-            totalOrders++;
-            if (codes.length >= 2) multiOrders++;
             if (date > latestDate) latestDate = date;
 
-            // 단독 카운트
             for (const c of codes) {
-                if (!codeCounts[c]) codeCounts[c] = { count: 0, lastDate: '' };
-                codeCounts[c].count++;
-                if (date > codeCounts[c].lastDate) codeCounts[c].lastDate = date;
+                if (!newCodeCounts[c]) newCodeCounts[c] = { count: 0, lastDate: '' };
+                newCodeCounts[c].count++;
+                if (date > newCodeCounts[c].lastDate) newCodeCounts[c].lastDate = date;
             }
 
-            // 페어 카운트 (codes.length >= 2일 때만)
             if (codes.length >= 2) {
                 for (let i = 0; i < codes.length; i++) {
                     for (let j = i + 1; j < codes.length; j++) {
                         const pairId = codes[i] + '__' + codes[j];
-                        if (!pairCounts[pairId]) pairCounts[pairId] = { count: 0, lastDate: '' };
-                        pairCounts[pairId].count++;
-                        if (date > pairCounts[pairId].lastDate) pairCounts[pairId].lastDate = date;
+                        if (!newPairCounts[pairId]) newPairCounts[pairId] = { count: 0, lastDate: '' };
+                        newPairCounts[pairId].count++;
+                        if (date > newPairCounts[pairId].lastDate) newPairCounts[pairId].lastDate = date;
                     }
                 }
             }
         }
 
-        // 3. 기존 Firebase 데이터 로드 (누적)
+        // 2. 기존 청크 로드 + 병합
         window.showLoading('💾 기존 누적 데이터와 병합 중...');
         const existingPairs = {};
         const existingStats = {};
 
-        const pairsSnap = await getDocs(collection(db, 'OrderPairs'));
-        pairsSnap.forEach(d => { existingPairs[d.id] = d.data(); });
+        const pairsSnap = await getDocs(collection(db, ORDER_PAIRS_COLL));
+        pairsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(p => {
+                    const pid = p.cA + '__' + p.cB;
+                    existingPairs[pid] = { codeA: p.cA, codeB: p.cB, count: p.c, lastDate: p.d };
+                });
+            } catch (e) {}
+        });
 
-        const statsSnap = await getDocs(collection(db, 'OrderStats'));
-        statsSnap.forEach(d => { existingStats[d.id] = d.data(); });
+        const statsSnap = await getDocs(collection(db, ORDER_STATS_COLL));
+        statsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(s => {
+                    existingStats[s.c] = { code: s.c, count: s.n, lastDate: s.d };
+                });
+            } catch (e) {}
+        });
 
-        // 4. 병합 (누적)
-        for (const code in codeCounts) {
-            const newData = codeCounts[code];
+        // 병합
+        for (const code in newCodeCounts) {
+            const nd = newCodeCounts[code];
             if (existingStats[code]) {
-                existingStats[code].count = (existingStats[code].count || 0) + newData.count;
-                if (newData.lastDate > (existingStats[code].lastDate || '')) {
-                    existingStats[code].lastDate = newData.lastDate;
-                }
+                existingStats[code].count += nd.count;
+                if (nd.lastDate > existingStats[code].lastDate) existingStats[code].lastDate = nd.lastDate;
             } else {
-                existingStats[code] = { code, count: newData.count, lastDate: newData.lastDate };
+                existingStats[code] = { code, count: nd.count, lastDate: nd.lastDate };
+            }
+        }
+        for (const pid in newPairCounts) {
+            const nd = newPairCounts[pid];
+            const [codeA, codeB] = pid.split('__');
+            if (existingPairs[pid]) {
+                existingPairs[pid].count += nd.count;
+                if (nd.lastDate > existingPairs[pid].lastDate) existingPairs[pid].lastDate = nd.lastDate;
+            } else {
+                existingPairs[pid] = { codeA, codeB, count: nd.count, lastDate: nd.lastDate };
             }
         }
 
-        for (const pairId in pairCounts) {
-            const newData = pairCounts[pairId];
-            const [codeA, codeB] = pairId.split('__');
-            if (existingPairs[pairId]) {
-                existingPairs[pairId].count = (existingPairs[pairId].count || 0) + newData.count;
-                if (newData.lastDate > (existingPairs[pairId].lastDate || '')) {
-                    existingPairs[pairId].lastDate = newData.lastDate;
-                }
-            } else {
-                existingPairs[pairId] = { codeA, codeB, count: newData.count, lastDate: newData.lastDate };
-            }
-        }
+        // 3. 청크 압축 저장 (기존 청크 삭제 후 다시 작성)
+        window.showLoading('💾 Firebase에 청크 압축 저장 중...');
 
-        // 5. Firestore 저장 (배치)
-        window.showLoading('💾 Firebase에 저장 중...');
         let batch = writeBatch(db);
-        let batchCount = 0;
+        let bc = 0;
+        pairsSnap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
+        if (bc > 0) await batch.commit();
 
-        // OrderStats 저장
-        for (const code in existingStats) {
-            const docRef = doc(db, 'OrderStats', code);
-            batch.set(docRef, existingStats[code], { merge: true });
-            batchCount++;
-            if (batchCount >= 400) {
-                await batch.commit();
-                batch = writeBatch(db);
-                batchCount = 0;
-            }
+        batch = writeBatch(db);
+        bc = 0;
+        statsSnap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
+        if (bc > 0) await batch.commit();
+
+        const allPairs = Object.values(existingPairs).map(p => ({ cA: p.codeA, cB: p.codeB, c: p.count, d: p.lastDate }));
+        batch = writeBatch(db);
+        bc = 0;
+        let chunkIdx = 0;
+        for (let i = 0; i < allPairs.length; i += CHUNK_SIZE_PAIRS) {
+            const chunk = allPairs.slice(i, i + CHUNK_SIZE_PAIRS);
+            const docRef = doc(db, ORDER_PAIRS_COLL, `CHUNK_${chunkIdx}`);
+            batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            chunkIdx++; bc++;
+            if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
         }
+        if (bc > 0) await batch.commit();
 
-        // OrderPairs 저장
-        for (const pairId in existingPairs) {
-            const docRef = doc(db, 'OrderPairs', pairId);
-            batch.set(docRef, existingPairs[pairId], { merge: true });
-            batchCount++;
-            if (batchCount >= 400) {
-                await batch.commit();
-                batch = writeBatch(db);
-                batchCount = 0;
-            }
+        const allStats = Object.values(existingStats).map(s => ({ c: s.code, n: s.count, d: s.lastDate }));
+        batch = writeBatch(db);
+        bc = 0;
+        chunkIdx = 0;
+        for (let i = 0; i < allStats.length; i += CHUNK_SIZE_STATS) {
+            const chunk = allStats.slice(i, i + CHUNK_SIZE_STATS);
+            const docRef = doc(db, ORDER_STATS_COLL, `CHUNK_${chunkIdx}`);
+            batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            chunkIdx++; bc++;
+            if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
         }
+        if (bc > 0) await batch.commit();
 
-        if (batchCount > 0) await batch.commit();
+        // 4. ProcessedOrders 추가 (처리한 주문번호)
+        window.showLoading('💾 처리 이력 저장 중...');
+        batch = writeBatch(db);
+        bc = 0;
+        for (const ono of targetOrderNos) {
+            const obj = orderMap[ono];
+            const docRef = doc(db, PROCESSED_ORDERS_COLL, ono);
+            batch.set(docRef, { date: obj.date || latestDate, at: Date.now() }, { merge: true });
+            bc++;
+            if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
+        }
+        if (bc > 0) await batch.commit();
 
-        // 6. 메타정보 갱신 (INFO_CONFIG)
+        // 5. 메타정보 갱신
+        let prevTotal = 0;
+        try {
+            const cfgSnap = await getDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'));
+            if (cfgSnap.exists()) {
+                const prevMeta = cfgSnap.data().orderAnalysisMeta || {};
+                prevTotal = prevMeta.totalProcessedOrders || 0;
+            }
+        } catch (e) {}
         const metaUpdate = {
             orderAnalysisMeta: {
                 lastUploadDate: latestDate || new Date().toISOString().slice(0, 10),
                 lastUploadAt: Date.now(),
-                lastFileTotalOrders: totalOrders,
-                lastFileMultiOrders: multiOrders
+                totalProcessedOrders: prevTotal + targetOrderNos.length,
+                totalPairs: Object.keys(existingPairs).length,
+                totalCodes: Object.keys(existingStats).length
             }
         };
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), metaUpdate, { merge: true });
 
         window.hideLoading();
-
-        // 7. 자동 리포트 표시
         alert(`✅ 주문 데이터 분석 완료!\n\n` +
-              `이번 파일: ${totalOrders}건 주문 (다중 구매 ${multiOrders}건)\n` +
-              `누적 페어: ${Object.keys(existingPairs).length}개\n` +
-              `누적 상품: ${Object.keys(existingStats).length}개\n\n` +
+              `이번 처리: ${targetOrderNos.length.toLocaleString()}건 주문\n` +
+              `누적 페어: ${Object.keys(existingPairs).length.toLocaleString()}개\n` +
+              `누적 상품: ${Object.keys(existingStats).length.toLocaleString()}개\n\n` +
               `자세한 리포트는 [📊 페어 분석 리포트 보기]에서 확인하세요.`);
         window.openOrderAnalysisReport();
     } catch (e) {
@@ -1705,20 +1804,28 @@ window.openOrderAnalysisReport = async function() {
         const configSnap = await getDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'));
         const meta = configSnap.exists() ? (configSnap.data().orderAnalysisMeta || {}) : {};
 
-        // 데이터 로드
-        const pairsSnap = await getDocs(collection(db, 'OrderPairs'));
-        const statsSnap = await getDocs(collection(db, 'OrderStats'));
-
+        // 데이터 로드 (v3.97a: 청크 압축 구조)
         const pairs = [];
-        pairsSnap.forEach(d => pairs.push(d.data()));
         const stats = {};
-        statsSnap.forEach(d => { stats[d.id] = d.data(); });
 
-        // 총 주문 수 추정 (단독 통계의 최대값 또는 합계 추정)
-        let totalOrdersEstimate = 0;
-        for (const code in stats) {
-            totalOrdersEstimate = Math.max(totalOrdersEstimate, stats[code].count || 0);
-        }
+        const pairsSnap = await getDocs(collection(db, ORDER_PAIRS_COLL));
+        pairsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(p => pairs.push({ codeA: p.cA, codeB: p.cB, count: p.c, lastDate: p.d }));
+            } catch (e) {}
+        });
+
+        const statsSnap = await getDocs(collection(db, ORDER_STATS_COLL));
+        statsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(s => { stats[s.c] = { code: s.c, count: s.n, lastDate: s.d }; });
+            } catch (e) {}
+        });
+
+        // 총 주문 수는 메타에서 가져오기 (정확함)
+        const totalOrdersEstimate = meta.totalProcessedOrders || 1;
 
         // lift 계산 + 신뢰 페어 필터 (count >= 5, lift >= 2.0)
         const N = totalOrdersEstimate || 1;
@@ -1745,8 +1852,12 @@ window.openOrderAnalysisReport = async function() {
                     <div style="font-size:14px; color:#4a148c; font-weight:bold;">${meta.lastUploadDate || '-'}</div>
                 </div>
                 <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">누적 처리 주문</div>
+                    <div style="font-size:18px; color:#4a148c; font-weight:900;">${(meta.totalProcessedOrders || 0).toLocaleString()}</div>
+                </div>
+                <div style="text-align:center;">
                     <div style="font-size:11px; color:#666;">누적 상품 수</div>
-                    <div style="font-size:18px; color:#4a148c; font-weight:900;">${Object.keys(stats).length}</div>
+                    <div style="font-size:18px; color:#4a148c; font-weight:900;">${Object.keys(stats).length.toLocaleString()}</div>
                 </div>
                 <div style="text-align:center;">
                     <div style="font-size:11px; color:#666;">누적 페어 수</div>
@@ -1754,7 +1865,7 @@ window.openOrderAnalysisReport = async function() {
                 </div>
                 <div style="text-align:center;">
                     <div style="font-size:11px; color:#666;">🏆 신뢰 페어 (5회+, lift 2.0+)</div>
-                    <div style="font-size:22px; color:#7b1fa2; font-weight:900;">${trustedPairs.length}</div>
+                    <div style="font-size:22px; color:#7b1fa2; font-weight:900;">${trustedPairs.length.toLocaleString()}</div>
                 </div>
             </div>
         `;
@@ -1817,39 +1928,22 @@ window.openOrderAnalysisReport = async function() {
 // 누적 데이터 전체 초기화
 window.resetOrderAnalysis = async function() {
     if (!confirm('정말로 누적된 모든 주문 페어 분석 데이터를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.')) return;
-    if (!confirm('마지막 확인입니다.\n\n모든 OrderPairs와 OrderStats가 삭제됩니다.\n계속하시겠습니까?')) return;
+    if (!confirm('마지막 확인입니다.\n\nOrderPairsChunks, OrderStatsChunks, ProcessedOrders가 모두 삭제됩니다.\n계속하시겠습니까?')) return;
 
     window.showLoading('🗑️ 누적 데이터 삭제 중...');
     try {
-        // OrderPairs 전체 삭제
-        const pairsSnap = await getDocs(collection(db, 'OrderPairs'));
-        let batch = writeBatch(db);
-        let batchCount = 0;
-        pairsSnap.forEach(d => {
-            batch.delete(d.ref);
-            batchCount++;
-            if (batchCount >= 400) {
-                batch.commit();
-                batch = writeBatch(db);
-                batchCount = 0;
-            }
-        });
-        if (batchCount > 0) await batch.commit();
-
-        // OrderStats 전체 삭제
-        const statsSnap = await getDocs(collection(db, 'OrderStats'));
-        batch = writeBatch(db);
-        batchCount = 0;
-        statsSnap.forEach(d => {
-            batch.delete(d.ref);
-            batchCount++;
-            if (batchCount >= 400) {
-                batch.commit();
-                batch = writeBatch(db);
-                batchCount = 0;
-            }
-        });
-        if (batchCount > 0) await batch.commit();
+        const collsToDelete = [ORDER_PAIRS_COLL, ORDER_STATS_COLL, PROCESSED_ORDERS_COLL];
+        for (const collName of collsToDelete) {
+            const snap = await getDocs(collection(db, collName));
+            let batch = writeBatch(db);
+            let bc = 0;
+            snap.forEach(d => {
+                batch.delete(d.ref);
+                bc++;
+                if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; }
+            });
+            if (bc > 0) await batch.commit();
+        }
 
         // INFO_CONFIG의 메타정보도 초기화
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), {
