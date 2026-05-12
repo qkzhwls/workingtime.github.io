@@ -2779,7 +2779,7 @@ if (fileInputOrders) {
         try {
             const result = await universalExcelReader(file);
             if (result.rows.length > 0) {
-                await window.previewOrderData(result.rows);
+                await window.processOrderData(result.rows);
             } else {
                 window.hideLoading();
                 _showUploadDiagnosisAlert(result.diagnosis, 'orders');
@@ -2796,8 +2796,8 @@ if (fileInputOrders) {
     });
 }
 
-// 1단계: 업로드 미리보기 (중복 검사)
-window.previewOrderData = async function(rows) {
+// 주문 데이터 처리: 중복 검사 → 신규만 자동 누적 저장
+window.processOrderData = async function(rows) {
     try {
         window.showLoading('🔍 주문번호별로 그룹화 중...');
         // 1. 주문번호별 그룹화
@@ -2818,98 +2818,24 @@ window.previewOrderData = async function(rows) {
             return;
         }
 
-        // 2. 기존 ProcessedOrders 조회
+        // 2. 기존 ProcessedOrders 조회 (중복 업로드 방지)
         window.showLoading('💾 중복 주문 검사 중...');
         const processedSet = new Set();
         const processedSnap = await getDocs(collection(db, PROCESSED_ORDERS_COLL));
         processedSnap.forEach(d => { processedSet.add(d.id); });
 
-        // 3. 신규/중복 분류
-        const newOrders = [];
-        const dupOrders = [];
-        for (const ono of orderNos) {
-            if (processedSet.has(ono)) dupOrders.push(ono);
-            else newOrders.push(ono);
+        // 3. 신규 주문만 필터링
+        const targetOrderNos = orderNos.filter(ono => !processedSet.has(ono));
+        const dupCount = orderNos.length - targetOrderNos.length;
+
+        if (targetOrderNos.length === 0) {
+            window.hideLoading();
+            alert(`⚠️ 모든 주문이 이미 처리되었습니다.\n\n파일 총 주문: ${orderNos.length.toLocaleString()}건\n이미 처리됨: ${dupCount.toLocaleString()}건\n\n이전에 같은 파일을 업로드했을 가능성이 큽니다.`);
+            return;
         }
 
-        // 4. 다중 구매 카운트 (신규만)
-        let newMulti = 0;
-        for (const ono of newOrders) {
-            if (orderMap[ono].codes.size >= 2) newMulti++;
-        }
-
-        // 5. 미리보기 데이터 보관
-        window._pendingOrderData = { orderMap, newOrders, dupOrders };
-
-        window.hideLoading();
-
-        // 6. 미리보기 모달 표시
-        const content = `
-            <div style="background:#f3e5f5; border:1px solid #ce93d8; border-radius:8px; padding:15px;">
-                <div style="display:flex; justify-content:space-around; flex-wrap:wrap; gap:10px;">
-                    <div style="text-align:center;">
-                        <div style="font-size:11px; color:#666;">파일 총 주문</div>
-                        <div style="font-size:20px; color:#4a148c; font-weight:900;">${orderNos.length.toLocaleString()}</div>
-                    </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:11px; color:#666;">✨ 신규 주문</div>
-                        <div style="font-size:20px; color:#2e7d32; font-weight:900;">${newOrders.length.toLocaleString()}</div>
-                    </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:11px; color:#666;">🔄 이미 처리됨</div>
-                        <div style="font-size:20px; color:#f57c00; font-weight:900;">${dupOrders.length.toLocaleString()}</div>
-                    </div>
-                    <div style="text-align:center;">
-                        <div style="font-size:11px; color:#666;">신규 다중구매</div>
-                        <div style="font-size:20px; color:#7b1fa2; font-weight:900;">${newMulti.toLocaleString()}</div>
-                    </div>
-                </div>
-            </div>
-            <div style="margin-top:15px; padding:10px; background:#fafafa; border:1px solid #eee; border-radius:6px; font-size:12px; color:#555; line-height:1.6;">
-                ${newOrders.length === 0 ? '<b style="color:#d32f2f;">⚠️ 모든 주문이 이미 처리되었습니다.</b><br>이전에 같은 파일을 업로드했을 가능성이 큽니다.' : 
-                  dupOrders.length === 0 ? '<b style="color:#2e7d32;">✅ 모든 주문이 신규입니다.</b><br>"신규 주문만 처리" 버튼을 클릭하여 진행하세요.' :
-                  `<b>📌 처리 옵션</b><br>• <b>신규 주문만 처리</b>: 이미 처리된 ${dupOrders.length}건은 건너뛰고 새 ${newOrders.length}건만 누적<br>• <b>중복 무시하고 모두 처리</b>: 모든 ${orderNos.length}건 처리 (중복 카운트 발생)`}
-            </div>
-        `;
-        document.getElementById('order-preview-content').innerHTML = content;
-        document.getElementById('btn-process-new-orders').style.display = newOrders.length > 0 ? 'inline-block' : 'none';
-        document.getElementById('btn-process-all-orders').style.display = dupOrders.length > 0 ? 'inline-block' : 'none';
-        document.getElementById('order-preview-modal').style.display = 'flex';
-    } catch (e) {
-        window.hideLoading();
-        console.error('previewOrderData 오류:', e);
-        alert('미리보기 오류: ' + e.message);
-    }
-};
-
-// 2단계: 사용자 확인 후 실제 처리
-window.confirmProcessOrders = async function(mode) {
-    const pending = window._pendingOrderData;
-    if (!pending) return;
-    document.getElementById('order-preview-modal').style.display = 'none';
-    window.showLoading('⏳ 처리 준비 중...');
-
-    const targetOrderNos = (mode === 'all') 
-        ? Object.keys(pending.orderMap) 
-        : pending.newOrders;
-
-    if (targetOrderNos.length === 0) {
-        window.hideLoading();
-        alert('처리할 주문이 없습니다.');
-        window._pendingOrderData = null;
-        return;
-    }
-
-    await window.processOrderData(pending.orderMap, targetOrderNos);
-    window._pendingOrderData = null;
-};
-
-// 3단계: 실제 페어 통계 계산 + Firebase 청크 압축 누적 저장
-window.processOrderData = async function(orderMap, targetOrderNos) {
-    try {
+        // 4. 페어/단독 카운트 집계 (신규분만)
         window.showLoading('📊 페어 통계 계산 중...');
-
-        // 1. 페어/단독 카운트 집계 (이번 처리분만)
         const newPairCounts = {};
         const newCodeCounts = {};
         let latestDate = '';
@@ -2921,12 +2847,14 @@ window.processOrderData = async function(orderMap, targetOrderNos) {
             const date = obj.date;
             if (date > latestDate) latestDate = date;
 
+            // 단독 카운트
             for (const c of codes) {
                 if (!newCodeCounts[c]) newCodeCounts[c] = { count: 0, lastDate: '' };
                 newCodeCounts[c].count++;
                 if (date > newCodeCounts[c].lastDate) newCodeCounts[c].lastDate = date;
             }
 
+            // 페어 카운트
             if (codes.length >= 2) {
                 for (let i = 0; i < codes.length; i++) {
                     for (let j = i + 1; j < codes.length; j++) {
@@ -2939,7 +2867,7 @@ window.processOrderData = async function(orderMap, targetOrderNos) {
             }
         }
 
-        // 2. 기존 청크 로드 + 병합
+        // 5. 기존 청크 로드 + 병합
         window.showLoading('💾 기존 누적 데이터와 병합 중...');
         const existingPairs = {};
         const existingStats = {};
@@ -2965,6 +2893,7 @@ window.processOrderData = async function(orderMap, targetOrderNos) {
             } catch (e) {}
         });
 
+        // 병합
         for (const code in newCodeCounts) {
             const nd = newCodeCounts[code];
             if (existingStats[code]) {
@@ -2985,54 +2914,70 @@ window.processOrderData = async function(orderMap, targetOrderNos) {
             }
         }
 
-        // 3. 청크 압축 저장
+        // 6. 청크 압축 저장 (기존 청크 삭제 후 다시 작성)
         window.showLoading('💾 Firebase에 청크 압축 저장 중...');
+
         let batch = writeBatch(db);
         let bc = 0;
         pairsSnap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
         if (bc > 0) await batch.commit();
 
-        batch = writeBatch(db); bc = 0;
+        batch = writeBatch(db);
+        bc = 0;
         statsSnap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
         if (bc > 0) await batch.commit();
 
+        // 새 청크 작성 (페어)
         const allPairs = Object.values(existingPairs).map(p => ({ cA: p.codeA, cB: p.codeB, c: p.count, d: p.lastDate }));
-        batch = writeBatch(db); bc = 0; let chunkIdx = 0;
+        batch = writeBatch(db);
+        bc = 0;
+        let chunkIdx = 0;
         for (let i = 0; i < allPairs.length; i += CHUNK_SIZE_PAIRS) {
             const chunk = allPairs.slice(i, i + CHUNK_SIZE_PAIRS);
             const docRef = doc(db, ORDER_PAIRS_COLL, `CHUNK_${chunkIdx}`);
             batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
-            chunkIdx++; bc++;
+            chunkIdx++;
+            bc++;
             if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
         }
         if (bc > 0) await batch.commit();
 
+        // 새 청크 작성 (단독)
         const allStats = Object.values(existingStats).map(s => ({ c: s.code, n: s.count, d: s.lastDate }));
-        batch = writeBatch(db); bc = 0; chunkIdx = 0;
+        batch = writeBatch(db);
+        bc = 0;
+        chunkIdx = 0;
         for (let i = 0; i < allStats.length; i += CHUNK_SIZE_STATS) {
             const chunk = allStats.slice(i, i + CHUNK_SIZE_STATS);
             const docRef = doc(db, ORDER_STATS_COLL, `CHUNK_${chunkIdx}`);
             batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
-            chunkIdx++; bc++;
+            chunkIdx++;
+            bc++;
             if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
         }
         if (bc > 0) await batch.commit();
 
-        // 4. ProcessedOrders 추가
+        // 7. ProcessedOrders 추가 (처리한 주문번호)
         window.showLoading('💾 처리 이력 저장 중...');
-        batch = writeBatch(db); bc = 0;
+        batch = writeBatch(db);
+        bc = 0;
         for (const ono of targetOrderNos) {
+            const obj = orderMap[ono];
             const docRef = doc(db, PROCESSED_ORDERS_COLL, ono);
-            batch.set(docRef, { date: orderMap[ono].date || latestDate, at: Date.now() }, { merge: true });
-            bc++; if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
+            batch.set(docRef, { date: obj.date || latestDate, at: Date.now() }, { merge: true });
+            bc++;
+            if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
         }
         if (bc > 0) await batch.commit();
 
-        // 5. 메타정보 갱신
+        // 8. 메타정보 갱신 (누적 처리 주문수 더하기)
         let prevTotal = 0;
         try {
             const cfgSnap = await getDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'));
-            if (cfgSnap.exists()) prevTotal = cfgSnap.data().orderAnalysisMeta?.totalProcessedOrders || 0;
+            if (cfgSnap.exists()) {
+                const prevMeta = cfgSnap.data().orderAnalysisMeta || {};
+                prevTotal = prevMeta.totalProcessedOrders || 0;
+            }
         } catch (e) {}
         const metaUpdate = {
             orderAnalysisMeta: {
@@ -3046,7 +2991,16 @@ window.processOrderData = async function(orderMap, targetOrderNos) {
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), metaUpdate, { merge: true });
 
         window.hideLoading();
-        alert(`✅ 주문 데이터 분석 완료!\n\n이번 처리: ${targetOrderNos.length.toLocaleString()}건 주문\n누적 페어: ${Object.keys(existingPairs).length.toLocaleString()}개\n누적 상품: ${Object.keys(existingStats).length.toLocaleString()}개`);
+
+        // 9. 결과 alert + 자동 리포트 표시
+        let msg = `✅ 주문 데이터 분석 완료!\n\n`;
+        msg += `파일 총 주문: ${orderNos.length.toLocaleString()}건\n`;
+        msg += `✨ 신규 처리: ${targetOrderNos.length.toLocaleString()}건\n`;
+        if (dupCount > 0) msg += `🔄 이미 처리됨 (건너뜀): ${dupCount.toLocaleString()}건\n`;
+        msg += `\n누적 페어: ${Object.keys(existingPairs).length.toLocaleString()}개\n`;
+        msg += `누적 상품: ${Object.keys(existingStats).length.toLocaleString()}개\n\n`;
+        msg += `자세한 리포트는 [📊 페어 분석 리포트 보기]에서 확인하세요.`;
+        alert(msg);
         window.openOrderAnalysisReport();
     } catch (e) {
         window.hideLoading();
