@@ -2763,6 +2763,418 @@ if (fileInputPerm) {
     });
 }
 
+// ===== v3.97a: 주문 페어 분석 (청크 압축 + 중복 방지) =====
+const ORDER_PAIRS_COLL = 'OrderPairsChunks';
+const ORDER_STATS_COLL = 'OrderStatsChunks';
+const PROCESSED_ORDERS_COLL = 'ProcessedOrders';
+const CHUNK_SIZE_PAIRS = 200;
+const CHUNK_SIZE_STATS = 200;
+
+// 주문 데이터 파일 업로드 핸들러
+const fileInputOrders = document.getElementById('excel-upload-orders');
+if (fileInputOrders) {
+    fileInputOrders.addEventListener('change', async function(e) {
+        const file = e.target.files[0]; if (!file) return;
+        window.showLoading('📦 주문 데이터를 분석 중입니다...');
+        try {
+            const result = await universalExcelReader(file);
+            if (result.rows.length > 0) {
+                await window.previewOrderData(result.rows);
+            } else {
+                window.hideLoading();
+                _showUploadDiagnosisAlert(result.diagnosis, 'orders');
+                e.target.value = '';
+            }
+        } catch (err) {
+            window.hideLoading();
+            console.error('주문 파일 처리 오류:', err);
+            alert('오류 발생: ' + err.message);
+            e.target.value = '';
+        } finally {
+            e.target.value = '';
+        }
+    });
+}
+
+// 1단계: 업로드 미리보기 (중복 검사)
+window.previewOrderData = async function(rows) {
+    try {
+        window.showLoading('🔍 주문번호별로 그룹화 중...');
+        // 1. 주문번호별 그룹화
+        const orderMap = {};
+        for (const row of rows) {
+            const orderNo = (row['주문번호'] || '').toString().trim();
+            const code = (row['상품코드'] || row['바코드'] || '').toString().trim();
+            const orderDate = (row['주문일'] || '').toString().trim();
+            if (!orderNo || !code) continue;
+            if (!orderMap[orderNo]) orderMap[orderNo] = { codes: new Set(), date: orderDate };
+            orderMap[orderNo].codes.add(code);
+        }
+
+        const orderNos = Object.keys(orderMap);
+        if (orderNos.length === 0) {
+            window.hideLoading();
+            alert('처리할 주문 데이터가 없습니다.');
+            return;
+        }
+
+        // 2. 기존 ProcessedOrders 조회
+        window.showLoading('💾 중복 주문 검사 중...');
+        const processedSet = new Set();
+        const processedSnap = await getDocs(collection(db, PROCESSED_ORDERS_COLL));
+        processedSnap.forEach(d => { processedSet.add(d.id); });
+
+        // 3. 신규/중복 분류
+        const newOrders = [];
+        const dupOrders = [];
+        for (const ono of orderNos) {
+            if (processedSet.has(ono)) dupOrders.push(ono);
+            else newOrders.push(ono);
+        }
+
+        // 4. 다중 구매 카운트 (신규만)
+        let newMulti = 0;
+        for (const ono of newOrders) {
+            if (orderMap[ono].codes.size >= 2) newMulti++;
+        }
+
+        // 5. 미리보기 데이터 보관
+        window._pendingOrderData = { orderMap, newOrders, dupOrders };
+
+        window.hideLoading();
+
+        // 6. 미리보기 모달 표시
+        const content = `
+            <div style="background:#f3e5f5; border:1px solid #ce93d8; border-radius:8px; padding:15px;">
+                <div style="display:flex; justify-content:space-around; flex-wrap:wrap; gap:10px;">
+                    <div style="text-align:center;">
+                        <div style="font-size:11px; color:#666;">파일 총 주문</div>
+                        <div style="font-size:20px; color:#4a148c; font-weight:900;">${orderNos.length.toLocaleString()}</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:11px; color:#666;">✨ 신규 주문</div>
+                        <div style="font-size:20px; color:#2e7d32; font-weight:900;">${newOrders.length.toLocaleString()}</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:11px; color:#666;">🔄 이미 처리됨</div>
+                        <div style="font-size:20px; color:#f57c00; font-weight:900;">${dupOrders.length.toLocaleString()}</div>
+                    </div>
+                    <div style="text-align:center;">
+                        <div style="font-size:11px; color:#666;">신규 다중구매</div>
+                        <div style="font-size:20px; color:#7b1fa2; font-weight:900;">${newMulti.toLocaleString()}</div>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:15px; padding:10px; background:#fafafa; border:1px solid #eee; border-radius:6px; font-size:12px; color:#555; line-height:1.6;">
+                ${newOrders.length === 0 ? '<b style="color:#d32f2f;">⚠️ 모든 주문이 이미 처리되었습니다.</b><br>이전에 같은 파일을 업로드했을 가능성이 큽니다.' : 
+                  dupOrders.length === 0 ? '<b style="color:#2e7d32;">✅ 모든 주문이 신규입니다.</b><br>"신규 주문만 처리" 버튼을 클릭하여 진행하세요.' :
+                  `<b>📌 처리 옵션</b><br>• <b>신규 주문만 처리</b>: 이미 처리된 ${dupOrders.length}건은 건너뛰고 새 ${newOrders.length}건만 누적<br>• <b>중복 무시하고 모두 처리</b>: 모든 ${orderNos.length}건 처리 (중복 카운트 발생)`}
+            </div>
+        `;
+        document.getElementById('order-preview-content').innerHTML = content;
+        document.getElementById('btn-process-new-orders').style.display = newOrders.length > 0 ? 'inline-block' : 'none';
+        document.getElementById('btn-process-all-orders').style.display = dupOrders.length > 0 ? 'inline-block' : 'none';
+        document.getElementById('order-preview-modal').style.display = 'flex';
+    } catch (e) {
+        window.hideLoading();
+        console.error('previewOrderData 오류:', e);
+        alert('미리보기 오류: ' + e.message);
+    }
+};
+
+// 2단계: 사용자 확인 후 실제 처리
+window.confirmProcessOrders = async function(mode) {
+    const pending = window._pendingOrderData;
+    if (!pending) return;
+    document.getElementById('order-preview-modal').style.display = 'none';
+    window.showLoading('⏳ 처리 준비 중...');
+
+    const targetOrderNos = (mode === 'all') 
+        ? Object.keys(pending.orderMap) 
+        : pending.newOrders;
+
+    if (targetOrderNos.length === 0) {
+        window.hideLoading();
+        alert('처리할 주문이 없습니다.');
+        window._pendingOrderData = null;
+        return;
+    }
+
+    await window.processOrderData(pending.orderMap, targetOrderNos);
+    window._pendingOrderData = null;
+};
+
+// 3단계: 실제 페어 통계 계산 + Firebase 청크 압축 누적 저장
+window.processOrderData = async function(orderMap, targetOrderNos) {
+    try {
+        window.showLoading('📊 페어 통계 계산 중...');
+
+        // 1. 페어/단독 카운트 집계 (이번 처리분만)
+        const newPairCounts = {};
+        const newCodeCounts = {};
+        let latestDate = '';
+
+        for (const ono of targetOrderNos) {
+            const obj = orderMap[ono];
+            if (!obj) continue;
+            const codes = [...obj.codes].sort();
+            const date = obj.date;
+            if (date > latestDate) latestDate = date;
+
+            for (const c of codes) {
+                if (!newCodeCounts[c]) newCodeCounts[c] = { count: 0, lastDate: '' };
+                newCodeCounts[c].count++;
+                if (date > newCodeCounts[c].lastDate) newCodeCounts[c].lastDate = date;
+            }
+
+            if (codes.length >= 2) {
+                for (let i = 0; i < codes.length; i++) {
+                    for (let j = i + 1; j < codes.length; j++) {
+                        const pairId = codes[i] + '__' + codes[j];
+                        if (!newPairCounts[pairId]) newPairCounts[pairId] = { count: 0, lastDate: '' };
+                        newPairCounts[pairId].count++;
+                        if (date > newPairCounts[pairId].lastDate) newPairCounts[pairId].lastDate = date;
+                    }
+                }
+            }
+        }
+
+        // 2. 기존 청크 로드 + 병합
+        window.showLoading('💾 기존 누적 데이터와 병합 중...');
+        const existingPairs = {};
+        const existingStats = {};
+
+        const pairsSnap = await getDocs(collection(db, ORDER_PAIRS_COLL));
+        pairsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(p => {
+                    const pid = p.cA + '__' + p.cB;
+                    existingPairs[pid] = { codeA: p.cA, codeB: p.cB, count: p.c, lastDate: p.d };
+                });
+            } catch (e) {}
+        });
+
+        const statsSnap = await getDocs(collection(db, ORDER_STATS_COLL));
+        statsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(s => {
+                    existingStats[s.c] = { code: s.c, count: s.n, lastDate: s.d };
+                });
+            } catch (e) {}
+        });
+
+        for (const code in newCodeCounts) {
+            const nd = newCodeCounts[code];
+            if (existingStats[code]) {
+                existingStats[code].count += nd.count;
+                if (nd.lastDate > existingStats[code].lastDate) existingStats[code].lastDate = nd.lastDate;
+            } else {
+                existingStats[code] = { code, count: nd.count, lastDate: nd.lastDate };
+            }
+        }
+        for (const pid in newPairCounts) {
+            const nd = newPairCounts[pid];
+            const [codeA, codeB] = pid.split('__');
+            if (existingPairs[pid]) {
+                existingPairs[pid].count += nd.count;
+                if (nd.lastDate > existingPairs[pid].lastDate) existingPairs[pid].lastDate = nd.lastDate;
+            } else {
+                existingPairs[pid] = { codeA, codeB, count: nd.count, lastDate: nd.lastDate };
+            }
+        }
+
+        // 3. 청크 압축 저장
+        window.showLoading('💾 Firebase에 청크 압축 저장 중...');
+        let batch = writeBatch(db);
+        let bc = 0;
+        pairsSnap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
+        if (bc > 0) await batch.commit();
+
+        batch = writeBatch(db); bc = 0;
+        statsSnap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
+        if (bc > 0) await batch.commit();
+
+        const allPairs = Object.values(existingPairs).map(p => ({ cA: p.codeA, cB: p.codeB, c: p.count, d: p.lastDate }));
+        batch = writeBatch(db); bc = 0; let chunkIdx = 0;
+        for (let i = 0; i < allPairs.length; i += CHUNK_SIZE_PAIRS) {
+            const chunk = allPairs.slice(i, i + CHUNK_SIZE_PAIRS);
+            const docRef = doc(db, ORDER_PAIRS_COLL, `CHUNK_${chunkIdx}`);
+            batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            chunkIdx++; bc++;
+            if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
+        }
+        if (bc > 0) await batch.commit();
+
+        const allStats = Object.values(existingStats).map(s => ({ c: s.code, n: s.count, d: s.lastDate }));
+        batch = writeBatch(db); bc = 0; chunkIdx = 0;
+        for (let i = 0; i < allStats.length; i += CHUNK_SIZE_STATS) {
+            const chunk = allStats.slice(i, i + CHUNK_SIZE_STATS);
+            const docRef = doc(db, ORDER_STATS_COLL, `CHUNK_${chunkIdx}`);
+            batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            chunkIdx++; bc++;
+            if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
+        }
+        if (bc > 0) await batch.commit();
+
+        // 4. ProcessedOrders 추가
+        window.showLoading('💾 처리 이력 저장 중...');
+        batch = writeBatch(db); bc = 0;
+        for (const ono of targetOrderNos) {
+            const docRef = doc(db, PROCESSED_ORDERS_COLL, ono);
+            batch.set(docRef, { date: orderMap[ono].date || latestDate, at: Date.now() }, { merge: true });
+            bc++; if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
+        }
+        if (bc > 0) await batch.commit();
+
+        // 5. 메타정보 갱신
+        let prevTotal = 0;
+        try {
+            const cfgSnap = await getDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'));
+            if (cfgSnap.exists()) prevTotal = cfgSnap.data().orderAnalysisMeta?.totalProcessedOrders || 0;
+        } catch (e) {}
+        const metaUpdate = {
+            orderAnalysisMeta: {
+                lastUploadDate: latestDate || new Date().toISOString().slice(0, 10),
+                lastUploadAt: Date.now(),
+                totalProcessedOrders: prevTotal + targetOrderNos.length,
+                totalPairs: Object.keys(existingPairs).length,
+                totalCodes: Object.keys(existingStats).length
+            }
+        };
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), metaUpdate, { merge: true });
+
+        window.hideLoading();
+        alert(`✅ 주문 데이터 분석 완료!\n\n이번 처리: ${targetOrderNos.length.toLocaleString()}건 주문\n누적 페어: ${Object.keys(existingPairs).length.toLocaleString()}개\n누적 상품: ${Object.keys(existingStats).length.toLocaleString()}개`);
+        window.openOrderAnalysisReport();
+    } catch (e) {
+        window.hideLoading();
+        console.error('processOrderData 오류:', e);
+        alert('주문 데이터 처리 중 오류가 발생했습니다.\n' + e.message);
+    }
+};
+
+// 분석 리포트 모달 열기
+window.openOrderAnalysisReport = async function() {
+    document.getElementById('order-analysis-modal').style.display = 'flex';
+    document.getElementById('order-analysis-summary').innerHTML = '<div style="text-align:center; color:#666;">데이터 로딩 중...</div>';
+    document.getElementById('order-analysis-tbody').innerHTML = '';
+    window.showLoading('📊 분석 리포트 로딩 중...');
+
+    try {
+        let meta = {};
+        const cfgSnap = await getDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'));
+        if (cfgSnap.exists()) meta = cfgSnap.data().orderAnalysisMeta || {};
+
+        const pairs = [];
+        const stats = {};
+        const pairsSnap = await getDocs(collection(db, ORDER_PAIRS_COLL));
+        pairsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(p => pairs.push({ codeA: p.cA, codeB: p.cB, count: p.c, lastDate: p.d }));
+            } catch (e) {}
+        });
+
+        const statsSnap = await getDocs(collection(db, ORDER_STATS_COLL));
+        statsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(s => { stats[s.c] = { code: s.c, count: s.n, lastDate: s.d }; });
+            } catch (e) {}
+        });
+
+        const totalOrdersEstimate = meta.totalProcessedOrders || 1;
+        const pairsWithLift = pairs.map(p => {
+            const cntA = (stats[p.codeA] && stats[p.codeA].count) || 1;
+            const cntB = (stats[p.codeB] && stats[p.codeB].count) || 1;
+            const lift = (p.count * totalOrdersEstimate) / (cntA * cntB);
+            return { ...p, lift };
+        });
+
+        const trustedPairs = pairsWithLift
+            .filter(p => p.count >= 5 && p.lift >= 2.0)
+            .sort((a, b) => (b.lift * b.count) - (a.lift * a.count));
+
+        let summaryHtml = `
+            <div style="display:flex; justify-content:space-around; flex-wrap:wrap; gap:15px;">
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">최근 업로드</div>
+                    <div style="font-size:14px; color:#4a148c; font-weight:bold;">${meta.lastUploadDate || '-'}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">누적 처리 주문</div>
+                    <div style="font-size:18px; color:#4a148c; font-weight:900;">${(meta.totalProcessedOrders || 0).toLocaleString()}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">누적 상품 수</div>
+                    <div style="font-size:18px; color:#4a148c; font-weight:900;">${Object.keys(stats).length.toLocaleString()}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">누적 페어 수</div>
+                    <div style="font-size:18px; color:#4a148c; font-weight:900;">${pairs.length.toLocaleString()}</div>
+                </div>
+                <div style="text-align:center;">
+                    <div style="font-size:11px; color:#666;">🏆 신뢰 페어 (5회+, lift 2.0+)</div>
+                    <div style="font-size:22px; color:#7b1fa2; font-weight:900;">${trustedPairs.length.toLocaleString()}</div>
+                </div>
+            </div>
+        `;
+        document.getElementById('order-analysis-summary').innerHTML = summaryHtml;
+
+        const top30 = trustedPairs.slice(0, 30);
+        let html = '';
+        if (top30.length === 0) {
+            html = '<tr><td colspan="7" style="padding:40px; color:#888;">데이터를 더 누적하면 페어가 생성됩니다.</td></tr>';
+        } else {
+            top30.forEach((p, idx) => {
+                const locA = originalData.find(d => d.code === p.codeA);
+                const locB = originalData.find(d => d.code === p.codeB);
+                let distance = (locA && locB && locA.dong === locB.dong && locA.dong !== '') 
+                    ? `<span style="color:#2e7d32; font-weight:bold;">같은 동</span>` 
+                    : `<span style="color:#d32f2f; font-weight:bold;">다른 동</span>`;
+                html += `<tr style="background:${idx % 2 === 0 ? '#ffffff' : '#faf5fc'};">
+                    <td style="font-weight:bold; color:#7b1fa2;">${idx+1}</td>
+                    <td style="font-weight:bold;">${p.codeA}</td><td style="font-weight:bold;">${p.codeB}</td>
+                    <td style="font-weight:bold; color:#7b1fa2;">${p.count}회</td>
+                    <td style="font-weight:bold; color:#e65100;">${p.lift.toFixed(2)}</td>
+                    <td style="font-size:11px;">${p.lastDate || '-'}</td><td>${distance}</td></tr>`;
+            });
+        }
+        document.getElementById('order-analysis-tbody').innerHTML = html;
+    } catch (e) {
+        console.error('리포트 로드 오류:', e);
+        document.getElementById('order-analysis-summary').innerHTML = `<div style="color:#d32f2f;">로드 실패: ${e.message}</div>`;
+    } finally {
+        window.hideLoading();
+    }
+};
+
+// 누적 데이터 전체 초기화
+window.resetOrderAnalysis = async function() {
+    if (!confirm('누적된 모든 주문 페어 분석 데이터를 삭제하시겠습니까?')) return;
+    if (!confirm('OrderPairsChunks, OrderStatsChunks, ProcessedOrders가 모두 삭제됩니다. 계속하시겠습니까?')) return;
+    window.showLoading('🗑️ 누적 데이터 삭제 중...');
+    try {
+        const colls = [ORDER_PAIRS_COLL, ORDER_STATS_COLL, PROCESSED_ORDERS_COLL];
+        for (const collName of colls) {
+            const snap = await getDocs(collection(db, collName));
+            let batch = writeBatch(db); let bc = 0;
+            snap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
+            if (bc > 0) await batch.commit();
+        }
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { orderAnalysisMeta: deleteField() }, { merge: true });
+        window.hideLoading(); alert('✅ 누적 데이터가 모두 삭제되었습니다.');
+        document.getElementById('order-analysis-modal').style.display = 'none';
+    } catch (e) {
+        window.hideLoading(); console.error('초기화 오류:', e);
+        alert('초기화 오류: ' + e.message);
+    }
+};
+
+async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
+
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
