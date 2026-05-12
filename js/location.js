@@ -3174,8 +3174,6 @@ window.resetOrderAnalysis = async function() {
 };
 
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
-
-async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
     let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
         const querySnapshot = await getDocs(collection(db, collectionName));
