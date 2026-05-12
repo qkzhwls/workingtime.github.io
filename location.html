@@ -372,7 +372,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.97a (페어 분석 - 청크 압축 + 중복 방지)</div>
+            <div class="version-badge">🚀 Ver 3.97 (주문 페어 분석 인프라)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -603,24 +603,7 @@
         </div>
     </div>
 
-    <div id="order-preview-modal" class="modal-overlay" onclick="if(event.target.id==='order-preview-modal') document.getElementById('order-preview-modal').style.display='none'">
-        <div class="modal-content" onclick="event.stopPropagation()" style="width: 540px; max-width: 96vw; padding: 25px 20px;">
-            <div class="modal-header" style="color: #7b1fa2; display: flex; align-items: center; gap: 10px;">
-                📦 주문 데이터 업로드 미리보기
-                <button onclick="document.getElementById('order-preview-modal').style.display='none'; window._pendingOrderData = null;" style="margin-left:auto; background:none; border:none; font-size:24px; cursor:pointer;">×</button>
-            </div>
-            <div id="order-preview-content" style="font-size:13px; line-height:1.8; padding: 10px 5px;">
-                <div style="text-align:center; color:#666;">분석 중...</div>
-            </div>
-            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px; gap:10px;">
-                <button class="btn-modal-cancel" style="background:#888; flex:1;" onclick="document.getElementById('order-preview-modal').style.display='none'; window._pendingOrderData = null;">취소</button>
-                <button id="btn-process-new-orders" style="padding:10px 18px; background:#7b1fa2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; flex:1; display:none;" onclick="window.confirmProcessOrders('new')">신규 주문만 처리</button>
-                <button id="btn-process-all-orders" style="padding:10px 18px; background:#d32f2f; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; flex:1; display:none;" onclick="window.confirmProcessOrders('all')">중복 무시하고 모두 처리</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="order-analysis-modal" class="modal-overlay" onclick="if(event.target.id==='order-analysis-modal') document.getElementById('order-analysis-modal').style.display='none'"><div id="order-analysis-modal" class="modal-overlay" onclick="if(event.target.id==='order-analysis-modal') document.getElementById('order-analysis-modal').style.display='none'">
+    <div id="order-analysis-modal" class="modal-overlay" onclick="if(event.target.id==='order-analysis-modal') document.getElementById('order-analysis-modal').style.display='none'">
         <div class="modal-content" onclick="event.stopPropagation()" style="width: 850px; max-width: 96vw; padding: 25px 20px;">
             <div class="modal-header" style="color: #7b1fa2; display: flex; align-items: center; gap: 10px;">
                 📊 주문 페어 분석 리포트
