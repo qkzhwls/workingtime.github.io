@@ -372,7 +372,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.97b (단종 페어 자동 정리)</div>
+            <div class="version-badge">🚀 Ver 3.98 (추천 알고리즘 페어 동선 통합)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -615,7 +615,14 @@
             </div>
             
             <div style="font-size:13px; font-weight:bold; color:#4a148c; margin-bottom:8px;">🏆 신뢰 페어 TOP 30 (동시구매 5회+ & lift 2.0+)</div>
-            <div class="modal-body" style="max-height: 45vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+            <div style="padding: 8px 12px; margin-bottom: 8px; background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px; font-size: 12px; display: flex; align-items: center; gap: 8px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: bold; color: #e65100;">
+                    <input type="checkbox" id="rec-include-pair-of-pair" style="cursor: pointer;" onchange="window.showRecommendation()">
+                    🔗 페어의 페어까지 포함 (느림)<span class="info-tip" data-tip-key="rec-pair-of-pair" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content">🔗 <b>페어의 페어 옵션</b><br>기본: 상품X의 직접 페어 상위 5개만 동선 보정에 사용<br>활성화: 페어의 페어(2단계)까지 포함 → 더 넓은 동선 최적화 시도<br><br>⚠️ 계산량이 증가하여 추천 생성이 느려질 수 있습니다.</span></span>
+                </label>
+                <span style="color: #999; font-size: 11px; margin-left: auto;">v3.98 동선 최적화</span>
+            </div>
+            <div class="modal-body" style="max-height: 70vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
                     <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <tr>
