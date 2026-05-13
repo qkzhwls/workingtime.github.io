@@ -741,6 +741,108 @@ window.showRecommendation = function() {
             return a.id.localeCompare(b.id); 
         });
 
+        // ===== v3.98: 페어 동선 보정 데이터 준비 =====
+        const pairMap = {};      
+        const codeToLocs = {};   
+        let pairDataReady = false;
+        let pairWeightMax = 0;   
+        
+        const includePairOfPair = document.getElementById('rec-include-pair-of-pair')?.checked || false;
+        
+        try {
+            if (window._cachedOrderPairs && window._cachedOrderStats && window._cachedOrderMeta) {
+                const pairs = window._cachedOrderPairs;
+                const stats = window._cachedOrderStats;
+                const meta = window._cachedOrderMeta;
+                const N = meta.totalProcessedOrders || 1;
+                
+                pairs.forEach(p => {
+                    const cA = (stats[p.codeA] || {}).count || 0;
+                    const cB = (stats[p.codeB] || {}).count || 0;
+                    if (cA === 0 || cB === 0) return;
+                    const lift = (p.count * N) / (cA * cB);
+                    if (p.count < 5 || lift < 2.0) return;
+                    const weight = lift * p.count;
+                    if (weight > pairWeightMax) pairWeightMax = weight;
+                    if (!pairMap[p.codeA]) pairMap[p.codeA] = [];
+                    if (!pairMap[p.codeB]) pairMap[p.codeB] = [];
+                    pairMap[p.codeA].push({ partner: p.codeB, weight });
+                    pairMap[p.codeB].push({ partner: p.codeA, weight });
+                });
+                
+                for (const code in pairMap) {
+                    pairMap[code].sort((a, b) => b.weight - a.weight);
+                    pairMap[code] = pairMap[code].slice(0, 5);
+                }
+                
+                originalData.forEach(d => {
+                    if (d.code && d.code !== d.id && d.code.trim() !== '') {
+                        if (!codeToLocs[d.code]) codeToLocs[d.code] = [];
+                        codeToLocs[d.code].push(d.id);
+                    }
+                });
+                pairDataReady = true;
+            }
+        } catch (e) {
+            console.warn('[v3.98] 페어 데이터 캐시 사용 실패, 페어 보정 비활성화:', e);
+        }
+        
+        const calcPairScore = (code, eLoc) => {
+            if (!pairDataReady) return 0;
+            const directPairs = pairMap[code] || [];
+            if (directPairs.length === 0) return 0;
+            
+            let targetPairs = directPairs.slice();
+            if (includePairOfPair) {
+                const seen = new Set([code, ...directPairs.map(p => p.partner)]);
+                for (const dp of directPairs) {
+                    const subPairs = pairMap[dp.partner] || [];
+                    for (const sp of subPairs) {
+                        if (seen.has(sp.partner)) continue;
+                        seen.add(sp.partner);
+                        targetPairs.push({ partner: sp.partner, weight: sp.weight * 0.5 });
+                    }
+                }
+            }
+            
+            const eZone = (eLoc.id || '').charAt(0).toUpperCase();
+            const eDong = (eLoc.dong || '').toString().trim();
+            const ePos = (eLoc.pos || '').toString().trim();
+            
+            let totalScore = 0;
+            for (const tp of targetPairs) {
+                const partnerLocs = codeToLocs[tp.partner] || [];
+                if (partnerLocs.length === 0) continue;
+                
+                let bestCoeff = 0;
+                for (const pLocId of partnerLocs) {
+                    const pLoc = originalData.find(d => d.id === pLocId);
+                    if (!pLoc) continue;
+                    const pZone = (pLoc.id || '').charAt(0).toUpperCase();
+                    const pDong = (pLoc.dong || '').toString().trim();
+                    const pPos = (pLoc.pos || '').toString().trim();
+                    
+                    let coeff = 0;
+                    if (eZone === pZone && eDong === pDong) {
+                        const ePosNum = parseInt(ePos, 10);
+                        const pPosNum = parseInt(pPos, 10);
+                        if (!isNaN(ePosNum) && !isNaN(pPosNum)) {
+                            const diff = Math.abs(ePosNum - pPosNum);
+                            if (diff === 0) coeff = 1.0;
+                            else if (diff === 1) coeff = 0.9;
+                            else if (diff === 2) coeff = 0.8;
+                            else coeff = 0.7;
+                        } else {
+                            coeff = 0.7;
+                        }
+                    }
+                    if (coeff > bestCoeff) bestCoeff = coeff;
+                }
+                totalScore += tp.weight * bestCoeff;
+            }
+            return totalScore;
+        };
+
         const tbody = document.getElementById('recommend-tbody');
         let html = ''; 
         let matchCount = 0;
@@ -753,17 +855,38 @@ window.showRecommendation = function() {
             let currentLocsObjs = originalData.filter(d => d.code === item.code);
             let currentDongsList = currentLocsObjs.map(d => (d.dong || '').toString().trim());
 
+            let candidateIndices = [];
             for (let j = 0; j < emptyLocs.length; j++) {
+                if (usedEmptyIndices.has(j)) continue;
+                const eLoc = emptyLocs[j];
+                const targetDong = (eLoc.dong || '').toString().trim();
+                if (currentDongsList.includes(targetDong)) continue;
+                
+                const pairScore = calcPairScore(item.code, eLoc);
+                candidateIndices.push({ j, pairScore, originalIdx: j });
+            }
+            
+            candidateIndices.sort((a, b) => {
+                if (b.pairScore !== a.pairScore) return b.pairScore - a.pairScore;
+                return a.originalIdx - b.originalIdx;
+            });
+            
+            let matched = false;
+            for (const cand of candidateIndices) {
+                const j = cand.j;
                 if (usedEmptyIndices.has(j)) continue;
                 
                 let eLoc = emptyLocs[j];
                 let targetDong = (eLoc.dong || '').toString().trim();
 
                 if (currentDongsList.includes(targetDong)) {
-                    break; 
+                    continue; 
                 }
 
                 usedEmptyIndices.add(j);
+                matched = true;
+                const matchedPairScore = cand.pairScore;
+                // ===== v3.98 페어 보정 끝, 기존 매칭 로직 진입 =====
                 
                 let totalStock = 0;
                 let totalStock2f = 0;
@@ -826,7 +949,8 @@ window.showRecommendation = function() {
                     name: item.name,
                     option: itemOption,
                     code: item.code,
-                    moveDirection: moveText // 엑셀용
+                    moveDirection: moveText, // 엑셀용
+                    pairScore: matchedPairScore || 0 // v3.98: 페어 점수
                 });
 
                 const isEven = displayRank % 2 === 0;
@@ -835,6 +959,14 @@ window.showRecommendation = function() {
 
                 // ★ 점수 세부 툴팁 HTML (html += 윗줄에 선언)
                 const scoreTipHtml = `<span class="info-tip" data-tip-key="rec-score-detail" style="margin-left:3px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• 직진배송: ${item.zContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.zQty||0).toLocaleString()})</span><br>• 주차별: ${item.wContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${item.tContrib.toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: 직진 ${window.recommendRatios.zikjin}% / 주차 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
+
+                // v3.98: 페어 보정 배지
+                let pairBadgeHtml = '';
+                if (matchedPairScore > 0 && pairWeightMax > 0) {
+                    const normScore = Math.min(100, (matchedPairScore / pairWeightMax) * 100);
+                    const partnerCount = (pairMap[item.code] || []).length;
+                    pairBadgeHtml = `<br><span style="display:inline-block; background:#fff3e0; color:#e65100; padding:3px 7px; border-radius:4px; font-size:10px; font-weight:bold; margin-top:3px; border:1px solid #ffcc80;" title="페어 가중치: ${matchedPairScore.toFixed(2)} (정규화 ${normScore.toFixed(0)}점, 페어 ${partnerCount}개)">🔗 페어 ${partnerCount}개와 가까이</span>`;
+                }
 
                 html += `
                     <tr style="background:${rowBg};">
@@ -848,7 +980,7 @@ window.showRecommendation = function() {
                         <td style="color:#555; font-size:12px; padding:14px 10px;">${item.currentLocs}</td>
                         <td style="background:#f1f8e9; border-right:none; padding:14px 12px; text-align:center;">
                             <span style="color:#1b5e20; font-weight:900; font-size:16px;">${eLoc.id}</span><br>
-                            ${moveBadge}<br>
+                            ${moveBadge}${pairBadgeHtml}<br>
                             <span style="font-size:11px; color:#555; margin-top:3px; display:inline-block;">${eLoc.dong}동 ${eLoc.pos}위치</span>
                         </td>
                     </tr>
@@ -2999,8 +3131,13 @@ window.processOrderData = async function(rows) {
         if (dupCount > 0) msg += `🔄 이미 처리됨 (건너뜀): ${dupCount.toLocaleString()}건\n`;
         msg += `\n누적 페어: ${Object.keys(existingPairs).length.toLocaleString()}개\n`;
         msg += `누적 상품: ${Object.keys(existingStats).length.toLocaleString()}개\n\n`;
-        msg += `자세한 리포트는 [📊 페어 분석 리포트 보기]에서 확인하세요.`;
-        alert(msg);
+        msg += `자세한 리포트는 [📊 페어 분석 리포트 보기]에서 확인하세요.`);
+        
+        // v3.98: 페어 캐시 갱신
+        if (typeof window.loadOrderPairsCache === 'function') {
+            window.loadOrderPairsCache();
+        }
+        
         window.openOrderAnalysisReport();
     } catch (e) {
         window.hideLoading();
@@ -3119,8 +3256,14 @@ window.resetOrderAnalysis = async function() {
             if (bc > 0) await batch.commit();
         }
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { orderAnalysisMeta: deleteField() }, { merge: true });
-        window.hideLoading(); alert('✅ 누적 데이터가 모두 삭제되었습니다.');
+        window.hideLoading();
+        alert('✅ 누적 데이터가 모두 삭제되었습니다.');
         document.getElementById('order-analysis-modal').style.display = 'none';
+        
+        // v3.98: 페어 캐시 초기화
+        window._cachedOrderPairs = [];
+        window._cachedOrderStats = {};
+        window._cachedOrderMeta = {};
     } catch (e) {
         window.hideLoading(); console.error('초기화 오류:', e);
         alert('초기화 오류: ' + e.message);
@@ -3599,10 +3742,66 @@ window.cleanupDeprecatedPairs = async function() {
         
         console.log(`[cleanup] 완료: 단종 ${deprecatedSet.size}건 정리, 페어 ${deletedPairCount}개 삭제, 통계 ${deletedStatCount}개 삭제.`);
         console.log(`[cleanup] 상세 로그: DeprecatedLog/${logDocId}`);
+        
+        // v3.98: 페어 캐시 갱신
+        if (typeof window.loadOrderPairsCache === 'function') {
+            window.loadOrderPairsCache();
+        }
     } catch (e) {
         console.error('[cleanup] 단종 정리 중 오류:', e);
     }
 };
+
+// ===== v3.98: 페어 데이터 캐시 로드 (showRecommendation에서 사용) =====
+window.loadOrderPairsCache = async function() {
+    try {
+        const pairsSnap = await getDocs(collection(db, ORDER_PAIRS_COLL));
+        const statsSnap = await getDocs(collection(db, ORDER_STATS_COLL));
+        
+        const pairs = [];
+        pairsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(p => pairs.push({ codeA: p.cA, codeB: p.cB, count: p.c, lastDate: p.d }));
+            } catch (e) {}
+        });
+        
+        const stats = {};
+        statsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(s => { stats[s.c] = { code: s.c, count: s.n, lastDate: s.d }; });
+            } catch (e) {}
+        });
+        
+        let meta = {};
+        try {
+            const cfgSnap = await getDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'));
+            if (cfgSnap.exists()) {
+                meta = cfgSnap.data().orderAnalysisMeta || {};
+            }
+        } catch (e) {}
+        
+        window._cachedOrderPairs = pairs;
+        window._cachedOrderStats = stats;
+        window._cachedOrderMeta = meta;
+        
+        console.log(`[v3.98] 페어 캐시 로드 완료: ${pairs.length}개 페어, ${Object.keys(stats).length}개 상품`);
+    } catch (e) {
+        console.warn('[v3.98] 페어 캐시 로드 실패:', e);
+        window._cachedOrderPairs = [];
+        window._cachedOrderStats = {};
+        window._cachedOrderMeta = {};
+    }
+};
+
+if (typeof window !== 'undefined') {
+    setTimeout(() => {
+        if (typeof getDocs === 'function' && typeof db !== 'undefined') {
+            window.loadOrderPairsCache();
+        }
+    }, 3000);
+}
 
 window.copyLocationToClipboard = async (event, locId) => {
     event.stopPropagation(); 
