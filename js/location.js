@@ -3131,7 +3131,8 @@ window.processOrderData = async function(rows) {
         if (dupCount > 0) msg += `🔄 이미 처리됨 (건너뜀): ${dupCount.toLocaleString()}건\n`;
         msg += `\n누적 페어: ${Object.keys(existingPairs).length.toLocaleString()}개\n`;
         msg += `누적 상품: ${Object.keys(existingStats).length.toLocaleString()}개\n\n`;
-        msg += `자세한 리포트는 [📊 페어 분석 리포트 보기]에서 확인하세요.`);
+        msg += `자세한 리포트는 [📊 페어 분석 리포트 보기]에서 확인하세요.`;
+        alert(msg);
         
         // v3.98: 페어 캐시 갱신
         if (typeof window.loadOrderPairsCache === 'function') {
