@@ -3385,6 +3385,9 @@ async function updateDatabaseA(rows, mode = 'daily') {
             let msg = `✅ 스마트 클린 업데이트 완료!\n과거 유령 재고는 완벽히 비워졌고, 엑셀의 최신 데이터 ${updateCount}건만 정확하게 반영되었습니다.`;
             if(skipCount > 0) msg += `\n(※ 기존 도면에 없는 낯선 로케이션 ${skipCount}건 무시됨)`;
             alert(msg);
+            
+            // v3.97b: 일일 최신화 완료 후 단종 페어 자동 정리 (비동기, alert 차단 안 함)
+            setTimeout(() => { window.cleanupDeprecatedPairs().catch(e => console.error('[cleanup] 오류:', e)); }, 100);
         }
         
     } catch (error) { 
@@ -3396,6 +3399,210 @@ async function updateDatabaseA(rows, mode = 'daily') {
         window.hideLoading(); 
     }
 }
+
+// ===== v3.97b: 단종 상품 페어 자동 정리 =====
+// 호출 시점: 일일 최신화(updateDatabaseA mode='daily') 완료 직후
+// 단종 판정 조건 (3개 모두 만족):
+//   1. 마지막배송일 30일+ 경과 (빈칸은 제외 = 신규 상품 보호)
+//   2. 재고 0
+//   3. 입고대기 0
+// 동작:
+//   - 한쪽이라도 단종이면 OrderPairsChunks의 페어 삭제 (엄격)
+//   - 단종 상품의 OrderStatsChunks 단독 통계도 삭제
+//   - 결과는 console.log만 (조용히)
+//   - 상세 로그는 DeprecatedLog 컬렉션에 저장
+window.cleanupDeprecatedPairs = async function() {
+    console.log('[cleanup] 단종 페어 정리 시작...');
+    
+    try {
+        // 1. 안전장치: OrderPairsChunks 비어있으면 종료
+        const pairsSnap = await getDocs(collection(db, ORDER_PAIRS_COLL));
+        if (pairsSnap.empty) {
+            console.log('[cleanup] 페어 데이터 없음. 정리 건너뜀.');
+            return;
+        }
+        
+        // 2. 마지막배송일 컬럼 존재 확인 (rawData에 한 번이라도 나타나는지)
+        const getRawVal = (rd, targetKey) => {
+            if (!rd) return '';
+            if (rd[targetKey]) return rd[targetKey];
+            const norm = targetKey.replace(/[\s\u00A0]/g, '');
+            for (const k of Object.keys(rd)) {
+                if (k.replace(/[\s\u00A0]/g, '') === norm) return rd[k];
+            }
+            return '';
+        };
+        
+        let hasLastDeliveryColumn = false;
+        for (const loc of originalData) {
+            if (getRawVal(loc.rawData, '마지막배송일')) {
+                hasLastDeliveryColumn = true;
+                break;
+            }
+        }
+        if (!hasLastDeliveryColumn) {
+            console.warn('[cleanup] 마지막배송일 컬럼이 데이터에 없음. 잘못된 정리를 방지하기 위해 건너뜀.');
+            return;
+        }
+        
+        // 3. incomingTotalByCode 상태 점검 (경고만)
+        if (!incomingTotalByCode || Object.keys(incomingTotalByCode).length === 0) {
+            console.warn('[cleanup] incomingTotalByCode가 비어있음. 시트 동기화를 먼저 수행하지 않았다면 단종 판정이 부정확할 수 있음.');
+        }
+        
+        // 4. 30일 cutoff 날짜 계산
+        const now = new Date();
+        const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        
+        // 5. 상품코드별로 그룹핑 (마지막배송일, 재고 합계 집계)
+        const codeMap = {}; // { code: { lastDelivery, totalStock, locIds: [] } }
+        originalData.forEach(loc => {
+            const code = (loc.code || '').toString().trim();
+            if (!code || code === loc.id) return;
+            
+            if (!codeMap[code]) codeMap[code] = { lastDelivery: '', totalStock: 0, locIds: [] };
+            
+            // 마지막배송일: 가장 최근 값 (마지막배송일 우선, 없으면 마지막입고일 fallback)
+            let val = getRawVal(loc.rawData, '마지막배송일');
+            if (!val) val = getRawVal(loc.rawData, '마지막입고일');
+            if (val && val > codeMap[code].lastDelivery) codeMap[code].lastDelivery = val;
+            
+            codeMap[code].totalStock += Number(loc.stock || 0);
+            codeMap[code].locIds.push(loc.id);
+        });
+        
+        // 6. 단종 상품 판정
+        const deprecatedSet = new Set();
+        const deprecatedDetail = []; // [{code, lastDelivery, totalStock, incomingQty, locIds}]
+        
+        for (const code in codeMap) {
+            const info = codeMap[code];
+            
+            // 조건 1: 마지막배송일 빈칸 → 신규 상품으로 간주, 제외
+            if (!info.lastDelivery) continue;
+            
+            // 조건 1: 마지막배송일 30일+ 경과
+            if (info.lastDelivery >= cutoffStr) continue;
+            
+            // 조건 2: 재고 0
+            if (info.totalStock > 0) continue;
+            
+            // 조건 3: 입고대기 0
+            const incomingQty = Number(incomingTotalByCode[code] || 0);
+            if (incomingQty > 0) continue;
+            
+            // 모두 만족 → 단종으로 판정
+            deprecatedSet.add(code);
+            deprecatedDetail.push({
+                code,
+                lastDelivery: info.lastDelivery,
+                totalStock: info.totalStock,
+                incomingQty,
+                locIds: info.locIds.join(', ')
+            });
+        }
+        
+        if (deprecatedSet.size === 0) {
+            console.log('[cleanup] 단종 상품 없음. 정리 종료.');
+            return;
+        }
+        
+        console.log(`[cleanup] 단종 상품 ${deprecatedSet.size}개 발견:`, [...deprecatedSet]);
+        
+        // 7. OrderPairsChunks 로드 → 단종 페어 필터링 → 다시 쓰기
+        const allPairs = [];
+        pairsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(p => allPairs.push(p));
+            } catch (e) {}
+        });
+        
+        const survivingPairs = allPairs.filter(p => 
+            !deprecatedSet.has(p.cA) && !deprecatedSet.has(p.cB)
+        );
+        const deletedPairCount = allPairs.length - survivingPairs.length;
+        
+        // 8. OrderStatsChunks 로드 → 단종 상품 통계 필터링 → 다시 쓰기
+        const statsSnap = await getDocs(collection(db, ORDER_STATS_COLL));
+        const allStats = [];
+        statsSnap.forEach(d => {
+            try {
+                const arr = JSON.parse(d.data().dataStr || '[]');
+                arr.forEach(s => allStats.push(s));
+            } catch (e) {}
+        });
+        
+        const survivingStats = allStats.filter(s => !deprecatedSet.has(s.c));
+        const deletedStatCount = allStats.length - survivingStats.length;
+        
+        // 9. 기존 청크 모두 삭제 후 새로 작성 (페어)
+        let batch = writeBatch(db);
+        let bc = 0;
+        pairsSnap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
+        if (bc > 0) await batch.commit();
+        
+        batch = writeBatch(db);
+        bc = 0;
+        let chunkIdx = 0;
+        for (let i = 0; i < survivingPairs.length; i += CHUNK_SIZE_PAIRS) {
+            const chunk = survivingPairs.slice(i, i + CHUNK_SIZE_PAIRS);
+            const docRef = doc(db, ORDER_PAIRS_COLL, `CHUNK_${chunkIdx}`);
+            batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            chunkIdx++;
+            bc++;
+            if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
+        }
+        if (bc > 0) await batch.commit();
+        
+        // 10. 기존 청크 모두 삭제 후 새로 작성 (단독 통계)
+        batch = writeBatch(db);
+        bc = 0;
+        statsSnap.forEach(d => { batch.delete(d.ref); bc++; if (bc >= 400) { batch.commit(); batch = writeBatch(db); bc = 0; } });
+        if (bc > 0) await batch.commit();
+        
+        batch = writeBatch(db);
+        bc = 0;
+        chunkIdx = 0;
+        for (let i = 0; i < survivingStats.length; i += CHUNK_SIZE_STATS) {
+            const chunk = survivingStats.slice(i, i + CHUNK_SIZE_STATS);
+            const docRef = doc(db, ORDER_STATS_COLL, `CHUNK_${chunkIdx}`);
+            batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+            chunkIdx++;
+            bc++;
+            if (bc >= 400) { await batch.commit(); batch = writeBatch(db); bc = 0; }
+        }
+        if (bc > 0) await batch.commit();
+        
+        // 11. DeprecatedLog 컬렉션에 상세 로그 저장 (날짜별 1문서)
+        const logDocId = new Date().toISOString().slice(0, 10) + '_' + Date.now();
+        await setDoc(doc(db, 'DeprecatedLog', logDocId), {
+            cleanedAt: Date.now(),
+            cleanedAtDate: new Date().toISOString().slice(0, 10),
+            cutoffDate: cutoffStr,
+            deprecatedCount: deprecatedSet.size,
+            deletedPairCount,
+            deletedStatCount,
+            details: JSON.stringify(deprecatedDetail)
+        });
+        
+        // 12. INFO_CONFIG의 orderAnalysisMeta 갱신 (페어/상품 카운트 동기화)
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), {
+            orderAnalysisMeta: {
+                lastCleanupAt: Date.now(),
+                lastCleanupDate: new Date().toISOString().slice(0, 10),
+                totalPairs: survivingPairs.length,
+                totalCodes: survivingStats.length
+            }
+        }, { merge: true });
+        
+        console.log(`[cleanup] 완료: 단종 ${deprecatedSet.size}건 정리, 페어 ${deletedPairCount}개 삭제, 통계 ${deletedStatCount}개 삭제.`);
+        console.log(`[cleanup] 상세 로그: DeprecatedLog/${logDocId}`);
+    } catch (e) {
+        console.error('[cleanup] 단종 정리 중 오류:', e);
+    }
+};
 
 window.copyLocationToClipboard = async (event, locId) => {
     event.stopPropagation(); 
