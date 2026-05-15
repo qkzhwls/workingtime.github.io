@@ -637,7 +637,9 @@ ${dataRows}
 
 window.openRecommendModal = function() {
     document.getElementById('recommend-modal').style.display = 'flex';
-};
+    if (typeof window.updateRecPairPanel === 'function') window.updateRecPairPanel(); // v3.98a 추가
+    window.showRecommendation();
+}
 
 window.showRecommendation = function() {
     window.showLoading("💡 우선순위 알고리즘을 분석하여 최적의 로케이션을 매칭 중입니다...");
@@ -3788,12 +3790,50 @@ window.loadOrderPairsCache = async function() {
         window._cachedOrderMeta = meta;
         
         console.log(`[v3.98] 페어 캐시 로드 완료: ${pairs.length}개 페어, ${Object.keys(stats).length}개 상품`);
+        
+        // v3.98a: 추천 모달의 페어 통계 박스 갱신
+        if (typeof window.updateRecPairPanel === 'function') {
+            window.updateRecPairPanel();
+        }
     } catch (e) {
         console.warn('[v3.98] 페어 캐시 로드 실패:', e);
         window._cachedOrderPairs = [];
         window._cachedOrderStats = {};
         window._cachedOrderMeta = {};
     }
+};
+
+// ===== v3.98a: 추천 모달의 페어 통계 박스 갱신 =====
+window.updateRecPairPanel = function() {
+    const panel = document.getElementById('rec-pair-summary');
+    if (!panel) return; // 추천 모달이 아직 안 열렸으면 무시
+    
+    const pairs = window._cachedOrderPairs || [];
+    const stats = window._cachedOrderStats || {};
+    const meta = window._cachedOrderMeta || {};
+    
+    if (pairs.length === 0) {
+        panel.innerHTML = `<span style="color:#999;">아직 페어 데이터 없음 — 주문 데이터 업로드 필요</span>`;
+        return;
+    }
+    
+    // 신뢰 페어 개수 계산
+    const N = meta.totalProcessedOrders || 1;
+    let trustedCount = 0;
+    pairs.forEach(p => {
+        const cA = (stats[p.codeA] || {}).count || 0;
+        const cB = (stats[p.codeB] || {}).count || 0;
+        if (cA === 0 || cB === 0) return;
+        const lift = (p.count * N) / (cA * cB);
+        if (p.count >= 5 && lift >= 2.0) trustedCount++;
+    });
+    
+    const lastUpload = meta.lastUploadDate ? meta.lastUploadDate.slice(0, 10) : '-';
+    
+    panel.innerHTML = `<span style="color:#1b5e20; font-weight:bold;">신뢰 페어 ${trustedCount.toLocaleString()}개</span>` +
+        ` · 누적 페어 ${pairs.length.toLocaleString()}개` +
+        ` · 누적 상품 ${Object.keys(stats).length.toLocaleString()}개` +
+        ` · 최근 업로드 ${lastUpload}`;
 };
 
 if (typeof window !== 'undefined') {
