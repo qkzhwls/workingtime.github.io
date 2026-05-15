@@ -3669,6 +3669,84 @@ window.cleanupDeprecatedPairs = async function() {
                 locIds: info.locIds.join(', ')
             });
         }
+
+        // ===== v3.97c: 자리 없는 페어 정리 (사각지대 해결) =====
+        // 페어 데이터에는 있지만 originalData에 자리 없는 상품 검사
+        // 조건: 입고대기 0 AND lastDate(페어 최근 함께 산 날) 30일+ 경과
+        const allPairCodes = new Set();
+        const codeLastDate = {}; // 상품코드별 페어/통계 lastDate 중 최대값
+        
+        // 페어 데이터에서 모든 상품코드 + lastDate 수집
+        try {
+            const pairsSnapForOrphan = await getDocs(collection(db, ORDER_PAIRS_COLL));
+            pairsSnapForOrphan.forEach(d => {
+                try {
+                    const arr = JSON.parse(d.data().dataStr || '[]');
+                    arr.forEach(p => {
+                        if (p.cA) {
+                            allPairCodes.add(p.cA);
+                            if (!codeLastDate[p.cA] || (p.d && p.d > codeLastDate[p.cA])) {
+                                codeLastDate[p.cA] = p.d || '';
+                            }
+                        }
+                        if (p.cB) {
+                            allPairCodes.add(p.cB);
+                            if (!codeLastDate[p.cB] || (p.d && p.d > codeLastDate[p.cB])) {
+                                codeLastDate[p.cB] = p.d || '';
+                            }
+                        }
+                    });
+                } catch (e) {}
+            });
+            
+            const statsSnapForOrphan = await getDocs(collection(db, ORDER_STATS_COLL));
+            statsSnapForOrphan.forEach(d => {
+                try {
+                    const arr = JSON.parse(d.data().dataStr || '[]');
+                    arr.forEach(s => {
+                        if (s.c) {
+                            allPairCodes.add(s.c);
+                            if (!codeLastDate[s.c] || (s.d && s.d > codeLastDate[s.c])) {
+                                codeLastDate[s.c] = s.d || '';
+                            }
+                        }
+                    });
+                } catch (e) {}
+            });
+        } catch (e) {
+            console.warn('[cleanup-v3.97c] 페어/통계 lastDate 수집 실패:', e);
+        }
+        
+        // 자리 없는 상품 = 페어 데이터에 있지만 codeMap(originalData)에 없음
+        let orphanCount = 0;
+        for (const code of allPairCodes) {
+            if (codeMap[code]) continue; // 자리 있는 상품은 위에서 이미 처리됨
+            if (deprecatedSet.has(code)) continue; // 이미 단종 판정된 경우 스킵
+            
+            // 자리 없는 상품의 단종 조건
+            const incomingQty = Number(incomingTotalByCode[code] || 0);
+            if (incomingQty > 0) continue; // 입고대기 있으면 보호 (재입고 예정)
+            
+            const lastDate = codeLastDate[code] || '';
+            if (!lastDate) continue; // lastDate 없으면 판단 불가, 보호
+            if (lastDate >= cutoffStr) continue; // 최근 30일 이내 함께 팔림 = 보호
+            
+            // 자리 없음 + 입고대기 0 + lastDate 30일+ 경과 → 단종 판정
+            deprecatedSet.add(code);
+            deprecatedDetail.push({
+                code,
+                lastDelivery: '(자리 없음)',
+                totalStock: 0,
+                incomingQty,
+                locIds: '(없음, 페어 lastDate: ' + lastDate + ')'
+            });
+            orphanCount++;
+        }
+        
+        if (orphanCount > 0) {
+            console.log(`[cleanup-v3.97c] 자리 없는 단종 상품 ${orphanCount}개 추가 발견`);
+        }
+        // ===== v3.97c 끝 =====
         
         if (deprecatedSet.size === 0) {
             console.log('[cleanup] 단종 상품 없음. 정리 종료.');
@@ -4331,6 +4409,17 @@ function _ttOpenTip(tip) {
     if (y < 8) y = r.bottom + 10;
     if (x < 8) x = 8;
     if (x + cw > window.innerWidth - 8) x = window.innerWidth - cw - 8;
+
+    // v3.97c: 모달 안의 툴팁이면 모달 컨테이너 경계 내로 추가 보정
+    const modalContent = tip.closest('.modal-content');
+    if (modalContent) {
+        const mr = modalContent.getBoundingClientRect();
+        if (x < mr.left + 8) x = mr.left + 8;
+        if (x + cw > mr.right - 8) x = mr.right - cw - 8;
+        // 모달 자체가 cw보다 좁은 경우 보호
+        if (x < 8) x = 8;
+    }
+
     content.style.left = x + 'px';
     content.style.top = y + 'px';
 }
