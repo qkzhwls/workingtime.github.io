@@ -3222,6 +3222,26 @@ window.openOrderAnalysisReport = async function() {
         if (top30.length === 0) {
             html = '<tr><td colspan="7" style="padding:40px; color:#888;">데이터를 더 누적하면 페어가 생성됩니다.</td></tr>';
         } else {
+            // v3.99: 상품 상세 정보 HTML 생성 헬퍼
+            const buildProductCell = (code) => {
+                const matches = originalData.filter(d => d.code === code);
+                if (matches.length === 0) {
+                    return `<div style="font-weight:bold; color:#7b1fa2;">${code}</div>` +
+                           `<div style="font-size:11px; color:#999; margin-top:2px;">⚠️ 로케이션 없음</div>`;
+                }
+                const loc = matches[0];
+                const name = (loc.name || '').toString().trim();
+                const option = (loc.option || '').toString().trim();
+                const locId = (loc.id || '').toString().trim();
+                const dupBadge = matches.length > 1
+                    ? `<span style="display:inline-block; background:#fff3e0; color:#e65100; padding:1px 5px; border-radius:3px; font-size:9px; font-weight:bold; margin-left:4px;" title="같은 상품코드가 ${matches.length}개 자리에 있습니다 (데이터 이상)">⚠️ ${matches.length}자리</span>`
+                    : '';
+                const optionHtml = option ? `<span style="color:#666; font-weight:normal; font-size:11px; margin-left:4px;">[${option}]</span>` : '';
+                const locHtml = locId ? `<div style="font-size:11px; color:#1b5e20; margin-top:2px;">📍 ${locId}${dupBadge}</div>` : `<div style="font-size:11px; color:#999; margin-top:2px;">📍 자리 없음${dupBadge}</div>`;
+                const nameHtml = name ? `<div style="font-size:11px; color:#555; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:190px;" title="${name}">${name}</div>` : '';
+                return `<div style="font-weight:bold; color:#7b1fa2;">${code}${optionHtml}</div>` + locHtml + nameHtml;
+            };
+            
             top30.forEach((p, idx) => {
                 const locA = originalData.find(d => d.code === p.codeA);
                 const locB = originalData.find(d => d.code === p.codeB);
@@ -3230,7 +3250,8 @@ window.openOrderAnalysisReport = async function() {
                     : `<span style="color:#d32f2f; font-weight:bold;">다른 동</span>`;
                 html += `<tr style="background:${idx % 2 === 0 ? '#ffffff' : '#faf5fc'};">
                     <td style="font-weight:bold; color:#7b1fa2;">${idx+1}</td>
-                    <td style="font-weight:bold;">${p.codeA}</td><td style="font-weight:bold;">${p.codeB}</td>
+                    <td style="text-align:left; padding:8px 10px;">${buildProductCell(p.codeA)}</td>
+                    <td style="text-align:left; padding:8px 10px;">${buildProductCell(p.codeB)}</td>
                     <td style="font-weight:bold; color:#7b1fa2;">${p.count}회</td>
                     <td style="font-weight:bold; color:#e65100;">${p.lift.toFixed(2)}</td>
                     <td style="font-size:11px;">${p.lastDate || '-'}</td><td>${distance}</td></tr>`;
