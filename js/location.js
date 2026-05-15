@@ -960,7 +960,7 @@ window.showRecommendation = function() {
                 const moveQtyDisplay = moveQty > 0 ? `<span style="color:#e65100; font-weight:900; font-size:15px;">${moveQty.toLocaleString()}</span><br><span style="font-size:10px; color:#888;">개</span>` : `<span style="color:#bbb; font-size:12px;">-</span>`;
 
                 // ★ 점수 세부 툴팁 HTML (html += 윗줄에 선언)
-                const scoreTipHtml = `<span class="info-tip" data-tip-key="rec-score-detail" style="margin-left:3px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• 직진배송: ${item.zContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.zQty||0).toLocaleString()})</span><br>• 주차별: ${item.wContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${item.tContrib.toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: 직진 ${window.recommendRatios.zikjin}% / 주차 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
+                const scoreTipHtml = `<span class="info-tip" data-tip-key="dyn-rec-score-${item.code}" style="margin-left:3px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• 직진배송: ${item.zContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.zQty||0).toLocaleString()})</span><br>• 주차별: ${item.wContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${item.tContrib.toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: 직진 ${window.recommendRatios.zikjin}% / 주차 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
 
                 // v3.98: 페어 보정 배지
                 let pairBadgeHtml = '';
@@ -4028,6 +4028,7 @@ window.applyCustomTooltips = function() {
     document.querySelectorAll('.info-tip[data-tip-key]').forEach(tip => {
         const key = tip.getAttribute('data-tip-key');
         if (!key) return;
+        if (key.startsWith('dyn-')) return; // v3.98a-fix2: 동적 콘텐츠 툴팁은 캐싱 안 함
         const content = tip.querySelector('.info-tip-content');
         if (!content) return;
         if (content.querySelector('.tt-tabs')) return;
@@ -4320,6 +4321,7 @@ function _ttResetTab(tip) {
     if (!content) return;
     const key = tip.getAttribute('data-tip-key');
     if (!key) return;
+    if (key.startsWith('dyn-')) return; // v3.98a-fix2: 동적 콘텐츠는 리셋하지 않음
     // 설명 탭으로 리셋
     _ttRenderTabs(tip, key, 'desc');
 }
@@ -4349,11 +4351,16 @@ document.addEventListener('click', function(e) {
         // 초기화 로직 (기존 유지)
         if (!tip.querySelector('.tt-tabs')) {
             const key = tip.getAttribute('data-tip-key');
-            if (!_ttDefaults[key]) {
-                const innerContent = tip.querySelector('.info-tip-content');
-                if (innerContent) _ttDefaults[key] = innerContent.innerHTML;
+            // v3.98a-fix2: 동적 콘텐츠 툴팁은 초기화/캐싱 없이 토글만 처리
+            if (key && key.startsWith('dyn-')) {
+                // 토글 동작으로 바로 이동 (탭 구조 주입 안 함)
+            } else {
+                if (!_ttDefaults[key]) {
+                    const innerContent = tip.querySelector('.info-tip-content');
+                    if (innerContent) _ttDefaults[key] = innerContent.innerHTML;
+                }
+                _ttRenderTabs(tip, key);
             }
-            _ttRenderTabs(tip, key);
         }
 
         // 토글 동작
