@@ -3198,19 +3198,19 @@ window.openOrderAnalysisReport = async function() {
                     <div style="font-size:14px; color:#4a148c; font-weight:bold;">${meta.lastUploadDate || '-'}</div>
                 </div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#666;">누적 처리 주문</div>
+                    <div style="font-size:11px; color:#666;">처리한 주문 건수</div>
                     <div style="font-size:18px; color:#4a148c; font-weight:900;">${(meta.totalProcessedOrders || 0).toLocaleString()}</div>
                 </div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#666;">누적 상품 수</div>
+                    <div style="font-size:11px; color:#666;">분석된 상품 종류</div>
                     <div style="font-size:18px; color:#4a148c; font-weight:900;">${Object.keys(stats).length.toLocaleString()}</div>
                 </div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#666;">누적 페어 수</div>
+                    <div style="font-size:11px; color:#666;">함께 팔린 상품 조합</div>
                     <div style="font-size:18px; color:#4a148c; font-weight:900;">${pairs.length.toLocaleString()}</div>
                 </div>
                 <div style="text-align:center;">
-                    <div style="font-size:11px; color:#666;">🏆 신뢰 페어 (5회+, lift 2.0+)</div>
+                    <div style="font-size:11px; color:#666;">🏆 자주 함께 팔리는 조합</div>
                     <div style="font-size:22px; color:#7b1fa2; font-weight:900;">${trustedPairs.length.toLocaleString()}</div>
                 </div>
             </div>
@@ -3247,7 +3247,7 @@ window.openOrderAnalysisReport = async function() {
 
 // 누적 데이터 전체 초기화
 window.resetOrderAnalysis = async function() {
-    if (!confirm('누적된 모든 주문 페어 분석 데이터를 삭제하시겠습니까?')) return;
+    if (!confirm('함께 팔리는 상품 분석 데이터를 전체 삭제하시겠습니까?\n\n(주문 데이터, 상품 조합, 통계가 모두 초기화됩니다)')) return;
     if (!confirm('OrderPairsChunks, OrderStatsChunks, ProcessedOrders가 모두 삭제됩니다. 계속하시겠습니까?')) return;
     window.showLoading('🗑️ 누적 데이터 삭제 중...');
     try {
