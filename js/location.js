@@ -974,7 +974,7 @@ window.showRecommendation = function() {
                     <tr style="background:${rowBg};">
                         <td style="color:var(--primary); font-weight:900; font-size:15px; border-left:none; padding:14px 10px;">
                             ${displayRank}위
-                            <br><span style="font-size:11px; color:#e65100; font-weight:bold;">${item.score.toFixed(1)}점${scoreTipHtml}</span>
+                            <br><span style="font-size:11px; color:#e65100; font-weight:bold; display:inline-block; line-height:18px; vertical-align:middle;">${item.score.toFixed(1)}점${scoreTipHtml}</span>
                         </td>
                         <td style="font-weight:bold; color:#1a237e; font-size:13px; letter-spacing:0.3px;">${item.code}</td>
                         <td style="text-align:left; font-size:14px; font-weight:bold; color:#212121; padding:14px 12px; line-height:1.5;">${item.name}</td>
