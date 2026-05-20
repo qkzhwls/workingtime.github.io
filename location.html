@@ -372,7 +372,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.97d (페어 분석 현황 박스 제거)</div>
+            <div class="version-badge">🚀 Ver 3.97e (추천 갯수 조절 UI)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -539,6 +539,19 @@
             </div>
             <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
                 ※ 선지정으로 찜해둔 자리는 물건이 없더라도 이 추천 목록에서 완벽히 보호(제외)됩니다.
+            </div>
+            <div id="rec-limit-panel" style="background:#f5f5f5; border:1px solid #e0e0e0; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; color:#555;">
+                <span style="font-weight:bold; color:#424242;">📋 추천 갯수:</span>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="10" checked style="cursor:pointer;"> 10개</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="20" style="cursor:pointer;"> 20개</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="50" style="cursor:pointer;"> 50개</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="100" style="cursor:pointer;"> 100개</label>
+                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                    <input type="radio" name="rec-limit" value="custom" id="rec-limit-custom-radio" style="cursor:pointer;">
+                    사용자지정
+                    <input type="number" id="rec-limit-custom-input" min="1" placeholder="숫자" style="width:70px; padding:2px 6px; font-size:12px; border:1px solid #bbb; border-radius:3px; margin-left:2px;">
+                    <span>개</span>
+                </label>
             </div>
             <div class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
