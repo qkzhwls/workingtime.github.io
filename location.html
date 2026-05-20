@@ -372,7 +372,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.97c (자리 없는 페어 정리 + 툴팁 레이아웃)</div>
+            <div class="version-badge">🚀 Ver 3.97d (페어 분석 현황 박스 제거)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -539,19 +539,6 @@
             </div>
             <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
                 ※ 선지정으로 찜해둔 자리는 물건이 없더라도 이 추천 목록에서 완벽히 보호(제외)됩니다.
-            </div>
-            <div id="rec-pair-panel" style="background:#fff8e1; border:1px solid #ffe082; border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:12px; display:flex; align-items:center; flex-wrap:wrap; gap:14px;">
-                <div style="display:flex; align-items:center; gap:8px; color:#e65100; font-weight:bold;">
-                    📊 페어 분석 현황:
-                </div>
-                <div id="rec-pair-summary" style="color:#555; font-weight:normal;">
-                    데이터 로드 중...
-                </div>
-                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:#e65100; font-weight:bold; margin-left:auto;">
-                    <input type="checkbox" id="rec-include-pair-of-pair" style="cursor:pointer;" onchange="window.showRecommendation()">
-                    🔗 페어의 페어까지 포함 (느림)<span class="info-tip" data-tip-key="rec-pair-of-pair" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content">🔗 <b>페어의 페어 옵션</b><br>기본: 상품X의 직접 페어 상위 5개만 동선 보정에 사용<br>활성화: 페어의 페어(2단계)까지 포함 → 더 넓은 동선 최적화 시도<br><br>⚠️ 계산량이 증가하여 추천 생성이 느려질 수 있습니다.</span></span>
-                </label>
-                <button onclick="window.openOrderAnalysisReport()" style="padding:5px 10px; font-size:11px; background:#7b1fa2; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">📊 자세히 보기</button>
             </div>
             <div class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
