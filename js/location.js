@@ -637,6 +637,7 @@ ${dataRows}
 
 window.openRecommendModal = function() {
     document.getElementById('recommend-modal').style.display = 'flex';
+    if (typeof window._initRecLimitUI === 'function') window._initRecLimitUI(); // v3.97e
 };
 
 
@@ -850,7 +851,13 @@ window.showRecommendation = function() {
         let usedEmptyIndices = new Set();
         let displayRank = 1;
 
+        // v3.97e: 사용자 지정 추천 갯수 가져오기
+        const limitVal = (typeof window._getRecommendLimit === 'function') ? window._getRecommendLimit() : 10;
+
         for (let i = 0; i < scoredItems.length; i++) {
+            // v3.97e: 사용자 지정 갯수 도달 시 종료
+            if (limitVal > 0 && matchCount >= limitVal) break;
+            
             let item = scoredItems[i];
             
             let currentLocsObjs = originalData.filter(d => d.code === item.code);
@@ -4712,3 +4719,76 @@ function renderCorridor(idx) {
         </div>
     `;
 }
+// ===== v3.97e: 추천 갯수 조절 UI 처리 =====
+(function setupRecLimitUI() {
+    const STORAGE_KEY = 'recLimitV397e';
+    
+    function loadSaved() {
+        try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (!saved) return { mode: '10', custom: '' };
+            const parsed = JSON.parse(saved);
+            return { mode: parsed.mode || '10', custom: parsed.custom || '' };
+        } catch (e) { return { mode: '10', custom: '' }; }
+    }
+    
+    function saveState(mode, custom) {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, custom })); } catch (e) {}
+    }
+    
+    window._getRecommendLimit = function() {
+        const radios = document.querySelectorAll('input[name="rec-limit"]');
+        let mode = '10';
+        radios.forEach(r => { if (r.checked) mode = r.value; });
+        if (mode === 'custom') {
+            const customInput = document.getElementById('rec-limit-custom-input');
+            const val = parseInt(customInput?.value || '0', 10);
+            if (isNaN(val) || val < 1) return 10;
+            return val;
+        }
+        return parseInt(mode, 10) || 10;
+    };
+    
+    window._initRecLimitUI = function() {
+        const radios = document.querySelectorAll('input[name="rec-limit"]');
+        if (radios.length === 0) return;
+        const state = loadSaved();
+        radios.forEach(r => { r.checked = (r.value === state.mode); });
+        const customInput = document.getElementById('rec-limit-custom-input');
+        if (customInput) customInput.value = state.custom || '';
+        
+        const panel = document.getElementById('rec-limit-panel');
+        if (panel && !panel.dataset.bound) {
+            panel.dataset.bound = '1';
+            radios.forEach(r => {
+                r.addEventListener('change', () => {
+                    saveState(r.value, customInput?.value || '');
+                    triggerRecalcIfNeeded();
+                });
+            });
+            if (customInput) {
+                const applyCustom = () => {
+                    if (customInput.value && customInput.value.trim() !== '') {
+                        const customRadio = document.getElementById('rec-limit-custom-radio');
+                        if (customRadio) customRadio.checked = true;
+                        saveState('custom', customInput.value);
+                    }
+                    triggerRecalcIfNeeded();
+                };
+                customInput.addEventListener('blur', applyCustom);
+                customInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); customInput.blur(); }
+                });
+            }
+        }
+    };
+    
+    function triggerRecalcIfNeeded() {
+        const tbody = document.getElementById('recommend-tbody');
+        if (!tbody) return;
+        const hasResult = tbody.children && tbody.children.length > 0;
+        if (hasResult && typeof window.showRecommendation === 'function') {
+            window.showRecommendation();
+        }
+    }
+})();
