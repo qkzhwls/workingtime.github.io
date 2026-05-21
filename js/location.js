@@ -519,7 +519,7 @@ window.saveMasterSettingsModal = async function() {
         showToast("✅ 마스터 설정이 저장되었습니다.");
         
         const recModal = document.getElementById('recommend-modal');
-        if (recModal && recModal.style.display === 'flex') window.showRecommendation();
+        if (recModal && recModal.style.display === 'flex') window.showPairRecommendation();
     } catch(e) { console.error(e); alert("설정 저장 중 오류가 발생했습니다."); }
 };
 
@@ -4787,8 +4787,8 @@ function renderCorridor(idx) {
         const tbody = document.getElementById('recommend-tbody');
         if (!tbody) return;
         const hasResult = tbody.children && tbody.children.length > 0;
-        if (hasResult && typeof window.showRecommendation === 'function') {
-            window.showRecommendation();
+        if (hasResult && typeof window.showPairRecommendation === 'function') {
+            window.showPairRecommendation();
         }
     }
 })();
@@ -4878,6 +4878,7 @@ window.showPairRecommendation = function() {
                         }
                     });
                     pairDataReady = true;
+                    console.log('[v4.0a-fix2] 페어 데이터 로드 완료: pairMap 상품 수 =', Object.keys(pairMap).length, ', codeToLocs 상품 수 =', Object.keys(codeToLocs).length);
                 }
             } catch (e) {
                 console.warn('[v4.0a-fix1] 페어 데이터 캐시 사용 실패:', e);
@@ -4909,6 +4910,7 @@ window.showPairRecommendation = function() {
                 });
                 
                 pairPairs.sort((a, b) => b.sumScore - a.sumScore);
+                console.log('[v4.0a-fix2] 페어 쌍 구성 완료: pairPairs 개수 =', pairPairs.length, ', scoredItems 개수 =', scoredItems.length);
             }
             
             // ===== 4. 빈 자리 준비 (기존 로직과 동일하게 정렬) =====
@@ -4964,6 +4966,11 @@ window.showPairRecommendation = function() {
                 emptyByZoneDong[key].push(eLoc);
             });
             
+            // v4.0a-fix2: 디버그 로그 - 빈 자리 그룹화 결과
+            const groupsWithTwoOrMore = Object.entries(emptyByZoneDong).filter(([k, v]) => v.length >= 2);
+            console.log('[v4.0a-fix2] 빈 자리 총', emptyLocs.length, '개 / 구역+동 그룹', Object.keys(emptyByZoneDong).length, '개 / 빈 자리 2개 이상 그룹', groupsWithTwoOrMore.length, '개');
+            console.log('[v4.0a-fix2] 빈 자리 2개 이상 그룹 상세:', groupsWithTwoOrMore.map(([k, v]) => k + ': ' + v.length + '개'));
+            
             // ===== 5. 갯수 제한 가져오기 (v3.97e UI에서 설정한 값) =====
             const limitVal = (typeof window._getRecommendLimit === 'function') ? window._getRecommendLimit() : 10;
             
@@ -4971,6 +4978,9 @@ window.showPairRecommendation = function() {
             const tbody = document.getElementById('recommend-tbody');
             let html = '';
             let matchCount = 0;
+            // v4.0a-fix2: 매칭 시도 통계
+            let skipReasonUsedCode = 0;
+            let skipReasonNoTwoSlots = 0;
             const usedEmptyKeys = new Set();
             const usedCodes = new Set();
             
@@ -4994,7 +5004,7 @@ window.showPairRecommendation = function() {
                     foundSlotB = slots[1];
                     break;
                 }
-                
+                console.log('[v4.0a-fix2] 매칭 종료: 성공', matchCount, '개 / 건너뜀(상품 중복)', skipReasonUsedCode, '개 / 건너뜀(빈 자리 2개 부족)', skipReasonNoTwoSlots, '개 / 전체 페어 쌍', pairPairs.length, '개');
                 if (!foundSlotA || !foundSlotB) continue;
                 
                 const aCurrentLocs = itemA.currentLocs.join(', ') || '-';
