@@ -255,6 +255,10 @@ window.onload = () => {
     injectPuzzleStyle();
     setupRealtimeListenerA();
     setupRealtimeListenerB();
+    // v4.0a-fix4: 페이지 로드 시 페어 캐시 자동 로드 (페어 쌍 추천에 필수)
+    if (typeof window.loadOrderPairsCache === 'function') {
+        window.loadOrderPairsCache();
+    }
 };
 
 window.handleDragStart = (e) => {
@@ -5028,7 +5032,6 @@ window.showPairRecommendation = function() {
                     foundSlotB = slots[1];
                     break;
                 }
-                console.log('[v4.0a-fix2] 매칭 종료: 성공', matchCount, '개 / 건너뜀(상품 중복)', skipReasonUsedCode, '개 / 건너뜀(빈 자리 2개 부족)', skipReasonNoTwoSlots, '개 / 전체 페어 쌍', pairPairs.length, '개');
                 if (!foundSlotA || !foundSlotB) continue;
                 
                 const aCurrentLocs = itemA.currentLocs.join(', ') || '-';
@@ -5069,6 +5072,8 @@ window.showPairRecommendation = function() {
                 usedCodes.add(pair.codeB);
                 matchCount++;
             }
+
+            console.log('[v4.0a-fix4] 매칭 종료: 성공', matchCount, '개 / 건너뜀(상품 중복)', skipReasonUsedCode, '개 / 건너뜀(빈 자리 2개 부족)', skipReasonNoTwoSlots, '개 / 전체 페어 쌍', pairPairs.length, '개');
             
             if (matchCount === 0) {
                 html += '<tr><td colspan="6" style="padding:40px; text-align:center; color:#666;">표시할 페어 쌍이 없습니다.<br>(페어 데이터가 부족하거나 같은 동에 빈 자리 2개를 확보할 수 없는 상태입니다)</td></tr>';
