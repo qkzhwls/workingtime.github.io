@@ -4800,7 +4800,7 @@ window.showPairRecommendation = function() {
         try {
             window.currentRecommendations = [];
             
-            // ===== 1. 점수 계산 (기존 showRecommendation과 동일한 방식) =====
+            // ===== 1. 점수 계산 (기존 showRecommendation과 동일한 정규화 방식) =====
             const allCodes = new Set(
                 originalData
                     .filter(d => d.code && d.code.trim() !== '' && d.code !== d.id)
@@ -4808,20 +4808,43 @@ window.showPairRecommendation = function() {
                     .map(d => d.code.trim())
             );
             
-            const ratios = window.recommendPriorities.scoreRatios || { zikjin: 50, weekly: 30, trend: 20 };
-            const scoredItems = [];
+            let maxZQty = 0;
+            let maxWQty = 0;
+            let maxTrend = 0;
+            let itemDataList = [];
             
             allCodes.forEach(code => {
-                const item = window.calculateScoreForCode ? window.calculateScoreForCode(code) : null;
-                if (!item) return;
-                
-                const zContrib = (item.zQty || 0) * (ratios.zikjin / 100);
-                const wContrib = (item.wQty || 0) * (ratios.weekly / 100);
-                const tContrib = (item.trendVal || 0) * (ratios.trend / 100);
-                const finalScore = zContrib + wContrib + tContrib;
+                let zItem = zikjinData[code] || {};
+                let wItem = weeklyData[code] || {};
+                let locItem = originalData.find(d => d.code === code);
+                let name = (locItem && locItem.name) || zItem['상품명'] || wItem['상품명'] || '알 수 없음';
+                let zQty = Number(zItem['수량'] || 0);
+                let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0);
+                let trendVal = 0;
+                let dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
+                if (dates.length >= 6) {
+                    let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
+                    let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
+                    trendVal = Math.max(0, recent3 - prev3);
+                }
+                if (zQty > maxZQty) maxZQty = zQty;
+                if (wQty > maxWQty) maxWQty = wQty;
+                if (trendVal > maxTrend) maxTrend = trendVal;
+                itemDataList.push({ code, name, zQty, wQty, trendVal });
+            });
+            
+            const scoredItems = [];
+            itemDataList.forEach(item => {
+                let zScore = maxZQty > 0 ? (item.zQty / maxZQty) * 100 : 0;
+                let wScore = maxWQty > 0 ? (item.wQty / maxWQty) * 100 : 0;
+                let tScore = maxTrend > 0 ? (item.trendVal / maxTrend) * 100 : 0;
+                let finalScore = (zScore * (window.recommendRatios.zikjin / 100)) + (wScore * (window.recommendRatios.weekly / 100)) + (tScore * (window.recommendRatios.trend / 100));
                 
                 if (finalScore > 0) {
-                    const currentLocs = originalData.filter(d => d.code === code).map(d => d.id);
+                    const currentLocs = originalData.filter(d => d.code === item.code).map(d => d.id);
+                    const zContrib = zScore * (window.recommendRatios.zikjin / 100);
+                    const wContrib = wScore * (window.recommendRatios.weekly / 100);
+                    const tContrib = tScore * (window.recommendRatios.trend / 100);
                     scoredItems.push({
                         code: item.code,
                         name: item.name,
@@ -4836,6 +4859,7 @@ window.showPairRecommendation = function() {
                     });
                 }
             });
+            scoredItems.sort((a, b) => b.score - a.score);
             
             // 빠른 조회를 위한 맵 구성
             const scoreMap = {};
