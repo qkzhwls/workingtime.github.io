@@ -372,7 +372,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 3.97e (추천 갯수 조절 UI)</div>
+            <div class="version-badge">🚀 Ver 4.0a (페어 쌍 추천 MVP)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -533,7 +533,7 @@
         <div class="modal-content" onclick="event.stopPropagation()" style="width: 980px; max-width: 96vw; padding: 25px 20px;">
             <div class="modal-header" style="color: #4caf50; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
                 💡 로케이션 변경 리스트
-                <button onclick="window.showRecommendation()" style="padding:6px 12px; font-size:13px; background:#4caf50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🔍 계산</button>
+                <button onclick="window.showPairRecommendation()" style="padding:6px 12px; font-size:13px; background:#4caf50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🔍 계산</button>
                 <button onclick="window.openRatioModal()" style="padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">⚙️ 점수반영비율 설정</button>
                 <button onclick="window.show2FRecommendation()" style="padding:6px 12px; font-size:13px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🏢 2F 이동 추천</button>
             </div>
@@ -557,12 +557,12 @@
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
                     <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <tr>
-                            <th style="width: 80px; border-top:none; font-size:13px;">순위(점수)<span class="info-tip" data-tip-key="rec-score">i<span class="info-tip-content">📊 <b>점수 계산 방식</b><br>세 가지 데이터의 가중 평균입니다:<br>• <b>직진배송</b>: 최근 직진배송 수량<br>• <b>주차별</b>: 기간 배송/발주 수량<br>• <b>상승세</b>: 최근 3주 vs 이전 3주 증가분<br><br>⚙️ <b>점수반영비율 설정</b>에서 각 비율을 조정할 수 있습니다.<br>마우스를 각 상품의 점수 위에 올리면 세부 내역이 보입니다.</span></span></th>
-                            <th style="width: 120px; border-top:none; font-size:13px;">상품코드</th>
-                            <th style="border-top:none; font-size:13px;">상품명</th>
-                            <th style="width: 80px; border-top:none; font-size:13px; background:#fff8e1; color:#e65100;">이동수량<span class="info-tip" data-tip-key="rec-move-qty">i<span class="info-tip-content">📦 <b>3층에서 옮길 수량</b><br>= 정상재고 - 2층창고재고<br>(같은 상품코드의 모든 로케이션 합계)</span></span></th>
-                            <th style="width: 130px; border-top:none; font-size:13px;">현재 위치</th>
-                            <th style="width: 180px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ 추천 로케이션<span class="info-tip" data-tip-key="rec-target-loc">i<span class="info-tip-content">🎯 <b>우선순위 알고리즘</b>으로 추천된 빈 자리입니다.<br>• 구역(★→A→B...) 우선<br>• 동 우선순위 (설정 가능)<br>• 위치 우선순위 (설정 가능)<br><br>뱃지 의미:<br>🔺<b>전진</b>: 더 좋은 위치로 이동<br>🔻<b>후퇴</b>: 덜 좋은 위치 (빈자리 부족)<br>➖<b>수평</b>: 비슷한 우선순위<br>✨<b>신규</b>: 처음 배치되는 상품</span></span></th>
+                            <th style="width: 70px; border-top:none; font-size:13px;">순위(합산점수)<span class="info-tip" data-tip-key="pair-rank-score">i<span class="info-tip-content">📊 <b>페어 쌍 순위 산정</b><br>두 상품의 점수(직진+주차+상승세)를 합산하여 순위를 매깁니다.<br>점수가 높은 페어 쌍부터 우선 추천됩니다.</span></span></th>
+                            <th style="border-top:none; font-size:13px;">상품 A</th>
+                            <th style="width: 160px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ A 추천 자리</th>
+                            <th style="width: 40px; border-top:none; font-size:18px; color:#1976d2; text-align:center;">⇄</th>
+                            <th style="border-top:none; font-size:13px;">상품 B</th>
+                            <th style="width: 160px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ B 추천 자리</th>
                         </tr>
                     </thead>
                     <tbody id="recommend-tbody"></tbody>
