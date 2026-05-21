@@ -4792,3 +4792,89 @@ function renderCorridor(idx) {
         }
     }
 })();
+// ===== v4.0a: 페어 쌍 추천 (MVP) =====
+window.showPairRecommendation = function() {
+    window.showLoading("💡 페어 쌍 추천을 계산 중입니다...");
+    
+    setTimeout(() => {
+        window.currentRecommendations = [];
+        
+        // 1. 점수 계산
+        const allCodes = new Set(originalData.filter(d => d.code && d.code.trim() !== '' && d.code !== d.id).filter(d => !(incomingTotalByCode[d.code.trim()] > 0)).map(d => d.code.trim()));
+        const ratios = window.recommendPriorities.scoreRatios || { zikjin: 50, weekly: 30, trend: 20 };
+        const scoredItems = [];
+        
+        allCodes.forEach(code => {
+            const item = window.calculateScoreForCode ? window.calculateScoreForCode(code) : null;
+            if (!item) return;
+            const finalScore = ((item.zQty || 0) * (ratios.zikjin / 100)) + ((item.wQty || 0) * (ratios.weekly / 100)) + ((item.trendVal || 0) * (ratios.trend / 100));
+            if (finalScore > 0) {
+                scoredItems.push({ code: item.code, name: item.name, score: finalScore, currentLocs: originalData.filter(d => d.code === code).map(d => d.id) });
+            }
+        });
+        const scoreMap = {}; scoredItems.forEach(s => { scoreMap[s.code] = s; });
+        
+        // 2. 페어 데이터 구성 및 3. 페어 쌍 구성
+        const pairMap = {}, pairPairs = [], seenPair = new Set();
+        if (window._cachedOrderPairs && window._cachedOrderStats && window._cachedOrderMeta) {
+            const { _cachedOrderPairs: pairs, _cachedOrderStats: stats, _cachedOrderMeta: meta } = window;
+            const N = meta.totalProcessedOrders || 1;
+            pairs.forEach(p => {
+                const cA = (stats[p.codeA] || {}).count || 0, cB = (stats[p.codeB] || {}).count || 0;
+                if (cA === 0 || cB === 0 || p.count < 5 || ((p.count * N) / (cA * cB)) < 2.0) return;
+                if (!pairMap[p.codeA]) pairMap[p.codeA] = [];
+                pairMap[p.codeA].push({ partner: p.codeB, weight: ((p.count * N) / (cA * cB)) * p.count });
+            });
+            for (const code in pairMap) { pairMap[code].sort((a, b) => b.weight - a.weight); pairMap[code] = pairMap[code].slice(0, 1); }
+            
+            scoredItems.forEach(itemA => {
+                const partner = pairMap[itemA.code]?.[0];
+                if (!partner || !scoreMap[partner.partner]) return;
+                const key = [itemA.code, partner.partner].sort().join('|');
+                if (seenPair.has(key)) return;
+                seenPair.add(key);
+                pairPairs.push({ codeA: itemA.code, codeB: partner.partner, sumScore: itemA.score + scoreMap[partner.partner].score });
+            });
+            pairPairs.sort((a, b) => b.sumScore - a.sumScore);
+        }
+        
+        // 4. 빈 자리 정렬 및 그룹화 (동별)
+        let emptyLocs = originalData.filter(d => !(d.code || d.name || d.preAssigned)).sort((a, b) => {
+            const zRank = (loc) => { const p = (loc.id || '').charAt(0).toUpperCase(); return window.recommendPriorities.zones ? Object.values(window.recommendPriorities.zones).findIndex(z => z.includes(p)) : 99; };
+            return zRank(a) - zRank(b) || window.recommendPriorities.dongs.indexOf(d.dong) - window.recommendPriorities.dongs.indexOf(b.dong);
+        });
+        const emptyByZoneDong = {};
+        emptyLocs.forEach(e => { const key = `${(e.id || '').charAt(0)}|${e.dong}`; if (!emptyByZoneDong[key]) emptyByZoneDong[key] = []; emptyByZoneDong[key].push(e); });
+        
+        // 6. 매칭
+        const tbody = document.getElementById('recommend-tbody'), limitVal = window._getRecommendLimit?.() || 10;
+        let html = '', matchCount = 0, usedEmptyKeys = new Set(), usedCodes = new Set();
+        
+        for (const pair of pairPairs) {
+            if (limitVal > 0 && matchCount >= limitVal) break;
+            if (usedCodes.has(pair.codeA) || usedCodes.has(pair.codeB)) continue;
+            
+            let foundSlotA = null, foundSlotB = null;
+            for (const key in emptyByZoneDong) {
+                const slots = emptyByZoneDong[key].filter(s => !usedEmptyKeys.has(s.id));
+                if (slots.length >= 2) { [foundSlotA, foundSlotB] = slots; break; }
+            }
+            if (!foundSlotA) continue;
+            
+            html += `<tr style="background:${matchCount % 2 === 0 ? '#ffffff' : '#fafafa'};">
+                <td style="text-align:center; padding:12px 6px;">${matchCount + 1}위<br><b style="color:#e65100">${pair.sumScore.toFixed(1)}점</b></td>
+                <td><b>${pair.codeA}</b><br>${scoreMap[pair.codeA].name}</td>
+                <td style="background:#e8f5e9"><b>${foundSlotA.id}</b><br>${foundSlotA.dong}동</td>
+                <td style="text-align:center; font-size:18px">⇄</td>
+                <td><b>${pair.codeB}</b><br>${scoreMap[pair.codeB].name}</td>
+                <td style="background:#e8f5e9"><b>${foundSlotB.id}</b><br>${foundSlotB.dong}동</td>
+            </tr>`;
+            usedEmptyKeys.add(foundSlotA.id); usedEmptyKeys.add(foundSlotB.id);
+            usedCodes.add(pair.codeA); usedCodes.add(pair.codeB);
+            matchCount++;
+        }
+        tbody.innerHTML = html || '<tr><td colspan="6" style="padding:40px; text-align:center;">표시할 페어 쌍이 없습니다.</td></tr>';
+        window.hideLoading();
+        document.getElementById('recommend-modal').style.display = 'flex';
+    }, 500);
+};
