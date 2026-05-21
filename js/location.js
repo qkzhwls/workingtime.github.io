@@ -4792,89 +4792,262 @@ function renderCorridor(idx) {
         }
     }
 })();
-// ===== v4.0a: 페어 쌍 추천 (MVP) =====
+// ===== v4.0a-fix1: 페어 쌍 추천 (MVP) =====
 window.showPairRecommendation = function() {
     window.showLoading("💡 페어 쌍 추천을 계산 중입니다...");
     
     setTimeout(() => {
-        window.currentRecommendations = [];
-        
-        // 1. 점수 계산
-        const allCodes = new Set(originalData.filter(d => d.code && d.code.trim() !== '' && d.code !== d.id).filter(d => !(incomingTotalByCode[d.code.trim()] > 0)).map(d => d.code.trim()));
-        const ratios = window.recommendPriorities.scoreRatios || { zikjin: 50, weekly: 30, trend: 20 };
-        const scoredItems = [];
-        
-        allCodes.forEach(code => {
-            const item = window.calculateScoreForCode ? window.calculateScoreForCode(code) : null;
-            if (!item) return;
-            const finalScore = ((item.zQty || 0) * (ratios.zikjin / 100)) + ((item.wQty || 0) * (ratios.weekly / 100)) + ((item.trendVal || 0) * (ratios.trend / 100));
-            if (finalScore > 0) {
-                scoredItems.push({ code: item.code, name: item.name, score: finalScore, currentLocs: originalData.filter(d => d.code === code).map(d => d.id) });
-            }
-        });
-        const scoreMap = {}; scoredItems.forEach(s => { scoreMap[s.code] = s; });
-        
-        // 2. 페어 데이터 구성 및 3. 페어 쌍 구성
-        const pairMap = {}, pairPairs = [], seenPair = new Set();
-        if (window._cachedOrderPairs && window._cachedOrderStats && window._cachedOrderMeta) {
-            const { _cachedOrderPairs: pairs, _cachedOrderStats: stats, _cachedOrderMeta: meta } = window;
-            const N = meta.totalProcessedOrders || 1;
-            pairs.forEach(p => {
-                const cA = (stats[p.codeA] || {}).count || 0, cB = (stats[p.codeB] || {}).count || 0;
-                if (cA === 0 || cB === 0 || p.count < 5 || ((p.count * N) / (cA * cB)) < 2.0) return;
-                if (!pairMap[p.codeA]) pairMap[p.codeA] = [];
-                pairMap[p.codeA].push({ partner: p.codeB, weight: ((p.count * N) / (cA * cB)) * p.count });
+        try {
+            window.currentRecommendations = [];
+            
+            // ===== 1. 점수 계산 (기존 showRecommendation과 동일한 방식) =====
+            const allCodes = new Set(
+                originalData
+                    .filter(d => d.code && d.code.trim() !== '' && d.code !== d.id)
+                    .filter(d => !(incomingTotalByCode[d.code.trim()] > 0))
+                    .map(d => d.code.trim())
+            );
+            
+            const ratios = window.recommendPriorities.scoreRatios || { zikjin: 50, weekly: 30, trend: 20 };
+            const scoredItems = [];
+            
+            allCodes.forEach(code => {
+                const item = window.calculateScoreForCode ? window.calculateScoreForCode(code) : null;
+                if (!item) return;
+                
+                const zContrib = (item.zQty || 0) * (ratios.zikjin / 100);
+                const wContrib = (item.wQty || 0) * (ratios.weekly / 100);
+                const tContrib = (item.trendVal || 0) * (ratios.trend / 100);
+                const finalScore = zContrib + wContrib + tContrib;
+                
+                if (finalScore > 0) {
+                    const currentLocs = originalData.filter(d => d.code === code).map(d => d.id);
+                    scoredItems.push({
+                        code: item.code,
+                        name: item.name,
+                        score: finalScore,
+                        currentLocs: currentLocs,
+                        zQty: item.zQty,
+                        wQty: item.wQty,
+                        trendVal: item.trendVal,
+                        zContrib: zContrib,
+                        wContrib: wContrib,
+                        tContrib: tContrib
+                    });
+                }
             });
-            for (const code in pairMap) { pairMap[code].sort((a, b) => b.weight - a.weight); pairMap[code] = pairMap[code].slice(0, 1); }
             
-            scoredItems.forEach(itemA => {
-                const partner = pairMap[itemA.code]?.[0];
-                if (!partner || !scoreMap[partner.partner]) return;
-                const key = [itemA.code, partner.partner].sort().join('|');
-                if (seenPair.has(key)) return;
-                seenPair.add(key);
-                pairPairs.push({ codeA: itemA.code, codeB: partner.partner, sumScore: itemA.score + scoreMap[partner.partner].score });
-            });
-            pairPairs.sort((a, b) => b.sumScore - a.sumScore);
-        }
-        
-        // 4. 빈 자리 정렬 및 그룹화 (동별)
-        let emptyLocs = originalData.filter(d => !(d.code || d.name || d.preAssigned)).sort((a, b) => {
-            const zRank = (loc) => { const p = (loc.id || '').charAt(0).toUpperCase(); return window.recommendPriorities.zones ? Object.values(window.recommendPriorities.zones).findIndex(z => z.includes(p)) : 99; };
-            return zRank(a) - zRank(b) || window.recommendPriorities.dongs.indexOf(d.dong) - window.recommendPriorities.dongs.indexOf(b.dong);
-        });
-        const emptyByZoneDong = {};
-        emptyLocs.forEach(e => { const key = `${(e.id || '').charAt(0)}|${e.dong}`; if (!emptyByZoneDong[key]) emptyByZoneDong[key] = []; emptyByZoneDong[key].push(e); });
-        
-        // 6. 매칭
-        const tbody = document.getElementById('recommend-tbody'), limitVal = window._getRecommendLimit?.() || 10;
-        let html = '', matchCount = 0, usedEmptyKeys = new Set(), usedCodes = new Set();
-        
-        for (const pair of pairPairs) {
-            if (limitVal > 0 && matchCount >= limitVal) break;
-            if (usedCodes.has(pair.codeA) || usedCodes.has(pair.codeB)) continue;
+            // 빠른 조회를 위한 맵 구성
+            const scoreMap = {};
+            scoredItems.forEach(s => { scoreMap[s.code] = s; });
             
-            let foundSlotA = null, foundSlotB = null;
-            for (const key in emptyByZoneDong) {
-                const slots = emptyByZoneDong[key].filter(s => !usedEmptyKeys.has(s.id));
-                if (slots.length >= 2) { [foundSlotA, foundSlotB] = slots; break; }
+            // ===== 2. 페어 데이터 준비 (신뢰 페어만 추출) =====
+            const pairMap = {};
+            const codeToLocs = {};
+            let pairDataReady = false;
+            
+            try {
+                if (window._cachedOrderPairs && window._cachedOrderStats && window._cachedOrderMeta) {
+                    const pairs = window._cachedOrderPairs;
+                    const stats = window._cachedOrderStats;
+                    const meta = window._cachedOrderMeta;
+                    const N = meta.totalProcessedOrders || 1;
+                    
+                    pairs.forEach(p => {
+                        const cA = (stats[p.codeA] || {}).count || 0;
+                        const cB = (stats[p.codeB] || {}).count || 0;
+                        if (cA === 0 || cB === 0) return;
+                        const lift = (p.count * N) / (cA * cB);
+                        if (p.count < 5 || lift < 2.0) return;
+                        const weight = lift * p.count;
+                        if (!pairMap[p.codeA]) pairMap[p.codeA] = [];
+                        if (!pairMap[p.codeB]) pairMap[p.codeB] = [];
+                        pairMap[p.codeA].push({ partner: p.codeB, weight: weight });
+                        pairMap[p.codeB].push({ partner: p.codeA, weight: weight });
+                    });
+                    
+                    for (const code in pairMap) {
+                        pairMap[code].sort((a, b) => b.weight - a.weight);
+                        pairMap[code] = pairMap[code].slice(0, 5);
+                    }
+                    
+                    originalData.forEach(d => {
+                        if (d.code && d.code !== d.id && d.code.trim() !== '') {
+                            if (!codeToLocs[d.code]) codeToLocs[d.code] = [];
+                            codeToLocs[d.code].push(d.id);
+                        }
+                    });
+                    pairDataReady = true;
+                }
+            } catch (e) {
+                console.warn('[v4.0a-fix1] 페어 데이터 캐시 사용 실패:', e);
             }
-            if (!foundSlotA) continue;
             
-            html += `<tr style="background:${matchCount % 2 === 0 ? '#ffffff' : '#fafafa'};">
-                <td style="text-align:center; padding:12px 6px;">${matchCount + 1}위<br><b style="color:#e65100">${pair.sumScore.toFixed(1)}점</b></td>
-                <td><b>${pair.codeA}</b><br>${scoreMap[pair.codeA].name}</td>
-                <td style="background:#e8f5e9"><b>${foundSlotA.id}</b><br>${foundSlotA.dong}동</td>
-                <td style="text-align:center; font-size:18px">⇄</td>
-                <td><b>${pair.codeB}</b><br>${scoreMap[pair.codeB].name}</td>
-                <td style="background:#e8f5e9"><b>${foundSlotB.id}</b><br>${foundSlotB.dong}동</td>
-            </tr>`;
-            usedEmptyKeys.add(foundSlotA.id); usedEmptyKeys.add(foundSlotB.id);
-            usedCodes.add(pair.codeA); usedCodes.add(pair.codeB);
-            matchCount++;
+            // ===== 3. 페어 쌍 구성 (중복 제거, 점수 합산 기준 정렬) =====
+            const pairPairs = [];
+            const seenPair = new Set();
+            
+            if (pairDataReady) {
+                scoredItems.forEach(itemA => {
+                    const partners = pairMap[itemA.code] || [];
+                    if (partners.length === 0) return;
+                    const topPartner = partners[0];
+                    const codeB = topPartner.partner;
+                    const itemB = scoreMap[codeB];
+                    if (!itemB) return;
+                    
+                    const key = [itemA.code, codeB].sort().join('|');
+                    if (seenPair.has(key)) return;
+                    seenPair.add(key);
+                    
+                    pairPairs.push({
+                        codeA: itemA.code,
+                        codeB: codeB,
+                        sumScore: itemA.score + itemB.score,
+                        weight: topPartner.weight
+                    });
+                });
+                
+                pairPairs.sort((a, b) => b.sumScore - a.sumScore);
+            }
+            
+            // ===== 4. 빈 자리 준비 (기존 로직과 동일하게 정렬) =====
+            let emptyLocs = originalData.filter(d => {
+                const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
+                if (hasContent || d.preAssigned) return false;
+                const excludeCombos = window.recommendPriorities.excludeCombos || [];
+                if (excludeCombos.length > 0) {
+                    const prefix = (d.id || '').charAt(0).toUpperCase();
+                    const dong = (d.dong || '').toString().trim();
+                    const combo = `${prefix}-${dong}`;
+                    if (excludeCombos.includes(combo)) return false;
+                }
+                return true;
+            });
+            
+            const getZoneRank = (locId) => {
+                const prefix = (locId || '').charAt(0).toUpperCase();
+                const zones = window.recommendPriorities.zones || {};
+                for (let i = 0; i <= 3; i++) {
+                    if (zones[i] && zones[i].includes(prefix)) return i;
+                }
+                return 99;
+            };
+            const getDongRank = (dong) => {
+                const str = (dong || '').toString().trim();
+                const idx = window.recommendPriorities.dongs.indexOf(str);
+                return idx !== -1 ? idx : 99;
+            };
+            const getPosRank = (pos) => {
+                const str = (pos || '').toString().trim();
+                const idx = window.recommendPriorities.poses.indexOf(str);
+                return idx !== -1 ? idx : 99;
+            };
+            
+            emptyLocs.sort((a, b) => {
+                const zRankA = getZoneRank(a.id);
+                const zRankB = getZoneRank(b.id);
+                if (zRankA !== zRankB) return zRankA - zRankB;
+                const dRankA = getDongRank(a.dong);
+                const dRankB = getDongRank(b.dong);
+                if (dRankA !== dRankB) return dRankA - dRankB;
+                return getPosRank(a.pos) - getPosRank(b.pos);
+            });
+            
+            // 동별 빈 자리 그룹화 (구역+동 단위)
+            const emptyByZoneDong = {};
+            emptyLocs.forEach(eLoc => {
+                const zone = (eLoc.id || '').charAt(0).toUpperCase();
+                const dong = (eLoc.dong || '').toString().trim();
+                const key = `${zone}|${dong}`;
+                if (!emptyByZoneDong[key]) emptyByZoneDong[key] = [];
+                emptyByZoneDong[key].push(eLoc);
+            });
+            
+            // ===== 5. 갯수 제한 가져오기 (v3.97e UI에서 설정한 값) =====
+            const limitVal = (typeof window._getRecommendLimit === 'function') ? window._getRecommendLimit() : 10;
+            
+            // ===== 6. 페어 쌍별 자리 매칭 (양쪽 다 옮기는 케이스만) =====
+            const tbody = document.getElementById('recommend-tbody');
+            let html = '';
+            let matchCount = 0;
+            const usedEmptyKeys = new Set();
+            const usedCodes = new Set();
+            
+            for (let i = 0; i < pairPairs.length; i++) {
+                if (limitVal > 0 && matchCount >= limitVal) break;
+                
+                const pair = pairPairs[i];
+                if (usedCodes.has(pair.codeA) || usedCodes.has(pair.codeB)) continue;
+                
+                const itemA = scoreMap[pair.codeA];
+                const itemB = scoreMap[pair.codeB];
+                
+                // 같은 구역+같은 동에 빈 자리가 2개 이상 있는 곳을 찾음
+                let foundSlotA = null;
+                let foundSlotB = null;
+                
+                for (const key in emptyByZoneDong) {
+                    const slots = emptyByZoneDong[key].filter(s => !usedEmptyKeys.has(s.id));
+                    if (slots.length < 2) continue;
+                    foundSlotA = slots[0];
+                    foundSlotB = slots[1];
+                    break;
+                }
+                
+                if (!foundSlotA || !foundSlotB) continue;
+                
+                const aCurrentLocs = itemA.currentLocs.join(', ') || '-';
+                const bCurrentLocs = itemB.currentLocs.join(', ') || '-';
+                const rowBg = matchCount % 2 === 0 ? '#ffffff' : '#fafafa';
+                
+                html += `
+                    <tr style="background:${rowBg};">
+                        <td style="text-align:center; color:var(--primary); font-weight:900; font-size:14px; padding:12px 6px;">
+                            ${matchCount + 1}위<br>
+                            <span style="font-size:11px; color:#e65100; font-weight:bold;">${pair.sumScore.toFixed(1)}점</span>
+                        </td>
+                        <td style="padding:10px 8px; font-size:12px;">
+                            <div style="font-weight:bold; color:#1976d2;">${itemA.code}</div>
+                            <div style="color:#333; margin-top:2px;">${itemA.name}</div>
+                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${aCurrentLocs}</div>
+                        </td>
+                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
+                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${foundSlotA.id}</div>
+                            <div style="font-size:10px; color:#555; margin-top:2px;">${foundSlotA.dong}동</div>
+                        </td>
+                        <td style="text-align:center; font-size:18px; color:#1976d2; font-weight:bold;">⇄</td>
+                        <td style="padding:10px 8px; font-size:12px;">
+                            <div style="font-weight:bold; color:#1976d2;">${itemB.code}</div>
+                            <div style="color:#333; margin-top:2px;">${itemB.name}</div>
+                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${bCurrentLocs}</div>
+                        </td>
+                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
+                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${foundSlotB.id}</div>
+                            <div style="font-size:10px; color:#555; margin-top:2px;">${foundSlotB.dong}동</div>
+                        </td>
+                    </tr>
+                `;
+                
+                usedEmptyKeys.add(foundSlotA.id);
+                usedEmptyKeys.add(foundSlotB.id);
+                usedCodes.add(pair.codeA);
+                usedCodes.add(pair.codeB);
+                matchCount++;
+            }
+            
+            if (matchCount === 0) {
+                html += '<tr><td colspan="6" style="padding:40px; text-align:center; color:#666;">표시할 페어 쌍이 없습니다.<br>(페어 데이터가 부족하거나 같은 동에 빈 자리 2개를 확보할 수 없는 상태입니다)</td></tr>';
+            }
+            
+            tbody.innerHTML = html;
+            window.hideLoading();
+            document.getElementById('recommend-modal').style.display = 'flex';
+            
+        } catch (err) {
+            console.error('[v4.0a-fix1] showPairRecommendation 에러:', err);
+            window.hideLoading();
+            alert('페어 쌍 추천 계산 중 오류가 발생했습니다. 콘솔(F12)을 확인해주세요.');
         }
-        tbody.innerHTML = html || '<tr><td colspan="6" style="padding:40px; text-align:center;">표시할 페어 쌍이 없습니다.</td></tr>';
-        window.hideLoading();
-        document.getElementById('recommend-modal').style.display = 'flex';
     }, 500);
 };
