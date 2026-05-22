@@ -34,12 +34,14 @@ window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
 
 window.currentRecommendations = [];
+// v4.1: 단독 추천용 별도 데이터 변수
+window.currentSingleRecommendations = [];
 
 window.recommendRatios = { zikjin: 50, weekly: 30, trend: 20 };
 window.recommendPriorities = {
     zones: { 0: ['★'], 1: ['A','B','C','D','E','F','G','H','I'], 2: ['Z'], 3: ['L','M','N','O','P','Q','R','S','T'] },
-    dongs: ['1', '2', '3', '4', '5', '6'],
-    poses: ['2', '3', '4', '1', '5']
+    dongs: ['★', '1', '2', '3', '4', '5', '6'],
+    poses: ['★', '2', '3', '4', '1', '5']
 };
 
 const getZoneDocId = (locId) => {
@@ -186,6 +188,13 @@ function setupRealtimeListenerA() {
             }
             if (conf.recommendPriorities) {
                 window.recommendPriorities = conf.recommendPriorities;
+                // v4.1: 기존 설정에 ★이 없으면 자동으로 1순위에 추가 (호환성 보강)
+                if (Array.isArray(window.recommendPriorities.dongs) && !window.recommendPriorities.dongs.includes('★')) {
+                    window.recommendPriorities.dongs = ['★', ...window.recommendPriorities.dongs];
+                }
+                if (Array.isArray(window.recommendPriorities.poses) && !window.recommendPriorities.poses.includes('★')) {
+                    window.recommendPriorities.poses = ['★', ...window.recommendPriorities.poses];
+                }
             }
             // ★ v3.53: 사용자 정의 툴팁 로드
             if (conf.customTooltips) {
@@ -479,8 +488,8 @@ window.openRatioModal = function(e) {
         });
     };
 
-    renderSortBlocks('sort-dongs', window.recommendPriorities.dongs || [], ['1','2','3','4','5','6']);
-    renderSortBlocks('sort-poses', window.recommendPriorities.poses || [], ['1','2','3','4','5']);
+    renderSortBlocks('sort-dongs', window.recommendPriorities.dongs || [], ['★','1','2','3','4','5','6']);
+    renderSortBlocks('sort-poses', window.recommendPriorities.poses || [], ['★','1','2','3','4','5']);
 
     // ★ 제외 조합 입력창 로드
     const excludeCombos = window.recommendPriorities.excludeCombos || [];
@@ -1015,11 +1024,30 @@ window.showRecommendation = function() {
 };
 
 window.downloadRecommendationExcel = function() {
-    if (!window.currentRecommendations || window.currentRecommendations.length === 0) {
+    // v4.1: 활성 탭에 따라 다른 데이터 사용
+    const singleTab = document.getElementById('rec-tab-single');
+    const singleActive = singleTab && singleTab.style.display !== 'none';
+    
+    let sourceData = null;
+    let sheetName = '';
+    let fileSuffix = '';
+    
+    if (singleActive) {
+        sourceData = window.currentSingleRecommendations;
+        sheetName = '단독추천';
+        fileSuffix = '단독';
+    } else {
+        sourceData = window.currentRecommendations;
+        sheetName = '페어추천';
+        fileSuffix = '페어';
+    }
+    
+    if (!sourceData || sourceData.length === 0) {
         alert("다운로드할 추천 데이터가 없습니다.");
         return;
     }
-    const excelData = window.currentRecommendations.map(item => {
+    
+    const excelData = sourceData.map(item => {
         return {
             "현재로케이션": item.currentLocs,
             "변경로케이션": item.targetLoc,
@@ -1028,13 +1056,11 @@ window.downloadRecommendationExcel = function() {
             "상품코드": item.code
         };
     });
-    // ... (이후 엑셀 변환 및 다운로드 로직은 유지)
 
     const ws = XLSX.utils.json_to_sheet(excelData);
     
+    // v4.1: ws['!cols']를 실제 5개 컬럼에 맞게 정리
     ws['!cols'] = [
-        { wch: 12 }, // 이동방향
-        { wch: 10 }, // 이동수량
         { wch: 20 }, // 현재로케이션
         { wch: 15 }, // 변경로케이션
         { wch: 40 }, // 상품명
@@ -1043,12 +1069,12 @@ window.downloadRecommendationExcel = function() {
     ];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "로케이션변경추천");
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
     
     const today = new Date();
     const dateString = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
     
-    XLSX.writeFile(wb, `로케이션변경추천리스트_${dateString}.xlsx`);
+    XLSX.writeFile(wb, `로케이션변경추천리스트_${fileSuffix}_${dateString}.xlsx`);
 };
 
 // ========================================
@@ -4785,10 +4811,19 @@ function renderCorridor(idx) {
     };
     
     function triggerRecalcIfNeeded() {
-        const tbody = document.getElementById('recommend-tbody');
-        if (!tbody) return;
-        const hasResult = tbody.children && tbody.children.length > 0;
-        if (hasResult && typeof window.showPairRecommendation === 'function') {
+        // v4.1: 활성 탭 기준으로 재계산
+        const pairTbody = document.getElementById('recommend-tbody');
+        const singleTbody = document.getElementById('recommend-single-tbody');
+        const pairTab = document.getElementById('rec-tab-pair');
+        const singleTab = document.getElementById('rec-tab-single');
+        
+        // 어떤 탭이 활성화되어 있고 결과가 있는지 확인
+        const singleActive = singleTab && singleTab.style.display !== 'none';
+        const pairActive = pairTab && pairTab.style.display !== 'none';
+        
+        if (singleActive && singleTbody && singleTbody.children.length > 0 && typeof window.showSingleRecommendation === 'function') {
+            window.showSingleRecommendation();
+        } else if (pairActive && pairTbody && pairTbody.children.length > 0 && typeof window.showPairRecommendation === 'function') {
             window.showPairRecommendation();
         }
     }
@@ -5104,6 +5139,280 @@ window.showPairRecommendation = function() {
                     if (isHoldCell) return `<td style="text-align:center; padding:10px 6px; background:#f5f5f5;"><div style="font-weight:bold; color:#888; font-size:13px;">📍 현재 자리 유지</div></td>`;
                     return `<td style="text-align:center; padding:10px 6px; background:#e8f5e9;"><div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slot.id}</div><div style="font-size:10px; color:#555; margin-top:2px;">${slot.dong}동</div></td>`;
                 };
+// ===== v4.1: 단독 추천 기능 =====
+window.switchRecTab = function(tabName) {
+    const singleTab = document.getElementById('rec-tab-single');
+    const pairTab = document.getElementById('rec-tab-pair');
+    const singleBtn = document.getElementById('rec-tab-btn-single');
+    const pairBtn = document.getElementById('rec-tab-btn-pair');
+    if (!singleTab || !pairTab || !singleBtn || !pairBtn) return;
+    
+    if (tabName === 'single') {
+        singleTab.style.display = '';
+        pairTab.style.display = 'none';
+        singleBtn.style.background = '#4caf50';
+        singleBtn.style.color = 'white';
+        pairBtn.style.background = '#e0e0e0';
+        pairBtn.style.color = '#555';
+    } else if (tabName === 'pair') {
+        singleTab.style.display = 'none';
+        pairTab.style.display = '';
+        singleBtn.style.background = '#e0e0e0';
+        singleBtn.style.color = '#555';
+        pairBtn.style.background = '#4caf50';
+        pairBtn.style.color = 'white';
+    }
+};
+
+window.runActiveRecommendation = function() {
+    // 활성 탭에 맞는 계산 실행
+    const singleTab = document.getElementById('rec-tab-single');
+    const singleActive = singleTab && singleTab.style.display !== 'none';
+    if (singleActive) {
+        window.showSingleRecommendation();
+    } else {
+        window.showPairRecommendation();
+    }
+};
+
+window.showSingleRecommendation = function() {
+    window.showLoading("📦 단독 추천을 계산 중입니다...");
+    
+    setTimeout(() => {
+        try {
+            window.currentSingleRecommendations = [];
+            
+            // ===== 1. 점수 계산 (페어 추천과 동일한 정규화 방식) =====
+            const allCodes = new Set(
+                originalData
+                    .filter(d => d.code && d.code.trim() !== '' && d.code !== d.id)
+                    .filter(d => !(incomingTotalByCode[d.code.trim()] > 0))
+                    .map(d => d.code.trim())
+            );
+            
+            let maxZQty = 0;
+            let maxWQty = 0;
+            let maxTrend = 0;
+            let itemDataList = [];
+            
+            allCodes.forEach(code => {
+                let zItem = zikjinData[code] || {};
+                let wItem = weeklyData[code] || {};
+                let locItem = originalData.find(d => d.code === code);
+                let name = (locItem && locItem.name) || zItem['상품명'] || wItem['상품명'] || '알 수 없음';
+                let zQty = Number(zItem['수량'] || 0);
+                let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0);
+                let trendVal = 0;
+                let dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
+                if (dates.length >= 6) {
+                    let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
+                    let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
+                    trendVal = Math.max(0, recent3 - prev3);
+                }
+                if (zQty > maxZQty) maxZQty = zQty;
+                if (wQty > maxWQty) maxWQty = wQty;
+                if (trendVal > maxTrend) maxTrend = trendVal;
+                itemDataList.push({ code, name, zQty, wQty, trendVal });
+            });
+            
+            const scoredItems = [];
+            itemDataList.forEach(item => {
+                let zScore = maxZQty > 0 ? (item.zQty / maxZQty) * 100 : 0;
+                let wScore = maxWQty > 0 ? (item.wQty / maxWQty) * 100 : 0;
+                let tScore = maxTrend > 0 ? (item.trendVal / maxTrend) * 100 : 0;
+                let finalScore = (zScore * (window.recommendRatios.zikjin / 100)) + (wScore * (window.recommendRatios.weekly / 100)) + (tScore * (window.recommendRatios.trend / 100));
+                
+                if (finalScore > 0) {
+                    const currentLocs = originalData.filter(d => d.code === item.code).map(d => d.id);
+                    scoredItems.push({
+                        code: item.code,
+                        name: item.name,
+                        score: finalScore,
+                        currentLocs: currentLocs
+                    });
+                }
+            });
+            scoredItems.sort((a, b) => b.score - a.score);
+            
+            // ===== 2. 빈 자리 준비 =====
+            let emptyLocs = originalData.filter(d => {
+                const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
+                if (hasContent || d.preAssigned) return false;
+                const excludeCombos = window.recommendPriorities.excludeCombos || [];
+                if (excludeCombos.length > 0) {
+                    const prefix = (d.id || '').charAt(0).toUpperCase();
+                    const dong = (d.dong || '').toString().trim();
+                    const combo = `${prefix}-${dong}`;
+                    if (excludeCombos.includes(combo)) return false;
+                }
+                return true;
+            });
+            
+            // ===== 3. 헬퍼: 등급/동/위치 순위 =====
+            const getZoneRank = (locId) => {
+                const prefix = (locId || '').charAt(0).toUpperCase();
+                const zones = window.recommendPriorities.zones || {};
+                for (let i = 0; i <= 3; i++) {
+                    if (zones[i] && zones[i].includes(prefix)) return i;
+                }
+                return 99;
+            };
+            const getDongRank = (dong) => {
+                const str = (dong || '').toString().trim();
+                const idx = window.recommendPriorities.dongs.indexOf(str);
+                return idx !== -1 ? idx : 99;
+            };
+            const getPosRank = (pos) => {
+                const str = (pos || '').toString().trim();
+                const idx = window.recommendPriorities.poses.indexOf(str);
+                return idx !== -1 ? idx : 99;
+            };
+            
+            // ===== 4. 빈 자리 정렬: 동 > 위치 > 구역 (사전순) =====
+            emptyLocs.sort((a, b) => {
+                const dRankA = getDongRank(a.dong);
+                const dRankB = getDongRank(b.dong);
+                if (dRankA !== dRankB) return dRankA - dRankB;
+                const pRankA = getPosRank(a.pos);
+                const pRankB = getPosRank(b.pos);
+                if (pRankA !== pRankB) return pRankA - pRankB;
+                return getZoneRank(a.id) - getZoneRank(b.id);
+            });
+            console.log('[v4.1] 단독 추천: 빈 자리 총', emptyLocs.length, '개 / 점수 있는 상품', scoredItems.length, '개');
+            
+            // ===== 5. 갯수 제한 =====
+            const limitVal = (typeof window._getRecommendLimit === 'function') ? window._getRecommendLimit() : 10;
+            
+            // ===== 6. 점수 1위부터 순서대로 자리 배정 =====
+            const tbody = document.getElementById('recommend-single-tbody');
+            let html = '';
+            let matchCount = 0;
+            let skipNoCurrentLoc = 0;
+            let skipNoBetterSlot = 0;
+            const usedEmptyKeys = new Set();
+            
+            const isBetterSlot = (slotInfo, currentInfo) => {
+                if (slotInfo.dongRank !== currentInfo.dongRank) {
+                    return slotInfo.dongRank < currentInfo.dongRank;
+                }
+                if (slotInfo.posRank !== currentInfo.posRank) {
+                    return slotInfo.posRank < currentInfo.posRank;
+                }
+                return slotInfo.zoneRank < currentInfo.zoneRank;
+            };
+            
+            const getLocInfo = (locId) => {
+                const locData = originalData.find(d => d.id === locId);
+                if (!locData) return null;
+                return {
+                    id: locId,
+                    dongRank: getDongRank(locData.dong),
+                    posRank: getPosRank(locData.pos),
+                    zoneRank: getZoneRank(locId),
+                    dong: (locData.dong || '').toString().trim()
+                };
+            };
+            const getEmptyLocInfo = (eLoc) => {
+                return {
+                    id: eLoc.id,
+                    dongRank: getDongRank(eLoc.dong),
+                    posRank: getPosRank(eLoc.pos),
+                    zoneRank: getZoneRank(eLoc.id),
+                    dong: (eLoc.dong || '').toString().trim()
+                };
+            };
+            
+            const getOptionByCode = (code) => {
+                const locData = originalData.find(d => d.code === code);
+                return (locData && locData.option) ? locData.option : '';
+            };
+            
+            for (let i = 0; i < scoredItems.length; i++) {
+                if (limitVal > 0 && matchCount >= limitVal) break;
+                
+                const item = scoredItems[i];
+                
+                const currentLocId = item.currentLocs && item.currentLocs[0];
+                if (!currentLocId) {
+                    skipNoCurrentLoc++;
+                    continue;
+                }
+                const currentInfo = getLocInfo(currentLocId);
+                if (!currentInfo) {
+                    skipNoCurrentLoc++;
+                    continue;
+                }
+                
+                let foundSlot = null;
+                for (let j = 0; j < emptyLocs.length; j++) {
+                    const eLoc = emptyLocs[j];
+                    if (usedEmptyKeys.has(eLoc.id)) continue;
+                    const slotInfo = getEmptyLocInfo(eLoc);
+                    if (isBetterSlot(slotInfo, currentInfo)) {
+                        foundSlot = eLoc;
+                        break;
+                    }
+                }
+                
+                if (!foundSlot) {
+                    skipNoBetterSlot++;
+                    continue;
+                }
+                
+                const option = getOptionByCode(item.code);
+                const rowBg = matchCount % 2 === 0 ? '#ffffff' : '#fafafa';
+                
+                html += `
+                    <tr style="background:${rowBg};">
+                        <td style="text-align:center; color:var(--primary); font-weight:900; font-size:14px; padding:12px 6px;">
+                            ${matchCount + 1}위
+                        </td>
+                        <td style="padding:10px 8px; font-size:12px;">
+                            <div style="font-weight:bold; color:#1976d2;">${item.code}</div>
+                            <div style="color:#333; margin-top:2px;">${item.name}</div>
+                            <div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${option || '-'}</div>
+                        </td>
+                        <td style="text-align:center; padding:10px 6px;">
+                            <div style="font-weight:bold; color:#555; font-size:13px;">${currentInfo.id}</div>
+                            <div style="font-size:10px; color:#777; margin-top:2px;">${currentInfo.dong}동</div>
+                        </td>
+                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
+                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${foundSlot.id}</div>
+                            <div style="font-size:10px; color:#555; margin-top:2px;">${(foundSlot.dong || '').toString().trim()}동</div>
+                        </td>
+                    </tr>
+                `;
+                
+                usedEmptyKeys.add(foundSlot.id);
+                
+                window.currentSingleRecommendations.push({
+                    currentLocs: currentInfo.id,
+                    targetLoc: foundSlot.id,
+                    name: item.name,
+                    option: option,
+                    code: item.code
+                });
+                
+                matchCount++;
+            }
+            
+            console.log('[v4.1] 단독 추천 종료: 성공', matchCount, '개 / 건너뜀(현재자리없음)', skipNoCurrentLoc, '개 / 건너뜀(이미최적)', skipNoBetterSlot, '개 / 엑셀 데이터', window.currentSingleRecommendations.length, '개');
+            
+            if (matchCount === 0) {
+                html += '<tr><td colspan="4" style="padding:40px; text-align:center; color:#666;">표시할 추천이 없습니다.<br>(모든 상품이 이미 최적 자리에 있거나, 더 좋은 빈 자리가 없습니다)</td></tr>';
+            }
+            
+            tbody.innerHTML = html;
+            window.hideLoading();
+            document.getElementById('recommend-modal').style.display = 'flex';
+            
+        } catch (err) {
+            console.error('[v4.1] showSingleRecommendation 에러:', err);
+            window.hideLoading();
+            alert('단독 추천 계산 중 오류가 발생했습니다. 콘솔(F12)을 확인해주세요.');
+        }
+    }, 500);
+};
                 
                 let slotCellA = (matchMode === 'both') ? buildSlotCell(foundSlotA, false) : (movingCode === pair.codeA ? buildSlotCell(movingSlot, false) : buildSlotCell(null, true));
                 let slotCellB = (matchMode === 'both') ? buildSlotCell(foundSlotB, false) : (movingCode === pair.codeB ? buildSlotCell(movingSlot, false) : buildSlotCell(null, true));
