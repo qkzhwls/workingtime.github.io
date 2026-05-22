@@ -1014,17 +1014,13 @@ window.showRecommendation = function() {
     }, 500); 
 };
 
-// ✨ [엑셀 다운로드 함수]
 window.downloadRecommendationExcel = function() {
     if (!window.currentRecommendations || window.currentRecommendations.length === 0) {
         alert("다운로드할 추천 데이터가 없습니다.");
         return;
     }
-
     const excelData = window.currentRecommendations.map(item => {
         return {
-            "이동방향": item.moveDirection,
-            "이동수량": item.moveQty,
             "현재로케이션": item.currentLocs,
             "변경로케이션": item.targetLoc,
             "상품명": item.name,
@@ -1032,6 +1028,7 @@ window.downloadRecommendationExcel = function() {
             "상품코드": item.code
         };
     });
+    // ... (이후 엑셀 변환 및 다운로드 로직은 유지)
 
     const ws = XLSX.utils.json_to_sheet(excelData);
     
@@ -4984,68 +4981,71 @@ window.showPairRecommendation = function() {
                 return getPosRank(a.pos) - getPosRank(b.pos);
             });
             
-            // 동별 빈 자리 그룹화 (구역+동 단위)
+            // v4.0b-fix1: 빈 자리 그룹화 키를 "구역 등급(zoneRank) + 동"으로 변경
             const emptyByZoneDong = {};
             emptyLocs.forEach(eLoc => {
-                const zone = (eLoc.id || '').charAt(0).toUpperCase();
+                const zRank = getZoneRank(eLoc.id);
                 const dong = (eLoc.dong || '').toString().trim();
-                const key = `${zone}|${dong}`;
+                const key = `${zRank}|${dong}`;
                 if (!emptyByZoneDong[key]) emptyByZoneDong[key] = [];
                 emptyByZoneDong[key].push(eLoc);
             });
             
-            // v4.0a-fix2: 디버그 로그 - 빈 자리 그룹화 결과
+            // v4.0b-fix1: 디버그 로그 - 빈 자리 그룹화 결과 (등급+동 단위)
             const groupsWithTwoOrMore = Object.entries(emptyByZoneDong).filter(([k, v]) => v.length >= 2);
-            console.log('[v4.0a-fix2] 빈 자리 총', emptyLocs.length, '개 / 구역+동 그룹', Object.keys(emptyByZoneDong).length, '개 / 빈 자리 2개 이상 그룹', groupsWithTwoOrMore.length, '개');
-            console.log('[v4.0a-fix2] 빈 자리 2개 이상 그룹 상세:', groupsWithTwoOrMore.map(([k, v]) => k + ': ' + v.length + '개'));
+            console.log('[v4.0b-fix1] 빈 자리 총', emptyLocs.length, '개 / 등급+동 그룹', Object.keys(emptyByZoneDong).length, '개 / 빈 자리 2개 이상 그룹', groupsWithTwoOrMore.length, '개');
+            console.log('[v4.0b-fix1] 빈 자리 2개 이상 그룹 상세:', groupsWithTwoOrMore.map(([k, v]) => k + ': ' + v.length + '개'));
             
             // ===== 5. 갯수 제한 가져오기 (v3.97e UI에서 설정한 값) =====
             const limitVal = (typeof window._getRecommendLimit === 'function') ? window._getRecommendLimit() : 10;
             
-            // ===== 6. 페어 쌍별 자리 매칭 (v4.0b: 양쪽 이동 → 실패 시 한쪽 이동 시도) =====
+            // ===== 6. 페어 쌍별 자리 매칭 (v4.0b-fix1: 동 이동 거리 0인 케이스 후순위) =====
             const tbody = document.getElementById('recommend-tbody');
             let html = '';
             let matchCount = 0;
-            // v4.0b: 매칭 시도 통계
-            let countBoth = 0;             // 양쪽 다 옮긴 케이스 수
-            let countSingle = 0;           // 한쪽만 옮긴 케이스 수
-            let skipReasonUsedCode = 0;    // 상품 중복으로 건너뜀
-            let skipReasonNoSlots = 0;     // 빈 자리 부족으로 건너뜀 (양/한쪽 모두 실패)
+            let countBoth = 0;
+            let countSingle = 0;
+            let skipReasonUsedCode = 0;
+            let skipReasonNoSlots = 0;
             const usedEmptyKeys = new Set();
             const usedCodes = new Set();
             
-            // v4.0b 신규: 현재 위치 정보 추출 헬퍼
             const getCurrentLocInfo = (code) => {
                 const locId = (scoreMap[code] && scoreMap[code].currentLocs && scoreMap[code].currentLocs[0]) || null;
                 if (!locId) return null;
                 const locData = originalData.find(d => d.id === locId);
                 if (!locData) return null;
-                return {
-                    id: locId,
-                    zone: (locId || '').charAt(0).toUpperCase(),
-                    dong: (locData.dong || '').toString().trim(),
-                    pos: (locData.pos || '').toString().trim(),
-                    zoneRank: getZoneRank(locId),
-                    dongRank: getDongRank(locData.dong)
-                };
+                return { id: locId, zone: (locId || '').charAt(0).toUpperCase(), dong: (locData.dong || '').toString().trim(), pos: (locData.pos || '').toString().trim(), zoneRank: getZoneRank(locId), dongRank: getDongRank(locData.dong) };
             };
             
-            for (let i = 0; i < pairPairs.length; i++) {
+            const getOptionByCode = (code) => {
+                const locData = originalData.find(d => d.code === code);
+                return (locData && locData.option) ? locData.option : '';
+            };
+            
+            const pairPairsAnalyzed = pairPairs.map(p => {
+                const lA = getCurrentLocInfo(p.codeA);
+                const lB = getCurrentLocInfo(p.codeB);
+                const dongRankSum = (lA ? lA.dongRank : 99) + (lB ? lB.dongRank : 99);
+                const hasMovement = (dongRankSum > 0) ? 1 : 0;
+                return { pair: p, hasMovement: hasMovement, dongRankSum: dongRankSum };
+            });
+            pairPairsAnalyzed.sort((a, b) => {
+                if (a.hasMovement !== b.hasMovement) return b.hasMovement - a.hasMovement;
+                return b.pair.sumScore - a.pair.sumScore;
+            });
+            
+            for (let i = 0; i < pairPairsAnalyzed.length; i++) {
                 if (limitVal > 0 && matchCount >= limitVal) break;
                 
-                const pair = pairPairs[i];
-                if (usedCodes.has(pair.codeA) || usedCodes.has(pair.codeB)) {
-                    skipReasonUsedCode++;
-                    continue;
-                }
+                const pair = pairPairsAnalyzed[i].pair;
+                if (usedCodes.has(pair.codeA) || usedCodes.has(pair.codeB)) { skipReasonUsedCode++; continue; }
                 
                 const itemA = scoreMap[pair.codeA];
                 const itemB = scoreMap[pair.codeB];
                 
-                // ===== 6-1. 양쪽 다 옮기는 케이스 먼저 시도 (v4.0a 로직 그대로) =====
                 let foundSlotA = null;
                 let foundSlotB = null;
-                
                 for (const key in emptyByZoneDong) {
                     const slots = emptyByZoneDong[key].filter(s => !usedEmptyKeys.has(s.id));
                     if (slots.length < 2) continue;
@@ -5054,147 +5054,74 @@ window.showPairRecommendation = function() {
                     break;
                 }
                 
-                // v4.0b: 매칭 모드 ('both' | 'single' | null)
                 let matchMode = null;
                 let movingCode = null;
-                let fixedCode = null;
                 let movingSlot = null;
                 
                 if (foundSlotA && foundSlotB) {
                     matchMode = 'both';
                 } else {
-                    // ===== 6-2. v4.0b 신규: 한쪽만 옮기는 케이스 시도 =====
                     const locInfoA = getCurrentLocInfo(pair.codeA);
                     const locInfoB = getCurrentLocInfo(pair.codeB);
-                    
-                    if (!locInfoA || !locInfoB) {
-                        skipReasonNoSlots++;
-                        continue;
-                    }
+                    if (!locInfoA || !locInfoB) { skipReasonNoSlots++; continue; }
                     
                     let movingInfo = null;
                     let fixedInfo = null;
                     if (locInfoA.zoneRank !== locInfoB.zoneRank) {
-                        if (locInfoA.zoneRank > locInfoB.zoneRank) {
-                            movingCode = pair.codeA; fixedCode = pair.codeB;
-                            movingInfo = locInfoA; fixedInfo = locInfoB;
-                        } else {
-                            movingCode = pair.codeB; fixedCode = pair.codeA;
-                            movingInfo = locInfoB; fixedInfo = locInfoA;
-                        }
+                        if (locInfoA.zoneRank > locInfoB.zoneRank) { movingCode = pair.codeA; movingInfo = locInfoA; fixedInfo = locInfoB; }
+                        else { movingCode = pair.codeB; movingInfo = locInfoB; fixedInfo = locInfoA; }
                     } else {
-                        if (itemA.score <= itemB.score) {
-                            movingCode = pair.codeA; fixedCode = pair.codeB;
-                            movingInfo = locInfoA; fixedInfo = locInfoB;
-                        } else {
-                            movingCode = pair.codeB; fixedCode = pair.codeA;
-                            movingInfo = locInfoB; fixedInfo = locInfoA;
-                        }
+                        if (itemA.score <= itemB.score) { movingCode = pair.codeA; movingInfo = locInfoA; fixedInfo = locInfoB; }
+                        else { movingCode = pair.codeB; movingInfo = locInfoB; fixedInfo = locInfoA; }
                     }
                     
-                    if (fixedInfo.zone === '★') {
-                        skipReasonNoSlots++;
-                        continue;
-                    }
-                    
-                    if (fixedInfo.dongRank === 99 || movingInfo.dongRank === 99 || fixedInfo.dongRank >= movingInfo.dongRank) {
-                        skipReasonNoSlots++;
-                        continue;
-                    }
+                    if (fixedInfo.zoneRank === 0) { skipReasonNoSlots++; continue; }
+                    if (fixedInfo.dongRank === 99 || movingInfo.dongRank === 99 || fixedInfo.dongRank >= movingInfo.dongRank) { skipReasonNoSlots++; continue; }
                     
                     const dongsArr = (window.recommendPriorities && window.recommendPriorities.dongs) || [];
                     const candidateDongs = [];
-                    for (let dIdx = fixedInfo.dongRank; dIdx < movingInfo.dongRank; dIdx++) {
-                        if (dIdx >= 0 && dIdx < dongsArr.length) {
-                            candidateDongs.push(dongsArr[dIdx]);
-                        }
-                    }
+                    for (let dIdx = fixedInfo.dongRank; dIdx < movingInfo.dongRank; dIdx++) { if (dIdx >= 0 && dIdx < dongsArr.length) candidateDongs.push(dongsArr[dIdx]); }
                     
                     for (let dCand = 0; dCand < candidateDongs.length; dCand++) {
                         const candDong = candidateDongs[dCand];
-                        const candKey = fixedInfo.zone + '|' + candDong;
+                        const candKey = fixedInfo.zoneRank + '|' + candDong;
                         const candSlots = (emptyByZoneDong[candKey] || []).filter(s => !usedEmptyKeys.has(s.id));
                         if (candSlots.length === 0) continue;
                         movingSlot = candSlots[0];
                         break;
                     }
-                    
-                    if (!movingSlot) {
-                        skipReasonNoSlots++;
-                        continue;
-                    }
-                    
+                    if (!movingSlot) { skipReasonNoSlots++; continue; }
                     matchMode = 'single';
                 }
                 
-                // ===== 6-3. 매칭 성공 → 행 HTML 생성 =====
                 const aCurrentLocs = itemA.currentLocs.join(', ') || '-';
                 const bCurrentLocs = itemB.currentLocs.join(', ') || '-';
                 const rowBg = matchCount % 2 === 0 ? '#ffffff' : '#fafafa';
+                const optionA = getOptionByCode(pair.codeA);
+                const optionB = getOptionByCode(pair.codeB);
                 
                 const buildSlotCell = (slot, isHoldCell) => {
-                    if (isHoldCell) {
-                        return `<td style="text-align:center; padding:10px 6px; background:#f5f5f5;">
-                                    <div style="font-weight:bold; color:#888; font-size:13px;">📍 현재 자리 유지</div>
-                                </td>`;
-                    }
-                    return `<td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
-                                <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slot.id}</div>
-                                <div style="font-size:10px; color:#555; margin-top:2px;">${slot.dong}동</div>
-                            </td>`;
+                    if (isHoldCell) return `<td style="text-align:center; padding:10px 6px; background:#f5f5f5;"><div style="font-weight:bold; color:#888; font-size:13px;">📍 현재 자리 유지</div></td>`;
+                    return `<td style="text-align:center; padding:10px 6px; background:#e8f5e9;"><div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slot.id}</div><div style="font-size:10px; color:#555; margin-top:2px;">${slot.dong}동</div></td>`;
                 };
                 
-                let slotCellA = '';
-                let slotCellB = '';
-                if (matchMode === 'both') {
-                    slotCellA = buildSlotCell(foundSlotA, false);
-                    slotCellB = buildSlotCell(foundSlotB, false);
-                } else {
-                    if (movingCode === pair.codeA) {
-                        slotCellA = buildSlotCell(movingSlot, false);
-                        slotCellB = buildSlotCell(null, true);
-                    } else {
-                        slotCellA = buildSlotCell(null, true);
-                        slotCellB = buildSlotCell(movingSlot, false);
-                    }
-                }
+                let slotCellA = (matchMode === 'both') ? buildSlotCell(foundSlotA, false) : (movingCode === pair.codeA ? buildSlotCell(movingSlot, false) : buildSlotCell(null, true));
+                let slotCellB = (matchMode === 'both') ? buildSlotCell(foundSlotB, false) : (movingCode === pair.codeB ? buildSlotCell(movingSlot, false) : buildSlotCell(null, true));
                 
-                html += `
-                    <tr style="background:${rowBg};">
-                        <td style="text-align:center; color:var(--primary); font-weight:900; font-size:14px; padding:12px 6px;">
-                            ${matchCount + 1}위<br>
-                            <span style="font-size:11px; color:#e65100; font-weight:bold;">${pair.sumScore.toFixed(1)}점</span>
-                        </td>
-                        <td style="padding:10px 8px; font-size:12px;">
-                            <div style="font-weight:bold; color:#1976d2;">${itemA.code}</div>
-                            <div style="color:#333; margin-top:2px;">${itemA.name}</div>
-                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${aCurrentLocs}</div>
-                        </td>
-                        ${slotCellA}
-                        <td style="text-align:center; font-size:18px; color:#1976d2; font-weight:bold;">⇄</td>
-                        <td style="padding:10px 8px; font-size:12px;">
-                            <div style="font-weight:bold; color:#1976d2;">${itemB.code}</div>
-                            <div style="color:#333; margin-top:2px;">${itemB.name}</div>
-                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${bCurrentLocs}</div>
-                        </td>
-                        ${slotCellB}
-                    </tr>
-                `;
+                html += `<tr style="background:${rowBg};"><td style="text-align:center; color:var(--primary); font-weight:900; font-size:14px; padding:12px 6px;">${matchCount + 1}위</td><td style="padding:10px 8px; font-size:12px;"><div style="font-weight:bold; color:#1976d2;">${itemA.code}</div><div style="color:#333; margin-top:2px;">${itemA.name}</div><div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${optionA || '-'}</div><div style="color:#777; font-size:11px; margin-top:3px;">현재: ${aCurrentLocs}</div></td>${slotCellA}<td style="padding:10px 8px; font-size:12px;"><div style="font-weight:bold; color:#1976d2;">${itemB.code}</div><div style="color:#333; margin-top:2px;">${itemB.name}</div><div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${optionB || '-'}</div><div style="color:#777; font-size:11px; margin-top:3px;">현재: ${bCurrentLocs}</div></td>${slotCellB}</tr>`;
+                
+                if (matchMode === 'both') { usedEmptyKeys.add(foundSlotA.id); usedEmptyKeys.add(foundSlotB.id); countBoth++; } else { usedEmptyKeys.add(movingSlot.id); countSingle++; }
+                usedCodes.add(pair.codeA); usedCodes.add(pair.codeB);
                 
                 if (matchMode === 'both') {
-                    usedEmptyKeys.add(foundSlotA.id);
-                    usedEmptyKeys.add(foundSlotB.id);
-                    countBoth++;
+                    window.currentRecommendations.push({ currentLocs: aCurrentLocs, targetLoc: foundSlotA.id, name: itemA.name, option: optionA, code: itemA.code });
+                    window.currentRecommendations.push({ currentLocs: bCurrentLocs, targetLoc: foundSlotB.id, name: itemB.name, option: optionB, code: itemB.code });
                 } else {
-                    usedEmptyKeys.add(movingSlot.id);
-                    countSingle++;
+                    window.currentRecommendations.push({ currentLocs: (movingCode === pair.codeA ? aCurrentLocs : bCurrentLocs), targetLoc: movingSlot.id, name: (movingCode === pair.codeA ? itemA.name : itemB.name), option: (movingCode === pair.codeA ? optionA : optionB), code: movingCode });
                 }
-                usedCodes.add(pair.codeA);
-                usedCodes.add(pair.codeB);
                 matchCount++;
             }
-
-            console.log('[v4.0b] 매칭 종료: 성공', matchCount, '개 (양쪽이동', countBoth, '/ 한쪽이동', countSingle, ') / 건너뜀(상품 중복)', skipReasonUsedCode, '개 / 건너뜀(빈 자리 부족)', skipReasonNoSlots, '개 / 전체 페어 쌍', pairPairs.length, '개');
+            console.log('[v4.0b-fix1] 매칭 종료: 성공', matchCount, '개 (양쪽이동', countBoth, '/ 한쪽이동', countSingle, ') / 건너뜀(상품 중복)', skipReasonUsedCode, '개 / 건너뜀(빈 자리 부족)', skipReasonNoSlots, '개 / 전체 페어 쌍', pairPairsAnalyzed.length, '개 / 엑셀 데이터', window.currentRecommendations.length, '개');
             
             if (matchCount === 0) {
                 html += '<tr><td colspan="6" style="padding:40px; text-align:center; color:#666;">표시할 페어 쌍이 없습니다.<br>(페어 데이터가 부족하거나 같은 동에 빈 자리 2개를 확보할 수 없는 상태입니다)</td></tr>';
