@@ -372,7 +372,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 4.1 (단독 추천 기능 추가)</div>
+            <div class="version-badge">🚀 Ver 4.1-fix1 (긴급 복구)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -573,32 +573,6 @@
             </div>
             
             <div id="rec-tab-pair" class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0; display:none;">
-                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
-                    <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        <tr>
-                            <th style="width: 60px; border-top:none; font-size:13px;">순위</th>
-                            <th style="border-top:none; font-size:13px;">상품 A</th>
-                            <th style="width: 160px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ A 추천 자리</th>
-                            <th style="border-top:none; font-size:13px;">상품 B</th>
-                            <th style="width: 160px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ B 추천 자리</th>
-                        </tr>
-                    </thead>
-                    <tbody id="recommend-tbody"></tbody>
-                </table>
-            </div>
-                <span style="font-weight:bold; color:#424242;">📋 추천 갯수:</span>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="10" checked style="cursor:pointer;"> 10개</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="20" style="cursor:pointer;"> 20개</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="50" style="cursor:pointer;"> 50개</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="100" style="cursor:pointer;"> 100개</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                    <input type="radio" name="rec-limit" value="custom" id="rec-limit-custom-radio" style="cursor:pointer;">
-                    사용자지정
-                    <input type="number" id="rec-limit-custom-input" min="1" placeholder="숫자" style="width:70px; padding:2px 6px; font-size:12px; border:1px solid #bbb; border-radius:3px; margin-left:2px;">
-                    <span>개</span>
-                </label>
-            </div>
-            <div class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
                     <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <tr>
