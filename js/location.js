@@ -5002,26 +5002,47 @@ window.showPairRecommendation = function() {
             // ===== 5. 갯수 제한 가져오기 (v3.97e UI에서 설정한 값) =====
             const limitVal = (typeof window._getRecommendLimit === 'function') ? window._getRecommendLimit() : 10;
             
-            // ===== 6. 페어 쌍별 자리 매칭 (양쪽 다 옮기는 케이스만) =====
+            // ===== 6. 페어 쌍별 자리 매칭 (v4.0b: 양쪽 이동 → 실패 시 한쪽 이동 시도) =====
             const tbody = document.getElementById('recommend-tbody');
             let html = '';
             let matchCount = 0;
-            // v4.0a-fix2: 매칭 시도 통계
-            let skipReasonUsedCode = 0;
-            let skipReasonNoTwoSlots = 0;
+            // v4.0b: 매칭 시도 통계
+            let countBoth = 0;             // 양쪽 다 옮긴 케이스 수
+            let countSingle = 0;           // 한쪽만 옮긴 케이스 수
+            let skipReasonUsedCode = 0;    // 상품 중복으로 건너뜀
+            let skipReasonNoSlots = 0;     // 빈 자리 부족으로 건너뜀 (양/한쪽 모두 실패)
             const usedEmptyKeys = new Set();
             const usedCodes = new Set();
+            
+            // v4.0b 신규: 현재 위치 정보 추출 헬퍼
+            const getCurrentLocInfo = (code) => {
+                const locId = (scoreMap[code] && scoreMap[code].currentLocs && scoreMap[code].currentLocs[0]) || null;
+                if (!locId) return null;
+                const locData = originalData.find(d => d.id === locId);
+                if (!locData) return null;
+                return {
+                    id: locId,
+                    zone: (locId || '').charAt(0).toUpperCase(),
+                    dong: (locData.dong || '').toString().trim(),
+                    pos: (locData.pos || '').toString().trim(),
+                    zoneRank: getZoneRank(locId),
+                    dongRank: getDongRank(locData.dong)
+                };
+            };
             
             for (let i = 0; i < pairPairs.length; i++) {
                 if (limitVal > 0 && matchCount >= limitVal) break;
                 
                 const pair = pairPairs[i];
-                if (usedCodes.has(pair.codeA) || usedCodes.has(pair.codeB)) continue;
+                if (usedCodes.has(pair.codeA) || usedCodes.has(pair.codeB)) {
+                    skipReasonUsedCode++;
+                    continue;
+                }
                 
                 const itemA = scoreMap[pair.codeA];
                 const itemB = scoreMap[pair.codeB];
                 
-                // 같은 구역+같은 동에 빈 자리가 2개 이상 있는 곳을 찾음
+                // ===== 6-1. 양쪽 다 옮기는 케이스 먼저 시도 (v4.0a 로직 그대로) =====
                 let foundSlotA = null;
                 let foundSlotB = null;
                 
@@ -5032,11 +5053,111 @@ window.showPairRecommendation = function() {
                     foundSlotB = slots[1];
                     break;
                 }
-                if (!foundSlotA || !foundSlotB) continue;
                 
+                // v4.0b: 매칭 모드 ('both' | 'single' | null)
+                let matchMode = null;
+                let movingCode = null;
+                let fixedCode = null;
+                let movingSlot = null;
+                
+                if (foundSlotA && foundSlotB) {
+                    matchMode = 'both';
+                } else {
+                    // ===== 6-2. v4.0b 신규: 한쪽만 옮기는 케이스 시도 =====
+                    const locInfoA = getCurrentLocInfo(pair.codeA);
+                    const locInfoB = getCurrentLocInfo(pair.codeB);
+                    
+                    if (!locInfoA || !locInfoB) {
+                        skipReasonNoSlots++;
+                        continue;
+                    }
+                    
+                    let movingInfo = null;
+                    let fixedInfo = null;
+                    if (locInfoA.zoneRank !== locInfoB.zoneRank) {
+                        if (locInfoA.zoneRank > locInfoB.zoneRank) {
+                            movingCode = pair.codeA; fixedCode = pair.codeB;
+                            movingInfo = locInfoA; fixedInfo = locInfoB;
+                        } else {
+                            movingCode = pair.codeB; fixedCode = pair.codeA;
+                            movingInfo = locInfoB; fixedInfo = locInfoA;
+                        }
+                    } else {
+                        if (itemA.score <= itemB.score) {
+                            movingCode = pair.codeA; fixedCode = pair.codeB;
+                            movingInfo = locInfoA; fixedInfo = locInfoB;
+                        } else {
+                            movingCode = pair.codeB; fixedCode = pair.codeA;
+                            movingInfo = locInfoB; fixedInfo = locInfoA;
+                        }
+                    }
+                    
+                    if (fixedInfo.zone === '★') {
+                        skipReasonNoSlots++;
+                        continue;
+                    }
+                    
+                    if (fixedInfo.dongRank === 99 || movingInfo.dongRank === 99 || fixedInfo.dongRank >= movingInfo.dongRank) {
+                        skipReasonNoSlots++;
+                        continue;
+                    }
+                    
+                    const dongsArr = (window.recommendPriorities && window.recommendPriorities.dongs) || [];
+                    const candidateDongs = [];
+                    for (let dIdx = fixedInfo.dongRank; dIdx < movingInfo.dongRank; dIdx++) {
+                        if (dIdx >= 0 && dIdx < dongsArr.length) {
+                            candidateDongs.push(dongsArr[dIdx]);
+                        }
+                    }
+                    
+                    for (let dCand = 0; dCand < candidateDongs.length; dCand++) {
+                        const candDong = candidateDongs[dCand];
+                        const candKey = fixedInfo.zone + '|' + candDong;
+                        const candSlots = (emptyByZoneDong[candKey] || []).filter(s => !usedEmptyKeys.has(s.id));
+                        if (candSlots.length === 0) continue;
+                        movingSlot = candSlots[0];
+                        break;
+                    }
+                    
+                    if (!movingSlot) {
+                        skipReasonNoSlots++;
+                        continue;
+                    }
+                    
+                    matchMode = 'single';
+                }
+                
+                // ===== 6-3. 매칭 성공 → 행 HTML 생성 =====
                 const aCurrentLocs = itemA.currentLocs.join(', ') || '-';
                 const bCurrentLocs = itemB.currentLocs.join(', ') || '-';
                 const rowBg = matchCount % 2 === 0 ? '#ffffff' : '#fafafa';
+                
+                const buildSlotCell = (slot, isHoldCell) => {
+                    if (isHoldCell) {
+                        return `<td style="text-align:center; padding:10px 6px; background:#f5f5f5;">
+                                    <div style="font-weight:bold; color:#888; font-size:13px;">📍 현재 자리 유지</div>
+                                </td>`;
+                    }
+                    return `<td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
+                                <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slot.id}</div>
+                                <div style="font-size:10px; color:#555; margin-top:2px;">${slot.dong}동</div>
+                            </td>`;
+                };
+                
+                let slotCellA = '';
+                let slotCellB = '';
+                if (matchMode === 'both') {
+                    slotCellA = buildSlotCell(foundSlotA, false);
+                    slotCellB = buildSlotCell(foundSlotB, false);
+                } else {
+                    if (movingCode === pair.codeA) {
+                        slotCellA = buildSlotCell(movingSlot, false);
+                        slotCellB = buildSlotCell(null, true);
+                    } else {
+                        slotCellA = buildSlotCell(null, true);
+                        slotCellB = buildSlotCell(movingSlot, false);
+                    }
+                }
                 
                 html += `
                     <tr style="background:${rowBg};">
@@ -5049,31 +5170,31 @@ window.showPairRecommendation = function() {
                             <div style="color:#333; margin-top:2px;">${itemA.name}</div>
                             <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${aCurrentLocs}</div>
                         </td>
-                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
-                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${foundSlotA.id}</div>
-                            <div style="font-size:10px; color:#555; margin-top:2px;">${foundSlotA.dong}동</div>
-                        </td>
+                        ${slotCellA}
                         <td style="text-align:center; font-size:18px; color:#1976d2; font-weight:bold;">⇄</td>
                         <td style="padding:10px 8px; font-size:12px;">
                             <div style="font-weight:bold; color:#1976d2;">${itemB.code}</div>
                             <div style="color:#333; margin-top:2px;">${itemB.name}</div>
                             <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${bCurrentLocs}</div>
                         </td>
-                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
-                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${foundSlotB.id}</div>
-                            <div style="font-size:10px; color:#555; margin-top:2px;">${foundSlotB.dong}동</div>
-                        </td>
+                        ${slotCellB}
                     </tr>
                 `;
                 
-                usedEmptyKeys.add(foundSlotA.id);
-                usedEmptyKeys.add(foundSlotB.id);
+                if (matchMode === 'both') {
+                    usedEmptyKeys.add(foundSlotA.id);
+                    usedEmptyKeys.add(foundSlotB.id);
+                    countBoth++;
+                } else {
+                    usedEmptyKeys.add(movingSlot.id);
+                    countSingle++;
+                }
                 usedCodes.add(pair.codeA);
                 usedCodes.add(pair.codeB);
                 matchCount++;
             }
 
-            console.log('[v4.0a-fix4] 매칭 종료: 성공', matchCount, '개 / 건너뜀(상품 중복)', skipReasonUsedCode, '개 / 건너뜀(빈 자리 2개 부족)', skipReasonNoTwoSlots, '개 / 전체 페어 쌍', pairPairs.length, '개');
+            console.log('[v4.0b] 매칭 종료: 성공', matchCount, '개 (양쪽이동', countBoth, '/ 한쪽이동', countSingle, ') / 건너뜀(상품 중복)', skipReasonUsedCode, '개 / 건너뜀(빈 자리 부족)', skipReasonNoSlots, '개 / 전체 페어 쌍', pairPairs.length, '개');
             
             if (matchCount === 0) {
                 html += '<tr><td colspan="6" style="padding:40px; text-align:center; color:#666;">표시할 페어 쌍이 없습니다.<br>(페어 데이터가 부족하거나 같은 동에 빈 자리 2개를 확보할 수 없는 상태입니다)</td></tr>';
