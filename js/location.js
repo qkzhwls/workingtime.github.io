@@ -5139,6 +5139,111 @@ window.showPairRecommendation = function() {
                     if (isHoldCell) return `<td style="text-align:center; padding:10px 6px; background:#f5f5f5;"><div style="font-weight:bold; color:#888; font-size:13px;">📍 현재 자리 유지</div></td>`;
                     return `<td style="text-align:center; padding:10px 6px; background:#e8f5e9;"><div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slot.id}</div><div style="font-size:10px; color:#555; margin-top:2px;">${slot.dong}동</div></td>`;
                 };
+                
+                let slotCellA = '';
+                let slotCellB = '';
+                if (matchMode === 'both') {
+                    slotCellA = buildSlotCell(foundSlotA, false);
+                    slotCellB = buildSlotCell(foundSlotB, false);
+                } else {
+                    if (movingCode === pair.codeA) {
+                        slotCellA = buildSlotCell(movingSlot, false);
+                        slotCellB = buildSlotCell(null, true);
+                    } else {
+                        slotCellA = buildSlotCell(null, true);
+                        slotCellB = buildSlotCell(movingSlot, false);
+                    }
+                }
+                
+                html += `
+                    <tr style="background:${rowBg};">
+                        <td style="text-align:center; color:var(--primary); font-weight:900; font-size:14px; padding:12px 6px;">
+                            ${matchCount + 1}위
+                        </td>
+                        <td style="padding:10px 8px; font-size:12px;">
+                            <div style="font-weight:bold; color:#1976d2;">${itemA.code}</div>
+                            <div style="color:#333; margin-top:2px;">${itemA.name}</div>
+                            <div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${optionA || '-'}</div>
+                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${aCurrentLocs}</div>
+                        </td>
+                        ${slotCellA}
+                        <td style="padding:10px 8px; font-size:12px;">
+                            <div style="font-weight:bold; color:#1976d2;">${itemB.code}</div>
+                            <div style="color:#333; margin-top:2px;">${itemB.name}</div>
+                            <div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${optionB || '-'}</div>
+                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${bCurrentLocs}</div>
+                        </td>
+                        ${slotCellB}
+                    </tr>
+                `;
+                
+                if (matchMode === 'both') {
+                    usedEmptyKeys.add(foundSlotA.id);
+                    usedEmptyKeys.add(foundSlotB.id);
+                    countBoth++;
+                } else {
+                    usedEmptyKeys.add(movingSlot.id);
+                    countSingle++;
+                }
+                usedCodes.add(pair.codeA);
+                usedCodes.add(pair.codeB);
+                
+                if (matchMode === 'both') {
+                    window.currentRecommendations.push({
+                        currentLocs: aCurrentLocs,
+                        targetLoc: foundSlotA.id,
+                        name: itemA.name,
+                        option: optionA,
+                        code: itemA.code
+                    });
+                    window.currentRecommendations.push({
+                        currentLocs: bCurrentLocs,
+                        targetLoc: foundSlotB.id,
+                        name: itemB.name,
+                        option: optionB,
+                        code: itemB.code
+                    });
+                } else {
+                    if (movingCode === pair.codeA) {
+                        window.currentRecommendations.push({
+                            currentLocs: aCurrentLocs,
+                            targetLoc: movingSlot.id,
+                            name: itemA.name,
+                            option: optionA,
+                            code: itemA.code
+                        });
+                    } else {
+                        window.currentRecommendations.push({
+                            currentLocs: bCurrentLocs,
+                            targetLoc: movingSlot.id,
+                            name: itemB.name,
+                            option: optionB,
+                            code: itemB.code
+                        });
+                    }
+                }
+                
+                matchCount++;
+            }
+
+            console.log('[v4.1-fix1] 페어 추천 매칭 종료: 성공', matchCount, '개 (양쪽이동', countBoth, '/ 한쪽이동', countSingle, ') / 건너뜀(상품 중복)', skipReasonUsedCode, '개 / 건너뜀(빈 자리 부족)', skipReasonNoSlots, '개 / 전체 페어 쌍', pairPairsAnalyzed.length, '개 / 엑셀 데이터', window.currentRecommendations.length, '개');
+            
+            const pairTbody = document.getElementById('recommend-tbody');
+            if (matchCount === 0) {
+                html += '<tr><td colspan="5" style="padding:40px; text-align:center; color:#666;">표시할 페어 쌍이 없습니다.<br>(페어 데이터가 부족하거나 같은 동에 빈 자리 2개를 확보할 수 없는 상태입니다)</td></tr>';
+            }
+            if (pairTbody) pairTbody.innerHTML = html;
+            window.hideLoading();
+            document.getElementById('recommend-modal').style.display = 'flex';
+            
+        } catch (err) {
+            console.error('[v4.1-fix1] showPairRecommendation 에러:', err);
+            window.hideLoading();
+            alert('페어 쌍 추천 계산 중 오류가 발생했습니다. 콘솔(F12)을 확인해주세요.');
+        }
+    }, 500);
+};
+
 // ===== v4.1: 단독 추천 기능 =====
 window.switchRecTab = function(tabName) {
     const singleTab = document.getElementById('rec-tab-single');
