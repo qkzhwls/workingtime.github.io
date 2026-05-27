@@ -4828,79 +4828,6 @@ function renderCorridor(idx) {
         }
     }
 })();
-// ===== v4.0a-fix1: 페어 쌍 추천 (MVP) =====
-window.showPairRecommendation = function() {
-    window.showLoading("🔗 페어 추천을 계산 중입니다...");
-    
-    setTimeout(() => {
-        try {
-            console.log('[v4.2] 페어 추천 내부 계산 시작');
-            
-            // 1. 단독 추천 결과 활용 (이미 생성된 데이터 사용)
-            const singleRecs = window.currentSingleRecommendations || [];
-            if (singleRecs.length === 0) {
-                alert("단독 추천 결과가 없습니다. 먼저 단독 추천 계산을 실행해주세요.");
-                window.hideLoading();
-                return;
-            }
-
-            // 2. 페어 데이터 로드
-            const pairMap = window.pairData || {}; 
-            console.log('[v4.2] 페어 데이터 로드 완료: pairMap 상품 수 =', Object.keys(pairMap).length);
-
-            // 3. 페어 매칭 (단독 추천 결과 기반)
-            const pairsFound = [];
-            const processedCodes = new Set();
-
-            singleRecs.forEach(recA => {
-                if (processedCodes.has(recA.code)) return;
-                
-                const pairInfo = pairMap[recA.code];
-                if (!pairInfo) return;
-
-                const codeB = pairInfo.partnerCode;
-                const recB = singleRecs.find(r => r.code === codeB);
-
-                if (recB && !processedCodes.has(codeB)) {
-                    pairsFound.push({ recA, recB });
-                    processedCodes.add(recA.code);
-                    processedCodes.add(codeB);
-                }
-            });
-            console.log('[v4.2] 페어 매칭 완료: K 개 =', pairsFound.length);
-
-            // 4. UI 렌더링
-            const tbody = document.getElementById('recommend-tbody');
-            let html = '';
-            
-            pairsFound.forEach((pair, idx) => {
-                const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
-                html += `
-                    <tr style="background:${rowBg};">
-                        <td style="text-align:center; font-weight:900; color:#e65100;">${idx + 1}위</td>
-                        <td style="padding:8px; font-size:12px;">${pair.recA.name}</td>
-                        <td style="padding:8px; font-size:12px; background:#fff3e0;">${pair.recA.targetLoc}</td>
-                        <td style="padding:8px; font-size:12px;">${pair.recB.name}</td>
-                        <td style="padding:8px; font-size:12px; background:#fff3e0;">${pair.recB.targetLoc}</td>
-                    </tr>
-                `;
-            });
-
-            if (pairsFound.length === 0) {
-                html = '<tr><td colspan="5" style="padding:40px; text-align:center;">페어로 추천할만한 상품이 없습니다.</td></tr>';
-            }
-
-            tbody.innerHTML = html;
-            window.hideLoading();
-            document.getElementById('recommend-modal').style.display = 'flex';
-            
-        } catch (err) {
-            console.error('[v4.2] 페어 추천 에러:', err);
-            window.hideLoading();
-            alert('페어 추천 계산 중 오류가 발생했습니다.');
-        }
-    }, 500);
-};
 
 // ===== v4.1: 단독 추천 기능 =====
 window.switchRecTab = function(tabName) {
@@ -5149,21 +5076,32 @@ window.showSingleRecommendation = function() {
                 
                 usedEmptyKeys.add(foundSlot.id);
                 
-                // 데이터 저장 시 정보 보강
-            window.currentSingleRecommendations.push({
-                currentLocs: currentInfo.id,
-                targetLoc: foundSlot.id,
-                name: item.name,
-                option: option,
-                code: item.code,
-                // v4.2-fix1: 페어 추천 시 참조를 위해 추가 정보 저장
-                zoneRank: currentInfo.zoneRank,
-                dongRank: currentInfo.dongRank,
-                posRank: currentInfo.posRank
-            });
+                // v4.2-fix1: 페어 추천에서 사용할 정보 추가 저장
+                const slotInfo = getEmptyLocInfo(foundSlot);
+                window.currentSingleRecommendations.push({
+                    currentLocs: currentInfo.id,
+                    targetLoc: foundSlot.id,
+                    name: item.name,
+                    option: option,
+                    code: item.code,
+                    // v4.2-fix1 추가 필드
+                    score: item.score,
+                    currentInfo: currentInfo,
+                    targetInfo: slotInfo
+                });
                 
                 matchCount++;
             }
+            
+            // v4.2-fix1: 페어 추천에서 사용할 추가 데이터 보관
+            window._lastSingleRecContext = {
+                emptyLocs: emptyLocs,
+                usedEmptyKeys: new Set(usedEmptyKeys),
+                getZoneRank: getZoneRank,
+                getDongRank: getDongRank,
+                getPosRank: getPosRank,
+                getEmptyLocInfo: getEmptyLocInfo
+            };
             
             console.log('[v4.1] 단독 추천 종료: 성공', matchCount, '개 / 건너뜀(현재자리없음)', skipNoCurrentLoc, '개 / 건너뜀(이미최적)', skipNoBetterSlot, '개 / 엑셀 데이터', window.currentSingleRecommendations.length, '개');
             
@@ -5176,88 +5114,274 @@ window.showSingleRecommendation = function() {
             document.getElementById('recommend-modal').style.display = 'flex';
             
         } catch (err) {
-            console.error('[v4.2-fix1] showSingleRecommendation 에러:', err);
+            console.error('[v4.1] showSingleRecommendation 에러:', err);
             window.hideLoading();
-            alert('단독 추천 계산 중 오류가 발생했습니다.');
+            alert('단독 추천 계산 중 오류가 발생했습니다. 콘솔(F12)을 확인해주세요.');
         }
     }, 500);
 };
 
-// 2. [v4.2-fix1] showPairRecommendation 함수 전면 교체
+// ===== v4.2-fix1: 페어 추천 (단독 추천 기반, 자리 재배정 포함) =====
+// 알고리즘:
+//   1. 단독 추천 결과(currentSingleRecommendations)와 컨텍스트(_lastSingleRecContext) 사용
+//   2. 단독 추천이 없으면 안내 메시지 후 종료
+//   3. 페어 데이터 로드 (lift >= 2.0, count >= 5, 상위 5개 partner)
+//   4. 단독 추천 결과를 1위부터 순회하며 페어 묶기 (weight 높은 partner 우선)
+//   5. 자리 재배정:
+//      - 더 위 순위 상품(base) = 단독 추천 자리 그대로 유지
+//      - 파트너 = base 근처(같은 동, 같은 구역 우선)로 끌어옴
+//      - 파트너의 원래 단독 자리는 비워짐 (페어 탭 표시 전용)
+//      - 근처 빈 자리 없으면 페어 매칭 포기
+//   6. 자리 변동 없는 페어(케이스 A) = 표시 안 함
 window.showPairRecommendation = function() {
     window.showLoading("🔗 페어 추천을 계산 중입니다...");
     
     setTimeout(() => {
         try {
-            console.log('[v4.2-fix1] 페어 추천 시작');
+            window.currentRecommendations = [];
             
+            // ===== 1. 단독 추천 결과 확인 =====
             const singleRecs = window.currentSingleRecommendations || [];
-            if (singleRecs.length === 0) {
-                alert("단독 추천 결과가 없습니다. 먼저 단독 추천 계산을 실행해주세요.");
+            const ctx = window._lastSingleRecContext || null;
+            
+            if (singleRecs.length === 0 || !ctx) {
                 window.hideLoading();
+                const tbody = document.getElementById('recommend-tbody');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="padding:40px; text-align:center; color:#666;">먼저 단독 추천을 실행해주세요.<br>(페어 추천은 단독 추천 결과를 기반으로 동작합니다)</td></tr>';
+                }
+                document.getElementById('recommend-modal').style.display = 'flex';
+                console.warn('[v4.2-fix1] 단독 추천 결과 없음 또는 컨텍스트 없음');
                 return;
             }
-
-            // 캐시된 페어 데이터 사용
-            const pairMap = window._cachedOrderPairs || {}; 
-            const pairsFound = [];
-            const processedCodes = new Set();
-            window.currentRecommendations = []; // 엑셀 데이터 초기화
-
-            singleRecs.forEach(recA => {
-                if (processedCodes.has(recA.code)) return;
-                
-                const partnerCode = pairMap[recA.code];
-                if (!partnerCode) return;
-
-                const recB = singleRecs.find(r => r.code === partnerCode);
-
-                if (recB && !processedCodes.has(partnerCode)) {
-                    pairsFound.push({ recA, recB });
-                    processedCodes.add(recA.code);
-                    processedCodes.add(partnerCode);
+            
+            console.log('[v4.2-fix1] 페어 추천 시작: 단독 추천 결과', singleRecs.length, '개');
+            
+            // ===== 2. 페어 데이터 준비 (신뢰 페어만 추출) =====
+            const pairMap = {};
+            let pairDataReady = false;
+            
+            try {
+                if (window._cachedOrderPairs && window._cachedOrderStats && window._cachedOrderMeta) {
+                    const pairs = window._cachedOrderPairs;
+                    const stats = window._cachedOrderStats;
+                    const meta = window._cachedOrderMeta;
+                    const N = meta.totalProcessedOrders || 1;
                     
-                    // 엑셀 저장용 데이터 구성
-                    window.currentRecommendations.push({
-                        currentLocs: `${recA.currentLocs}, ${recB.currentLocs}`,
-                        targetLoc: `${recA.targetLoc}, ${recB.targetLoc}`,
-                        name: `${recA.name}, ${recB.name}`,
-                        option: `${recA.option || ''}, ${recB.option || ''}`,
-                        code: `${recA.code}, ${recB.code}`
+                    pairs.forEach(p => {
+                        const cA = (stats[p.codeA] || {}).count || 0;
+                        const cB = (stats[p.codeB] || {}).count || 0;
+                        if (cA === 0 || cB === 0) return;
+                        const lift = (p.count * N) / (cA * cB);
+                        if (p.count < 5 || lift < 2.0) return;
+                        const weight = lift * p.count;
+                        if (!pairMap[p.codeA]) pairMap[p.codeA] = [];
+                        if (!pairMap[p.codeB]) pairMap[p.codeB] = [];
+                        pairMap[p.codeA].push({ partner: p.codeB, weight: weight });
+                        pairMap[p.codeB].push({ partner: p.codeA, weight: weight });
                     });
+                    
+                    for (const code in pairMap) {
+                        pairMap[code].sort((a, b) => b.weight - a.weight);
+                        pairMap[code] = pairMap[code].slice(0, 5);
+                    }
+                    pairDataReady = true;
+                    console.log('[v4.2-fix1] 페어 데이터 로드 완료: pairMap 상품 수 =', Object.keys(pairMap).length);
                 }
+            } catch (e) {
+                console.warn('[v4.2-fix1] 페어 데이터 캐시 사용 실패:', e);
+            }
+            
+            if (!pairDataReady) {
+                window.hideLoading();
+                const tbody = document.getElementById('recommend-tbody');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="5" style="padding:40px; text-align:center; color:#666;">페어 데이터가 준비되지 않았습니다.<br>(주문 데이터를 업로드하거나 페어 분석을 먼저 실행해주세요)</td></tr>';
+                }
+                document.getElementById('recommend-modal').style.display = 'flex';
+                return;
+            }
+            
+            // ===== 3. 단독 추천 결과를 빠르게 조회하기 위한 맵 =====
+            const singleByCode = {};
+            singleRecs.forEach((s, idx) => {
+                singleByCode[s.code] = Object.assign({}, s, { singleRank: idx });
             });
-
-            console.log('[v4.2-fix1] 페어 매칭 완료: ' + pairsFound.length + ' 쌍');
-
+            
+            // ===== 4. 페어 묶기 (단독 추천 결과 안에서) =====
+            const matchedPairs = []; // [{ baseItem, partnerItem, partnerNewSlot }]
+            const usedCodes = new Set();
+            const usedNewSlots = new Set(); // 페어 재배정으로 사용된 자리 (중복 방지)
+            
+            for (let i = 0; i < singleRecs.length; i++) {
+                const base = singleRecs[i];
+                if (usedCodes.has(base.code)) continue;
+                
+                const partners = pairMap[base.code] || [];
+                if (partners.length === 0) continue;
+                
+                // partner를 weight 높은 순으로 검색 (pairMap이 이미 정렬됨)
+                let foundPartner = null;
+                for (let p = 0; p < partners.length; p++) {
+                    const partnerCode = partners[p].partner;
+                    if (usedCodes.has(partnerCode)) continue;
+                    if (!singleByCode[partnerCode]) continue; // 단독 추천 결과 안에 없으면 제외
+                    foundPartner = singleByCode[partnerCode];
+                    break;
+                }
+                
+                if (!foundPartner) continue;
+                
+                // ===== 5. 자리 재배정: 파트너를 base 근처로 끌어옴 =====
+                // base의 단독 추천 자리 정보
+                const baseTargetInfo = base.targetInfo;
+                if (!baseTargetInfo) continue; // 안전장치
+                
+                const baseDong = baseTargetInfo.dong;
+                const baseZone = (base.targetLoc || '').charAt(0).toUpperCase();
+                const basePosRank = baseTargetInfo.posRank;
+                
+                // 점유된 자리 집합 구성:
+                // - 단독 추천에서 쓰인 모든 자리 (단, 파트너 자신의 자리는 비워짐)
+                // - 이미 페어로 재배정된 자리들
+                // - base 자신의 자리도 점유 중
+                const occupiedKeys = new Set(ctx.usedEmptyKeys);
+                occupiedKeys.delete(foundPartner.targetLoc); // 파트너의 단독 자리는 비워짐
+                usedNewSlots.forEach(k => occupiedKeys.add(k));
+                occupiedKeys.add(base.targetLoc); // base 자신의 자리는 점유 유지
+                
+                // 같은 동의 빈 자리 후보 (점유 안 된 것만)
+                const sameDongSlots = ctx.emptyLocs.filter(eLoc => {
+                    if (occupiedKeys.has(eLoc.id)) return false;
+                    const eDong = (eLoc.dong || '').toString().trim();
+                    return eDong === baseDong;
+                });
+                
+                if (sameDongSlots.length === 0) {
+                    // 근처 빈 자리 없음 → 페어 매칭 포기
+                    continue;
+                }
+                
+                // 우선순위: 같은 동 + 같은 구역 우선, 그 다음 같은 동의 다른 구역
+                const sameZoneInSameDong = sameDongSlots.filter(eLoc => {
+                    return (eLoc.id || '').charAt(0).toUpperCase() === baseZone;
+                });
+                const otherZoneInSameDong = sameDongSlots.filter(eLoc => {
+                    return (eLoc.id || '').charAt(0).toUpperCase() !== baseZone;
+                });
+                
+                // 각 그룹 안에서 위치(pos)가 base와 가까운 순으로 정렬
+                const posDistSort = (a, b) => {
+                    const aDist = Math.abs(ctx.getPosRank(a.pos) - basePosRank);
+                    const bDist = Math.abs(ctx.getPosRank(b.pos) - basePosRank);
+                    return aDist - bDist;
+                };
+                sameZoneInSameDong.sort(posDistSort);
+                otherZoneInSameDong.sort(posDistSort);
+                
+                const candidateOrder = sameZoneInSameDong.concat(otherZoneInSameDong);
+                const partnerNewSlot = candidateOrder[0]; // 가장 가까운 빈 자리
+                
+                if (!partnerNewSlot) continue; // 안전장치
+                
+                // ===== 6. 케이스 A 제외: 자리 변동 없으면 표시 안 함 =====
+                // 파트너의 단독 추천 자리와 새 자리가 같으면 변동 없음 (케이스 A)
+                if (partnerNewSlot.id === foundPartner.targetLoc) {
+                    // 변동 없음 → 페어 추천에서 제외
+                    continue;
+                }
+                
+                matchedPairs.push({
+                    baseItem: base,
+                    partnerItem: foundPartner,
+                    partnerNewSlot: partnerNewSlot
+                });
+                
+                usedCodes.add(base.code);
+                usedCodes.add(foundPartner.code);
+                usedNewSlots.add(partnerNewSlot.id);
+            }
+            
+            console.log('[v4.2-fix1] 페어 매칭 완료:', matchedPairs.length, '쌍');
+            
+            // ===== 7. 화면 출력 =====
             const tbody = document.getElementById('recommend-tbody');
             let html = '';
             
-            pairsFound.forEach((pair, idx) => {
-                const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+            for (let i = 0; i < matchedPairs.length; i++) {
+                const mp = matchedPairs[i];
+                const itemA = mp.baseItem;       // 더 위 순위, 자리 유지
+                const itemB = mp.partnerItem;     // 파트너, 자리 재배정됨
+                
+                // A는 단독 추천 자리 그대로, B는 새로 재배정된 자리
+                const slotA_id = itemA.targetLoc;
+                const slotA_dong = (itemA.targetInfo && itemA.targetInfo.dong) || '';
+                const slotB_id = mp.partnerNewSlot.id;
+                const slotB_dong = (mp.partnerNewSlot.dong || '').toString().trim();
+                
+                const aCurrentLoc = itemA.currentLocs || '-';
+                const bCurrentLoc = itemB.currentLocs || '-';
+                const rowBg = i % 2 === 0 ? '#ffffff' : '#fafafa';
+                
                 html += `
                     <tr style="background:${rowBg};">
-                        <td style="text-align:center; font-weight:900; color:#e65100;">${idx + 1}위</td>
-                        <td style="padding:8px; font-size:12px;">${pair.recA.name}<br><small style="color:#666;">(${pair.recA.code})</small></td>
-                        <td style="padding:8px; font-size:12px; background:#fff3e0;">${pair.recA.targetLoc}</td>
-                        <td style="padding:8px; font-size:12px;">${pair.recB.name}<br><small style="color:#666;">(${pair.recB.code})</small></td>
-                        <td style="padding:8px; font-size:12px; background:#fff3e0;">${pair.recB.targetLoc}</td>
+                        <td style="text-align:center; color:var(--primary); font-weight:900; font-size:14px; padding:12px 6px;">
+                            ${i + 1}위
+                        </td>
+                        <td style="padding:10px 8px; font-size:12px;">
+                            <div style="font-weight:bold; color:#1976d2;">${itemA.code}</div>
+                            <div style="color:#333; margin-top:2px;">${itemA.name}</div>
+                            <div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${itemA.option || '-'}</div>
+                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${aCurrentLoc}</div>
+                        </td>
+                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
+                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slotA_id}</div>
+                            <div style="font-size:10px; color:#555; margin-top:2px;">${slotA_dong}동</div>
+                        </td>
+                        <td style="padding:10px 8px; font-size:12px;">
+                            <div style="font-weight:bold; color:#1976d2;">${itemB.code}</div>
+                            <div style="color:#333; margin-top:2px;">${itemB.name}</div>
+                            <div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${itemB.option || '-'}</div>
+                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${bCurrentLoc}</div>
+                        </td>
+                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
+                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slotB_id}</div>
+                            <div style="font-size:10px; color:#555; margin-top:2px;">${slotB_dong}동</div>
+                        </td>
                     </tr>
                 `;
-            });
-
-            if (pairsFound.length === 0) {
-                html = '<tr><td colspan="5" style="padding:40px; text-align:center;">페어로 추천할만한 상품이 없습니다.</td></tr>';
+                
+                // 엑셀 데이터 저장
+                window.currentRecommendations.push({
+                    currentLocs: aCurrentLoc,
+                    targetLoc: slotA_id,
+                    name: itemA.name,
+                    option: itemA.option,
+                    code: itemA.code
+                });
+                window.currentRecommendations.push({
+                    currentLocs: bCurrentLoc,
+                    targetLoc: slotB_id,
+                    name: itemB.name,
+                    option: itemB.option,
+                    code: itemB.code
+                });
             }
-
-            tbody.innerHTML = html;
+            
+            console.log('[v4.2-fix1] 페어 추천 종료: 표시', matchedPairs.length, '쌍 / 엑셀 데이터', window.currentRecommendations.length, '개');
+            
+            if (matchedPairs.length === 0) {
+                html = '<tr><td colspan="5" style="padding:40px; text-align:center; color:#666;">표시할 페어 쌍이 없습니다.<br>(단독 추천 결과 안에 페어로 묶일 상품이 없거나, 근처에 빈 자리가 부족합니다)</td></tr>';
+            }
+            
+            if (tbody) tbody.innerHTML = html;
             window.hideLoading();
             document.getElementById('recommend-modal').style.display = 'flex';
             
         } catch (err) {
-            console.error('[v4.2-fix1] 페어 추천 에러:', err);
+            console.error('[v4.2-fix1] showPairRecommendation 에러:', err);
             window.hideLoading();
-            alert('페어 추천 계산 중 오류가 발생했습니다.');
+            alert('페어 추천 계산 중 오류가 발생했습니다. 콘솔(F12)을 확인해주세요.');
         }
     }, 500);
 };
