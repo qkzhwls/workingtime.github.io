@@ -5208,17 +5208,48 @@ window.showPairRecommendation = function() {
                 singleByCode[s.code] = Object.assign({}, s, { singleRank: idx });
             });
             
+            // v4.2-fix1 디버그: 단독 추천 결과 코드 중 페어 데이터에 partner 있는 상품 카운트
+            let codesWithAnyPartner = 0;
+            let totalPartnerCount = 0;
+            singleRecs.forEach(s => {
+                const partners = pairMap[s.code] || [];
+                if (partners.length > 0) {
+                    codesWithAnyPartner++;
+                    totalPartnerCount += partners.length;
+                }
+            });
+            console.log('[v4.2-fix1][디버그] 단독 추천', singleRecs.length, '개 중 페어 데이터에 partner 있는 상품:', codesWithAnyPartner, '개 / 총 partner 수:', totalPartnerCount);
+            
+            // 처음 3개 단독 추천 상품에 대해 partner가 단독 추천에 있는지 상세 진단
+            const sampleCount = Math.min(3, singleRecs.length);
+            for (let s = 0; s < sampleCount; s++) {
+                const item = singleRecs[s];
+                const partners = pairMap[item.code] || [];
+                const partnerCodes = partners.map(p => p.partner);
+                const partnersInSingle = partnerCodes.filter(pc => singleByCode[pc]);
+                console.log('[v4.2-fix1][샘플진단] 단독', (s+1), '위', item.code, '(', item.name, ') / partner 후보 코드:', partnerCodes, '/ 그중 단독 추천에 있는 것:', partnersInSingle);
+            }
+            
             // ===== 4. 페어 묶기 (단독 추천 결과 안에서) =====
             const matchedPairs = []; // [{ baseItem, partnerItem, partnerNewSlot }]
             const usedCodes = new Set();
             const usedNewSlots = new Set(); // 페어 재배정으로 사용된 자리 (중복 방지)
             
+            // v4.2-fix1 디버그 카운터
+            let cntSkipUsedCode = 0;
+            let cntSkipNoPartners = 0;
+            let cntSkipPartnerNotInSingle = 0;
+            let cntSkipNoBaseTargetInfo = 0;
+            let cntSkipNoSameDongSlot = 0;
+            let cntSkipNoCandidateSlot = 0;
+            let cntSkipCaseA = 0;
+            
             for (let i = 0; i < singleRecs.length; i++) {
                 const base = singleRecs[i];
-                if (usedCodes.has(base.code)) continue;
+                if (usedCodes.has(base.code)) { cntSkipUsedCode++; continue; }
                 
                 const partners = pairMap[base.code] || [];
-                if (partners.length === 0) continue;
+                if (partners.length === 0) { cntSkipNoPartners++; continue; }
                 
                 // partner를 weight 높은 순으로 검색 (pairMap이 이미 정렬됨)
                 let foundPartner = null;
@@ -5230,12 +5261,12 @@ window.showPairRecommendation = function() {
                     break;
                 }
                 
-                if (!foundPartner) continue;
+                if (!foundPartner) { cntSkipPartnerNotInSingle++; continue; }
                 
                 // ===== 5. 자리 재배정: 파트너를 base 근처로 끌어옴 =====
                 // base의 단독 추천 자리 정보
                 const baseTargetInfo = base.targetInfo;
-                if (!baseTargetInfo) continue; // 안전장치
+                if (!baseTargetInfo) { cntSkipNoBaseTargetInfo++; continue; } // 안전장치
                 
                 const baseDong = baseTargetInfo.dong;
                 const baseZone = (base.targetLoc || '').charAt(0).toUpperCase();
@@ -5259,6 +5290,7 @@ window.showPairRecommendation = function() {
                 
                 if (sameDongSlots.length === 0) {
                     // 근처 빈 자리 없음 → 페어 매칭 포기
+                    cntSkipNoSameDongSlot++;
                     continue;
                 }
                 
@@ -5282,12 +5314,13 @@ window.showPairRecommendation = function() {
                 const candidateOrder = sameZoneInSameDong.concat(otherZoneInSameDong);
                 const partnerNewSlot = candidateOrder[0]; // 가장 가까운 빈 자리
                 
-                if (!partnerNewSlot) continue; // 안전장치
+                if (!partnerNewSlot) { cntSkipNoCandidateSlot++; continue; } // 안전장치
                 
                 // ===== 6. 케이스 A 제외: 자리 변동 없으면 표시 안 함 =====
                 // 파트너의 단독 추천 자리와 새 자리가 같으면 변동 없음 (케이스 A)
                 if (partnerNewSlot.id === foundPartner.targetLoc) {
                     // 변동 없음 → 페어 추천에서 제외
+                    cntSkipCaseA++;
                     continue;
                 }
                 
@@ -5301,6 +5334,15 @@ window.showPairRecommendation = function() {
                 usedCodes.add(foundPartner.code);
                 usedNewSlots.add(partnerNewSlot.id);
             }
+            
+            console.log('[v4.2-fix1][디버그] 페어 매칭 스킵 사유 집계:',
+                '\n  - 이미 묶임:', cntSkipUsedCode,
+                '\n  - partner 없음:', cntSkipNoPartners,
+                '\n  - partner 모두 단독 추천에 없음:', cntSkipPartnerNotInSingle,
+                '\n  - baseTargetInfo 없음:', cntSkipNoBaseTargetInfo,
+                '\n  - 같은 동 빈 자리 없음:', cntSkipNoSameDongSlot,
+                '\n  - 후보 슬롯 없음(안전장치):', cntSkipNoCandidateSlot,
+                '\n  - 케이스 A(자리 변동 없음):', cntSkipCaseA);
             
             console.log('[v4.2-fix1] 페어 매칭 완료:', matchedPairs.length, '쌍');
             
