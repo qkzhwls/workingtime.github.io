@@ -4938,6 +4938,7 @@ window.runActiveRecommendation = function() {
     }
 };
 
+// 1. [v4.2-fix1] showSingleRecommendation 함수 수정 부분
 window.showSingleRecommendation = function() {
     window.showLoading("📦 단독 추천을 계산 중입니다...");
     
@@ -5148,13 +5149,18 @@ window.showSingleRecommendation = function() {
                 
                 usedEmptyKeys.add(foundSlot.id);
                 
-                window.currentSingleRecommendations.push({
-                    currentLocs: currentInfo.id,
-                    targetLoc: foundSlot.id,
-                    name: item.name,
-                    option: option,
-                    code: item.code
-                });
+                // 데이터 저장 시 정보 보강
+            window.currentSingleRecommendations.push({
+                currentLocs: currentInfo.id,
+                targetLoc: foundSlot.id,
+                name: item.name,
+                option: option,
+                code: item.code,
+                // v4.2-fix1: 페어 추천 시 참조를 위해 추가 정보 저장
+                zoneRank: currentInfo.zoneRank,
+                dongRank: currentInfo.dongRank,
+                posRank: currentInfo.posRank
+            });
                 
                 matchCount++;
             }
@@ -5170,9 +5176,88 @@ window.showSingleRecommendation = function() {
             document.getElementById('recommend-modal').style.display = 'flex';
             
         } catch (err) {
-            console.error('[v4.1] showSingleRecommendation 에러:', err);
+            console.error('[v4.2-fix1] showSingleRecommendation 에러:', err);
             window.hideLoading();
-            alert('단독 추천 계산 중 오류가 발생했습니다. 콘솔(F12)을 확인해주세요.');
+            alert('단독 추천 계산 중 오류가 발생했습니다.');
+        }
+    }, 500);
+};
+
+// 2. [v4.2-fix1] showPairRecommendation 함수 전면 교체
+window.showPairRecommendation = function() {
+    window.showLoading("🔗 페어 추천을 계산 중입니다...");
+    
+    setTimeout(() => {
+        try {
+            console.log('[v4.2-fix1] 페어 추천 시작');
+            
+            const singleRecs = window.currentSingleRecommendations || [];
+            if (singleRecs.length === 0) {
+                alert("단독 추천 결과가 없습니다. 먼저 단독 추천 계산을 실행해주세요.");
+                window.hideLoading();
+                return;
+            }
+
+            // 캐시된 페어 데이터 사용
+            const pairMap = window._cachedOrderPairs || {}; 
+            const pairsFound = [];
+            const processedCodes = new Set();
+            window.currentRecommendations = []; // 엑셀 데이터 초기화
+
+            singleRecs.forEach(recA => {
+                if (processedCodes.has(recA.code)) return;
+                
+                const partnerCode = pairMap[recA.code];
+                if (!partnerCode) return;
+
+                const recB = singleRecs.find(r => r.code === partnerCode);
+
+                if (recB && !processedCodes.has(partnerCode)) {
+                    pairsFound.push({ recA, recB });
+                    processedCodes.add(recA.code);
+                    processedCodes.add(partnerCode);
+                    
+                    // 엑셀 저장용 데이터 구성
+                    window.currentRecommendations.push({
+                        currentLocs: `${recA.currentLocs}, ${recB.currentLocs}`,
+                        targetLoc: `${recA.targetLoc}, ${recB.targetLoc}`,
+                        name: `${recA.name}, ${recB.name}`,
+                        option: `${recA.option || ''}, ${recB.option || ''}`,
+                        code: `${recA.code}, ${recB.code}`
+                    });
+                }
+            });
+
+            console.log('[v4.2-fix1] 페어 매칭 완료: ' + pairsFound.length + ' 쌍');
+
+            const tbody = document.getElementById('recommend-tbody');
+            let html = '';
+            
+            pairsFound.forEach((pair, idx) => {
+                const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                html += `
+                    <tr style="background:${rowBg};">
+                        <td style="text-align:center; font-weight:900; color:#e65100;">${idx + 1}위</td>
+                        <td style="padding:8px; font-size:12px;">${pair.recA.name}<br><small style="color:#666;">(${pair.recA.code})</small></td>
+                        <td style="padding:8px; font-size:12px; background:#fff3e0;">${pair.recA.targetLoc}</td>
+                        <td style="padding:8px; font-size:12px;">${pair.recB.name}<br><small style="color:#666;">(${pair.recB.code})</small></td>
+                        <td style="padding:8px; font-size:12px; background:#fff3e0;">${pair.recB.targetLoc}</td>
+                    </tr>
+                `;
+            });
+
+            if (pairsFound.length === 0) {
+                html = '<tr><td colspan="5" style="padding:40px; text-align:center;">페어로 추천할만한 상품이 없습니다.</td></tr>';
+            }
+
+            tbody.innerHTML = html;
+            window.hideLoading();
+            document.getElementById('recommend-modal').style.display = 'flex';
+            
+        } catch (err) {
+            console.error('[v4.2-fix1] 페어 추천 에러:', err);
+            window.hideLoading();
+            alert('페어 추천 계산 중 오류가 발생했습니다.');
         }
     }, 500);
 };
