@@ -4746,69 +4746,98 @@ function renderCorridor(idx) {
         </div>
     `;
 }
-// ===== v3.97e: 추천 갯수 조절 UI 처리 =====
+// ===== v4.3: 추천 갯수 드롭다운 + 우선순위 선택 UI =====
+// 변경: 라디오 → 드롭다운, 사용자지정은 prompt() 1회성 (저장 안 함)
+//      우선순위 선택 추가 (동 이동 / 위치 이동)
 (function setupRecLimitUI() {
-    const STORAGE_KEY = 'recLimitV397e';
-    
-    function loadSaved() {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (!saved) return { mode: '10', custom: '' };
-            const parsed = JSON.parse(saved);
-            return { mode: parsed.mode || '10', custom: parsed.custom || '' };
-        } catch (e) { return { mode: '10', custom: '' }; }
-    }
-    
-    function saveState(mode, custom) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode, custom })); } catch (e) {}
-    }
+    // v4.3: 사용자지정 값은 메모리에만 저장 (localStorage 사용 안 함, 1회성)
+    let _customLimitValue = null; // 마지막 사용자지정 값 (페이지 세션 동안 유지)
+    let _lastNonCustomMode = '10'; // prompt 취소 시 되돌아갈 직전 값
     
     window._getRecommendLimit = function() {
-        const radios = document.querySelectorAll('input[name="rec-limit"]');
-        let mode = '10';
-        radios.forEach(r => { if (r.checked) mode = r.value; });
+        const select = document.getElementById('rec-limit-select');
+        if (!select) return 10;
+        const mode = select.value;
         if (mode === 'custom') {
-            const customInput = document.getElementById('rec-limit-custom-input');
-            const val = parseInt(customInput?.value || '0', 10);
-            if (isNaN(val) || val < 1) return 10;
-            return val;
+            if (_customLimitValue && _customLimitValue >= 1) return _customLimitValue;
+            return 10;
         }
         return parseInt(mode, 10) || 10;
     };
     
+    // v4.3: 단독 추천 우선순위 모드 ('dong' = 동 이동, 'pos' = 위치 이동)
+    window._getRecPriorityMode = function() {
+        const select = document.getElementById('rec-priority-mode');
+        if (!select) return 'dong';
+        return select.value || 'dong';
+    };
+    
     window._initRecLimitUI = function() {
-        const radios = document.querySelectorAll('input[name="rec-limit"]');
-        if (radios.length === 0) return;
-        const state = loadSaved();
-        radios.forEach(r => { r.checked = (r.value === state.mode); });
-        const customInput = document.getElementById('rec-limit-custom-input');
-        if (customInput) customInput.value = state.custom || '';
+        const select = document.getElementById('rec-limit-select');
+        const prioritySelect = document.getElementById('rec-priority-mode');
+        if (!select) return;
         
         const panel = document.getElementById('rec-limit-panel');
         if (panel && !panel.dataset.bound) {
             panel.dataset.bound = '1';
-            radios.forEach(r => {
-                r.addEventListener('change', () => {
-                    saveState(r.value, customInput?.value || '');
-                    triggerRecalcIfNeeded();
-                });
-            });
-            if (customInput) {
-                const applyCustom = () => {
-                    if (customInput.value && customInput.value.trim() !== '') {
-                        const customRadio = document.getElementById('rec-limit-custom-radio');
-                        if (customRadio) customRadio.checked = true;
-                        saveState('custom', customInput.value);
+            
+            // 추천 갯수 드롭다운 change 이벤트
+            select.addEventListener('change', () => {
+                if (select.value === 'custom') {
+                    // 사용자지정 선택 시 즉시 prompt 띄움
+                    const promptDefault = _customLimitValue ? String(_customLimitValue) : '';
+                    const input = window.prompt('추천 갯수를 입력하세요 (1 이상)', promptDefault);
+                    
+                    if (input === null) {
+                        // 취소: 직전 값으로 되돌림
+                        select.value = _lastNonCustomMode;
+                        updateCustomDisplay();
+                        return; // 재계산 안 함
                     }
+                    
+                    const num = parseInt(input.trim(), 10);
+                    if (isNaN(num) || num < 1) {
+                        alert('올바른 숫자를 입력하세요 (1 이상)');
+                        select.value = _lastNonCustomMode;
+                        updateCustomDisplay();
+                        return;
+                    }
+                    
+                    _customLimitValue = num;
+                    updateCustomDisplay();
                     triggerRecalcIfNeeded();
-                };
-                customInput.addEventListener('blur', applyCustom);
-                customInput.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); customInput.blur(); }
-                });
-            }
+                } else {
+                    // 일반 옵션 선택: 직전 값 기록 후 재계산
+                    _lastNonCustomMode = select.value;
+                    updateCustomDisplay();
+                    triggerRecalcIfNeeded();
+                }
+            });
         }
+        
+        // 우선순위 드롭다운 change 이벤트
+        if (prioritySelect && !prioritySelect.dataset.bound) {
+            prioritySelect.dataset.bound = '1';
+            prioritySelect.addEventListener('change', () => {
+                triggerRecalcIfNeeded();
+            });
+        }
+        
+        updateCustomDisplay();
     };
+    
+    function updateCustomDisplay() {
+        const select = document.getElementById('rec-limit-select');
+        const display = document.getElementById('rec-limit-custom-display');
+        const numSpan = document.getElementById('rec-limit-custom-num');
+        if (!select || !display || !numSpan) return;
+        if (select.value === 'custom' && _customLimitValue) {
+            display.style.display = 'inline';
+            numSpan.textContent = String(_customLimitValue);
+        } else {
+            display.style.display = 'none';
+        }
+    }
     
     function triggerRecalcIfNeeded() {
         // v4.1: 활성 탭 기준으로 재계산
@@ -4982,14 +5011,21 @@ window.showSingleRecommendation = function() {
             let skipNoBetterSlot = 0;
             const usedEmptyKeys = new Set();
             
+            // v4.3: 우선순위 모드 ('dong' = 동 이동, 'pos' = 위치 이동)
+            const priorityMode = (typeof window._getRecPriorityMode === 'function') ? window._getRecPriorityMode() : 'dong';
+            
+            // v4.3: isBetterSlot을 우선순위 모드에 따라 분기
+            //   - 'dong' 모드: 새 자리 동이 현재보다 앞 동이어야만 더 좋은 자리 (같은 동은 제외)
+            //   - 'pos'  모드: 같은 동 내에서 새 위치가 현재보다 앞 위치여야만 더 좋은 자리
+            //                  (동 이동 제외, 같은 위치에서 구역만 변경되는 것도 제외)
             const isBetterSlot = (slotInfo, currentInfo) => {
-                if (slotInfo.dongRank !== currentInfo.dongRank) {
-                    return slotInfo.dongRank < currentInfo.dongRank;
+                if (priorityMode === 'pos') {
+                    // 위치 이동 모드: 같은 동 + 더 앞 위치만
+                    if (slotInfo.dongRank !== currentInfo.dongRank) return false; // 동 다르면 제외
+                    return slotInfo.posRank < currentInfo.posRank; // 위치만 비교 (같은 위치/구역만 다른 경우 제외)
                 }
-                if (slotInfo.posRank !== currentInfo.posRank) {
-                    return slotInfo.posRank < currentInfo.posRank;
-                }
-                return slotInfo.zoneRank < currentInfo.zoneRank;
+                // 'dong' 모드 (기본): 더 앞 동만
+                return slotInfo.dongRank < currentInfo.dongRank;
             };
             
             const getLocInfo = (locId) => {
@@ -5208,48 +5244,17 @@ window.showPairRecommendation = function() {
                 singleByCode[s.code] = Object.assign({}, s, { singleRank: idx });
             });
             
-            // v4.2-fix1 디버그: 단독 추천 결과 코드 중 페어 데이터에 partner 있는 상품 카운트
-            let codesWithAnyPartner = 0;
-            let totalPartnerCount = 0;
-            singleRecs.forEach(s => {
-                const partners = pairMap[s.code] || [];
-                if (partners.length > 0) {
-                    codesWithAnyPartner++;
-                    totalPartnerCount += partners.length;
-                }
-            });
-            console.log('[v4.2-fix1][디버그] 단독 추천', singleRecs.length, '개 중 페어 데이터에 partner 있는 상품:', codesWithAnyPartner, '개 / 총 partner 수:', totalPartnerCount);
-            
-            // 처음 3개 단독 추천 상품에 대해 partner가 단독 추천에 있는지 상세 진단
-            const sampleCount = Math.min(3, singleRecs.length);
-            for (let s = 0; s < sampleCount; s++) {
-                const item = singleRecs[s];
-                const partners = pairMap[item.code] || [];
-                const partnerCodes = partners.map(p => p.partner);
-                const partnersInSingle = partnerCodes.filter(pc => singleByCode[pc]);
-                console.log('[v4.2-fix1][샘플진단] 단독', (s+1), '위', item.code, '(', item.name, ') / partner 후보 코드:', partnerCodes, '/ 그중 단독 추천에 있는 것:', partnersInSingle);
-            }
-            
             // ===== 4. 페어 묶기 (단독 추천 결과 안에서) =====
             const matchedPairs = []; // [{ baseItem, partnerItem, partnerNewSlot }]
             const usedCodes = new Set();
             const usedNewSlots = new Set(); // 페어 재배정으로 사용된 자리 (중복 방지)
             
-            // v4.2-fix1 디버그 카운터
-            let cntSkipUsedCode = 0;
-            let cntSkipNoPartners = 0;
-            let cntSkipPartnerNotInSingle = 0;
-            let cntSkipNoBaseTargetInfo = 0;
-            let cntSkipNoSameDongSlot = 0;
-            let cntSkipNoCandidateSlot = 0;
-            let cntSkipCaseA = 0;
-            
             for (let i = 0; i < singleRecs.length; i++) {
                 const base = singleRecs[i];
-                if (usedCodes.has(base.code)) { cntSkipUsedCode++; continue; }
+                if (usedCodes.has(base.code)) continue;
                 
                 const partners = pairMap[base.code] || [];
-                if (partners.length === 0) { cntSkipNoPartners++; continue; }
+                if (partners.length === 0) continue;
                 
                 // partner를 weight 높은 순으로 검색 (pairMap이 이미 정렬됨)
                 let foundPartner = null;
@@ -5261,12 +5266,12 @@ window.showPairRecommendation = function() {
                     break;
                 }
                 
-                if (!foundPartner) { cntSkipPartnerNotInSingle++; continue; }
+                if (!foundPartner) continue;
                 
                 // ===== 5. 자리 재배정: 파트너를 base 근처로 끌어옴 =====
                 // base의 단독 추천 자리 정보
                 const baseTargetInfo = base.targetInfo;
-                if (!baseTargetInfo) { cntSkipNoBaseTargetInfo++; continue; } // 안전장치
+                if (!baseTargetInfo) continue; // 안전장치
                 
                 const baseDong = baseTargetInfo.dong;
                 const baseZone = (base.targetLoc || '').charAt(0).toUpperCase();
@@ -5290,7 +5295,6 @@ window.showPairRecommendation = function() {
                 
                 if (sameDongSlots.length === 0) {
                     // 근처 빈 자리 없음 → 페어 매칭 포기
-                    cntSkipNoSameDongSlot++;
                     continue;
                 }
                 
@@ -5314,13 +5318,12 @@ window.showPairRecommendation = function() {
                 const candidateOrder = sameZoneInSameDong.concat(otherZoneInSameDong);
                 const partnerNewSlot = candidateOrder[0]; // 가장 가까운 빈 자리
                 
-                if (!partnerNewSlot) { cntSkipNoCandidateSlot++; continue; } // 안전장치
+                if (!partnerNewSlot) continue; // 안전장치
                 
                 // ===== 6. 케이스 A 제외: 자리 변동 없으면 표시 안 함 =====
                 // 파트너의 단독 추천 자리와 새 자리가 같으면 변동 없음 (케이스 A)
                 if (partnerNewSlot.id === foundPartner.targetLoc) {
                     // 변동 없음 → 페어 추천에서 제외
-                    cntSkipCaseA++;
                     continue;
                 }
                 
@@ -5334,15 +5337,6 @@ window.showPairRecommendation = function() {
                 usedCodes.add(foundPartner.code);
                 usedNewSlots.add(partnerNewSlot.id);
             }
-            
-            console.log('[v4.2-fix1][디버그] 페어 매칭 스킵 사유 집계:',
-                '\n  - 이미 묶임:', cntSkipUsedCode,
-                '\n  - partner 없음:', cntSkipNoPartners,
-                '\n  - partner 모두 단독 추천에 없음:', cntSkipPartnerNotInSingle,
-                '\n  - baseTargetInfo 없음:', cntSkipNoBaseTargetInfo,
-                '\n  - 같은 동 빈 자리 없음:', cntSkipNoSameDongSlot,
-                '\n  - 후보 슬롯 없음(안전장치):', cntSkipNoCandidateSlot,
-                '\n  - 케이스 A(자리 변동 없음):', cntSkipCaseA);
             
             console.log('[v4.2-fix1] 페어 매칭 완료:', matchedPairs.length, '쌍');
             
