@@ -372,7 +372,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 4.2-fix1 (페어 추천 복구)</div>
+            <div class="version-badge">🚀 Ver 4.3 (갯수 드롭다운 + 우선순위 선택)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -540,17 +540,26 @@
             <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
                 ※ 선지정으로 찜해둔 자리는 물건이 없더라도 이 추천 목록에서 완벽히 보호(제외)됩니다.
             </div>
-            <div id="rec-limit-panel" style="background:#f5f5f5; border:1px solid #e0e0e0; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; align-items:center; flex-wrap:wrap; gap:10px; color:#555;">
-                <span style="font-weight:bold; color:#424242;">📋 추천 갯수:</span>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="10" checked style="cursor:pointer;"> 10개</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="20" style="cursor:pointer;"> 20개</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="50" style="cursor:pointer;"> 50개</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;"><input type="radio" name="rec-limit" value="100" style="cursor:pointer;"> 100개</label>
-                <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-                    <input type="radio" name="rec-limit" value="custom" id="rec-limit-custom-radio" style="cursor:pointer;">
-                    사용자지정
-                    <input type="number" id="rec-limit-custom-input" min="1" placeholder="숫자" style="width:70px; padding:2px 6px; font-size:12px; border:1px solid #bbb; border-radius:3px; margin-left:2px;">
-                    <span>개</span>
+            <div id="rec-limit-panel" style="background:#f5f5f5; border:1px solid #e0e0e0; border-radius:6px; padding:8px 12px; margin-bottom:10px; font-size:12px; display:flex; align-items:center; flex-wrap:wrap; gap:14px; color:#555;">
+                <!-- v4.3: 추천 갯수 (라디오 → 드롭다운) -->
+                <label style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-weight:bold; color:#424242;">📋 추천 갯수:</span>
+                    <select id="rec-limit-select" style="padding:3px 8px; font-size:12px; border:1px solid #bbb; border-radius:4px; background:white; cursor:pointer;">
+                        <option value="10" selected>10개</option>
+                        <option value="20">20개</option>
+                        <option value="50">50개</option>
+                        <option value="100">100개</option>
+                        <option value="custom">사용자지정</option>
+                    </select>
+                    <span id="rec-limit-custom-display" style="display:none; color:#1976d2; font-weight:bold;">(<span id="rec-limit-custom-num">0</span>개)</span>
+                </label>
+                <!-- v4.3: 우선순위 선택 (단독 추천 전용) -->
+                <label style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-weight:bold; color:#424242;">🎯 우선순위:</span>
+                    <select id="rec-priority-mode" style="padding:3px 8px; font-size:12px; border:1px solid #bbb; border-radius:4px; background:white; cursor:pointer;">
+                        <option value="dong" selected>동 이동</option>
+                        <option value="pos">위치 이동</option>
+                    </select>
                 </label>
             </div>
             <div id="rec-tab-header" style="display:flex; gap:0; border-bottom:2px solid #4caf50; margin-bottom:10px;">
