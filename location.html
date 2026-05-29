@@ -360,11 +360,13 @@
 
     <div class="controls-header">
         <div class="tabs">
-            <button class="tab-btn active" onclick="switchView('list')">데이터 리스트</button>
-            <button class="tab-btn" onclick="switchView('map')">도면 보기</button>
+            <button class="tab-btn active" id="tab-btn-list" onclick="switchView('list')">데이터 리스트</button>
+            <button class="tab-btn" id="tab-btn-map" onclick="switchView('map')">도면 보기</button>
+            <!-- v4.4: 종합 대시보드 탭 (기존 사용률 팝업 통합) -->
+            <button class="tab-btn" id="tab-btn-dashboard" onclick="switchView('dashboard')">📊 종합 대시보드</button>
             
-            <div class="usage-container">
-                <button class="btn-usage" onclick="toggleUsagePopup(event)">📊 사용률</button>
+            <!-- v4.4: 기존 사용률 팝업 영역 제거 (대시보드 탭으로 통합), 단 hidden 컨테이너로 남겨둠 (calculateAndRenderUsage가 usage-popup 엘리먼트를 직접 사용함) -->
+            <div class="usage-container" style="display:none;">
                 <div class="usage-popup" id="usage-popup" onclick="event.stopPropagation()"></div>
             </div>
             
@@ -372,7 +374,7 @@
         </div>
         
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 4.3 (갯수 드롭다운 + 우선순위 선택)</div>
+            <div class="version-badge">🚀 Ver 4.4 (종합 대시보드)</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -460,6 +462,15 @@
             box-shadow:0 4px 16px rgba(0,0,0,0.18); padding:12px 15px;
             min-width:180px; max-width:280px; pointer-events:none; font-size:13px; line-height:1.7;
         "></div>
+    </div>
+
+    <!-- v4.4: 종합 대시보드 영역 -->
+    <div id="view-dashboard" class="content-view" style="display:none;">
+        <div id="dashboard-root" style="margin: 0 20px 10px 20px; background:#f9fafc; border:1px solid #ddd; border-radius:10px; padding:0; overflow:auto; max-height:calc(100vh - 180px);">
+            <div id="dashboard-content">
+                <div style="padding:40px; text-align:center; color:#888; font-size:13px;">📊 대시보드 데이터를 불러오는 중...</div>
+            </div>
+        </div>
     </div>
 
     <div id="dynamic-popups"></div>
@@ -735,9 +746,16 @@
         function switchView(view) {
             document.getElementById('view-list').style.display = view === 'list' ? 'block' : 'none';
             document.getElementById('view-map').style.display = view === 'map' ? 'block' : 'none';
+            // v4.4: 대시보드 탭
+            const dashView = document.getElementById('view-dashboard');
+            if (dashView) dashView.style.display = view === 'dashboard' ? 'block' : 'none';
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             event.currentTarget.classList.add('active');
             if (view === 'map' && typeof window.renderMap === 'function') window.renderMap();
+            // v4.4: 대시보드 전환 시 렌더링
+            if (view === 'dashboard' && typeof window._v44_renderDashboard === 'function') {
+                window._v44_renderDashboard();
+            }
         }
 
         function toggleFilterPopup(e, id) {
