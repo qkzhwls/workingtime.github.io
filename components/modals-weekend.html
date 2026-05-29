@@ -1,88 +1,35 @@
-<div id="weekend-work-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50 flex items-center justify-center p-4">
-    <div id="weekend-modal-content" class="relative bg-white rounded-lg shadow-xl w-full max-w-5xl mx-auto flex flex-col md:flex-row gap-0 max-h-[90vh] overflow-hidden">
+<div id="weekend-work-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50 flex items-center justify-center">
+    <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl p-4 md:p-6 mx-auto my-4 flex flex-col max-h-[90vh]">
         
-        <div class="flex-grow flex flex-col p-3 md:p-4 overflow-hidden relative">
-            
-            <div id="weekend-modal-header" class="flex justify-between items-center mb-2 border-b border-gray-100 pb-2 md:pb-0 md:border-none md:cursor-move">
-                <div class="flex flex-col md:flex-row md:items-baseline gap-1 md:gap-3 pointer-events-none">
-                    <h3 class="text-lg md:text-2xl font-bold text-gray-800 flex items-center gap-2 pointer-events-auto">
-                        🗓️ 주말 근무 신청
-                    </h3>
-                    <span class="text-xs md:text-sm text-gray-500 pointer-events-auto">
-                        근무할 날짜를 <span class="text-blue-600 font-bold">클릭</span>하여 신청/취소하세요.
-                    </span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button id="toggle-weekend-stats-btn" class="md:hidden bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-md font-bold text-xs border border-indigo-200 hover:bg-indigo-100 shadow-sm flex items-center gap-1">
-                        📊 현황
-                    </button>
-                    <button id="close-weekend-modal-btn" class="text-gray-400 hover:text-gray-700 text-3xl font-bold md:hidden leading-none">&times;</button>
-                </div>
-            </div>
-            
-            <div class="flex justify-center items-center space-x-4 mb-3 bg-gray-50 p-2 rounded-lg border border-gray-100">
-                <button id="prev-month-btn" class="p-1 rounded-full hover:bg-gray-200 text-gray-600 transition">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-                </button>
-                <h2 id="current-month-label" class="text-xl font-bold text-gray-800 w-32 md:w-40 text-center">Loading...</h2>
-                <button id="next-month-btn" class="p-1 rounded-full hover:bg-gray-200 text-gray-600 transition">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                </button>
-            </div>
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl md:text-2xl font-bold text-gray-800 flex items-center gap-2">
+                🗓️ 주말 근무 신청
+            </h3>
+            <button id="close-weekend-modal-btn" class="text-gray-400 hover:text-gray-700 text-3xl font-bold">&times;</button>
+        </div>
+        
+        <p class="text-sm text-gray-500 mb-4 text-center">
+            근무할 날짜의 리스트를 <span class="text-blue-600 font-bold">클릭</span>하여 신청하거나 취소하세요.
+        </p>
 
-            <div class="flex justify-between items-center mb-2 text-[11px] md:text-sm font-medium">
-                <div class="flex bg-white rounded-md border border-gray-200 shadow-sm overflow-hidden shrink-0">
-                    <button id="view-toggle-list" class="px-2 md:px-3 py-1 text-[11px] md:text-xs font-bold bg-blue-50 text-blue-600 transition-colors">리스트</button>
-                    <button id="view-toggle-calendar" class="px-2 md:px-3 py-1 text-[11px] md:text-xs font-bold bg-white text-gray-500 hover:bg-gray-50 transition-colors">달력</button>
-                </div>
-
-                <div class="flex space-x-2 md:space-x-4 shrink-0">
-                    <div class="flex items-center"><span class="w-2.5 h-2.5 md:w-3 md:h-3 bg-orange-400 rounded-full mr-1"></span>대기</div>
-                    <div class="flex items-center"><span class="w-2.5 h-2.5 md:w-3 md:h-3 bg-blue-600 rounded-full mr-1"></span>확정</div>
-                    <div class="flex items-center"><span class="w-2.5 h-2.5 md:w-3 md:h-3 bg-yellow-400 rounded-full mr-1"></span>취소됨</div>
-                </div>
-            </div>
-
-            <div id="admin-bulk-action-bar" class="hidden justify-between items-center bg-gray-100 p-2 rounded-lg mb-2 border border-gray-200 shadow-sm shrink-0">
-                <div class="flex items-center gap-2 pl-1">
-                    <input type="checkbox" id="select-all-dates-checkbox" class="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
-                    <label for="select-all-dates-checkbox" class="text-[13px] font-bold text-gray-700 cursor-pointer select-none">전체 선택</label>
-                </div>
-                <div class="flex gap-1.5">
-                    <button id="bulk-confirm-btn" class="bg-green-600 hover:bg-green-700 text-white px-2.5 py-1.5 rounded text-xs font-bold transition shadow-sm">선택 승인</button>
-                    <button id="bulk-cancel-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white px-2.5 py-1.5 rounded text-xs font-bold transition shadow-sm">선택 취소</button>
-                    <button id="bulk-delete-btn" class="bg-red-600 hover:bg-red-700 text-white px-2.5 py-1.5 rounded text-xs font-bold transition shadow-sm">선택 삭제</button>
-                </div>
-            </div>
-
-            <div class="flex-grow overflow-y-auto border-t border-gray-200 pt-2 pr-1">
-                <div id="weekend-list-view" class="space-y-2 pb-2"></div>
-                
-                <div id="weekend-calendar-view" class="hidden h-full flex-col">
-                    <div class="grid grid-cols-7 gap-1 text-center font-bold text-xs md:text-sm mb-1 text-gray-600 bg-gray-100 py-2 rounded-md">
-                        <div class="text-red-500">일</div>
-                        <div>월</div><div>화</div><div>수</div><div>목</div><div>금</div>
-                        <div class="text-blue-500">토</div>
-                    </div>
-                    <div id="calendar-grid" class="grid grid-cols-7 gap-1 md:gap-2 flex-grow auto-rows-fr"></div>
-                </div>
-            </div>
+        <div class="flex justify-center items-center space-x-6 mb-6 bg-gray-50 p-3 rounded-lg">
+            <button id="prev-month-btn" class="p-2 rounded-full hover:bg-gray-200 text-gray-600 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+            </button>
+            <h2 id="current-month-label" class="text-xl md:text-2xl font-bold text-gray-800 w-40 md:w-48 text-center">Loading...</h2>
+            <button id="next-month-btn" class="p-2 rounded-full hover:bg-gray-200 text-gray-600 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </button>
         </div>
 
-        <div id="weekend-stats-sidebar" class="w-full md:w-64 flex-shrink-0 bg-white md:bg-indigo-50/30 border-t md:border-t-0 md:border-l border-indigo-100 p-4 flex-col hidden md:flex overflow-y-auto max-h-[50vh] md:max-h-full absolute md:relative bottom-0 left-0 right-0 z-50 shadow-[0_-15px_30px_rgba(0,0,0,0.15)] md:shadow-none rounded-t-2xl md:rounded-none">
-            <div class="flex justify-between items-center mb-3 border-b border-indigo-200 pb-2">
-                <h4 class="text-md font-bold text-indigo-800 flex items-center gap-2">
-                    📊 개인별 신청 현황
-                </h4>
-                <button id="close-weekend-stats-mobile-btn" class="md:hidden text-gray-400 hover:text-gray-700 text-2xl font-bold leading-none">&times;</button>
-                <button id="close-weekend-modal-btn-desktop" class="hidden md:block text-gray-400 hover:text-gray-700 text-2xl font-bold leading-none">&times;</button>
-            </div>
-            
-            <div class="text-xs text-gray-500 mb-2 flex justify-between px-2">
-                <span>이름</span>
-                <span>확정 / 대기</span>
-            </div>
-            <div id="weekend-stats-list" class="flex flex-col gap-2 overflow-y-auto pr-1 pb-4 md:pb-0"></div>
+        <div class="flex justify-end space-x-4 mb-2 text-xs md:text-sm font-medium">
+            <div class="flex items-center"><span class="w-3 h-3 bg-orange-400 rounded-full mr-2"></span>승인 대기</div>
+            <div class="flex items-center"><span class="w-3 h-3 bg-blue-600 rounded-full mr-2"></span>확정됨</div>
+        </div>
+
+        <div class="flex-grow overflow-y-auto border-t border-gray-200 mt-2">
+            <div id="weekend-list-view" class="space-y-3 py-2">
+                </div>
         </div>
     </div>
 </div>
@@ -95,100 +42,10 @@
             <p class="text-gray-500 text-xs mt-2">현재 상태: <span id="admin-popup-status" class="font-bold"></span></p>
         </div>
         
-        <div class="flex justify-between md:justify-end gap-1 md:gap-2">
-            <button id="admin-reject-btn" class="px-3 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 font-medium text-sm flex-1 md:flex-none">대기로 강등</button>
-            <button id="admin-cancel-btn" class="px-3 py-2 bg-yellow-100 text-yellow-700 rounded hover:bg-yellow-200 font-medium text-sm flex-1 md:flex-none">취소 처리</button>
-            <button id="admin-confirm-btn" class="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium text-sm flex-1 md:flex-none">승인 확정</button>
+        <div class="flex justify-end space-x-2">
+            <button id="admin-reject-btn" class="px-4 py-2 bg-red-100 text-red-700 rounded hover:bg-red-200 font-medium text-sm">반려(삭제)</button>
+            <button id="admin-confirm-btn" class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium text-sm">승인 확정</button>
         </div>
         <button id="admin-close-popup-btn" class="mt-4 w-full text-center text-sm text-gray-400 hover:text-gray-600">닫기</button>
-    </div>
-</div>
-
-<div id="weekend-admin-date-popup" class="fixed inset-0 bg-black bg-opacity-40 hidden z-[70] flex items-center justify-center px-4">
-    <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm overflow-y-auto max-h-[90vh]">
-        <div class="flex justify-between items-center mb-4 border-b pb-2">
-            <h4 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-                ⚙️ <span id="admin-date-popup-title">날짜</span> 설정
-            </h4>
-            <button id="admin-date-close-btn" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
-        </div>
-        
-        <div class="space-y-4">
-            <div class="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
-                <div class="flex justify-between items-center mb-2">
-                    <label class="block text-sm font-bold text-indigo-800">⚖️ 스마트 형평성 배분 (AI 추천)</label>
-                    <button id="admin-date-smart-calc-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded text-xs font-bold transition shadow-sm flex items-center gap-1">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                        계산하기
-                    </button>
-                </div>
-                <p class="text-[11px] text-indigo-600 mb-2 leading-tight">정원과 기존 신청자를 비교하여 연 누적 횟수가 적은 팀원 우선으로 최적의 배분안을 추천합니다.</p>
-                <div id="smart-calc-result-area" class="hidden bg-white p-3 rounded-lg border border-indigo-200 mt-3 shadow-inner"></div>
-            </div>
-
-            <div class="bg-emerald-50 p-4 rounded-lg border border-emerald-100">
-                <label class="block text-sm font-bold text-emerald-800 mb-2">🎯 이 날짜 정원 설정</label>
-                <div class="flex gap-2 items-center">
-                    <input type="number" id="admin-date-capacity" min="1" class="w-20 p-2 border border-emerald-300 rounded focus:ring-2 focus:ring-emerald-500 outline-none text-center" placeholder="명">
-                    <button id="admin-date-capacity-btn" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded font-bold transition shadow-sm">설정</button>
-                </div>
-            </div>
-
-            <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                <label class="block text-sm font-bold text-blue-800 mb-2">👤 수동 인원 추가 (즉시 확정)</label>
-                <div class="flex gap-2">
-                    <select id="admin-date-add-member" class="flex-1 p-2 border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                        <option value="">팀원 선택...</option>
-                    </select>
-                    <button id="admin-date-add-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold transition shadow-sm">추가</button>
-                </div>
-            </div>
-
-            <div class="bg-purple-50 p-4 rounded-lg border border-purple-100">
-                <label class="block text-sm font-bold text-purple-800 mb-2">🎲 랜덤 인원 뽑기 (무작위 대기 등록)</label>
-                <div class="flex gap-2 items-center">
-                    <input type="number" id="admin-date-random-count" min="1" max="10" value="1" class="w-16 p-2 border border-purple-300 rounded focus:ring-2 focus:ring-purple-500 outline-none text-center">
-                    <span class="text-sm text-purple-700 font-medium">명</span>
-                    <button id="admin-date-random-btn" class="ml-auto bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded font-bold transition shadow-sm">추첨하기</button>
-                </div>
-            </div>
-
-            <div class="bg-red-50 p-4 rounded-lg border border-red-100 flex justify-between items-center">
-                <div>
-                    <span class="block text-sm font-bold text-red-800">🚫 이 날짜 신청 마감</span>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" id="admin-date-block-toggle" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
-                </label>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div id="past-date-edit-popup" class="fixed inset-0 bg-black bg-opacity-50 hidden z-[80] flex items-center justify-center px-4">
-    <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md overflow-y-auto max-h-[90vh]">
-        <div class="flex justify-between items-center mb-4 border-b pb-2">
-            <h4 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-                📝 <span id="past-date-popup-title">날짜</span> 인원 편집 (과거)
-            </h4>
-            <button id="past-date-close-btn" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
-        </div>
-        
-        <div class="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-4">
-            <label class="block text-sm font-bold text-blue-800 mb-2">👤 누락된 인원 추가 (확정 등록)</label>
-            <div class="flex gap-2">
-                <select id="past-date-add-member" class="flex-1 p-2 border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none bg-white">
-                    <option value="">팀원 선택...</option>
-                </select>
-                <button id="past-date-add-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-bold transition shadow-sm">추가</button>
-            </div>
-        </div>
-
-        <div>
-            <label class="block text-sm font-bold text-gray-700 mb-2">📋 현재 등록된 인원 (상태 변경 및 삭제)</label>
-            <div id="past-date-member-list" class="flex flex-col gap-1 border border-gray-200 rounded-lg p-2 bg-gray-50 max-h-60 overflow-y-auto">
-                </div>
-        </div>
     </div>
 </div>
