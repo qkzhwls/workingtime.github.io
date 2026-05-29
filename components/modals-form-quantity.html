@@ -1,0 +1,44 @@
+<div id="quantity-on-stop-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center hidden z-50 p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm relative">
+        <div class="p-6 border-b border-gray-200 flex justify-between items-center">
+            <h2 class="text-xl font-bold text-gray-900">처리량 입력</h2>
+            <button class="modal-close-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+        <div class="p-6 space-y-4">
+            <p>업무 <span id="quantity-on-stop-task-name" class="font-bold"></span>의 처리량을 입력하세요.</p>
+            <div>
+                <label for="quantity-on-stop-input" class="block text-sm font-medium text-gray-700">처리량 (개)</label>
+                <input type="number" id="quantity-on-stop-input" min="0" class="mt-1 w-full bg-white border border-gray-300 rounded-lg p-2">
+            </div>
+        </div>
+        <div class="p-4 bg-gray-50 rounded-b-2xl flex justify-end gap-4">
+            <button type="button" id="cancel-quantity-on-stop" class="bg-white hover:bg-gray-100 border border-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg transition">나중에 입력</button>
+            <button type="button" id="confirm-quantity-on-stop" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">확인</button>
+        </div>
+    </div>
+</div>
+
+<div id="quantity-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center hidden z-[50] p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative">
+        <div class="p-6 border-b border-gray-200 flex justify-between items-center">
+            <h2 id="quantity-modal-title" class="text-xl font-bold text-gray-900">업무별 처리량 입력</h2>
+            <button class="modal-close-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+        <div id="modal-task-quantity-inputs" class="p-6 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 max-h-[60vh] overflow-y-auto"></div>
+        <div class="px-6 pb-2 pt-2 flex items-center justify-end border-t border-gray-100">
+            <label class="inline-flex items-center cursor-pointer select-none group">
+                <input type="checkbox" id="quantity-confirm-checkbox" class="sr-only peer">
+                <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500 transition-colors"></div>
+                <span class="ms-3 text-sm font-bold text-gray-500 group-hover:text-gray-700 peer-checked:text-green-600 transition-colors">확정 입력 (검증 완료)</span>
+            </label>
+        </div>
+        <div class="p-4 bg-gray-50 rounded-b-2xl flex justify-end gap-4">
+            <button type="button" id="cancel-quantity-btn" class="bg-white hover:bg-gray-100 border border-gray-300 text-gray-800 font-bold py-2 px-4 rounded-lg transition">취소</button>
+            <button type="button" id="confirm-quantity-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">확인 및 저장</button>
+        </div>
+    </div>
+</div>

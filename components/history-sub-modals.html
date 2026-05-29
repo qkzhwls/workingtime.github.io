@@ -1,0 +1,306 @@
+<div id="delete-history-modal" class="fixed inset-0 bg-gray-900/75 backdrop-blur-sm flex items-center justify-center hidden z-[60] p-4 transition-colors">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm relative border border-gray-200 dark:border-gray-700 depth-panel">
+        <button class="modal-close-btn text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors absolute top-4 right-4">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+        <div class="p-8 text-center">
+            <svg class="mx-auto mb-5 text-red-500 w-14 h-14" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11V6m0 8h.01M19 10a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+            <h3 class="mb-4 text-lg font-bold text-gray-900 dark:text-white">정말로 이 날짜의 모든 기록을<br/>삭제하시겠습니까?</h3>
+            <p class="mb-8 text-sm text-gray-500 dark:text-gray-400 font-medium">이 작업은 되돌릴 수 없습니다.</p>
+            <div class="flex justify-center gap-3">
+                <button type="button" id="confirm-history-delete-btn" class="text-white bg-red-600 hover:bg-red-700 font-bold rounded-xl text-sm px-5 py-2.5 shadow-md transition-colors">예, 삭제합니다</button>
+                <button type="button" id="cancel-history-delete-btn" class="text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600 rounded-xl text-sm font-bold px-5 py-2.5 shadow-sm transition-colors">아니요, 취소합니다</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="inspection-log-manager-modal" class="fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center hidden z-[70] p-4 transition-colors">
+    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-5xl h-[800px] flex flex-col relative animate-fade-in border border-gray-200 dark:border-gray-700 depth-panel">
+        <div class="p-6 border-b border-indigo-100 dark:border-indigo-900/50 flex justify-between items-center bg-indigo-50 dark:bg-indigo-900/30 rounded-t-2xl shrink-0">
+            <div>
+                <h2 class="text-xl font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-2">
+                    📋 검수 기록 관리
+                </h2>
+                <p id="inspection-log-product-name" class="text-sm text-indigo-600 dark:text-indigo-400 mt-1 font-bold">상품명</p>
+            </div>
+            <button class="modal-close-btn text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 transition-colors" onclick="document.getElementById('inspection-log-manager-modal').classList.add('hidden')">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+        
+        <div class="p-0 overflow-y-auto flex-grow bg-gray-50 dark:bg-gray-900">
+            <table class="w-full text-sm text-left text-gray-600 dark:text-gray-300">
+                <thead class="text-xs text-gray-700 dark:text-gray-300 uppercase bg-gray-100 dark:bg-gray-800 sticky top-0 z-10 shadow-sm">
+                    <tr>
+                        <th class="px-6 py-4 w-[6%] text-center font-bold">유형</th>
+                        <th class="px-6 py-4 w-[12%] font-bold">일시</th>
+                        <th class="px-6 py-4 w-[7%] font-bold">담당</th>
+                        <th class="px-6 py-4 w-[10%] font-bold">입고일자</th>
+                        <th class="px-6 py-4 w-[8%] font-bold">코드</th>
+                        <th class="px-6 py-4 w-[8%] font-bold">옵션</th>
+                        <th class="px-6 py-4 w-[10%] font-bold">공급처 상품명</th>
+                        <th class="px-6 py-4 w-[5%] text-center font-bold">수량</th>
+                        <th class="px-6 py-4 w-[8%] text-center font-bold">상태</th>
+                        <th class="px-6 py-4 w-[8%] text-center font-bold">사진</th>
+                        <th class="px-6 py-4 font-bold">특이사항</th>
+                        <th class="px-6 py-4 w-[10%] text-right font-bold">관리</th>
+                    </tr>
+                </thead>
+                <tbody id="inspection-log-table-body" class="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-800/50">
+                </tbody>
+            </table>
+        </div>
+        <div class="p-5 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-800 rounded-b-2xl flex justify-end shrink-0">
+            <button class="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 font-bold py-2.5 px-8 rounded-xl transition shadow-sm" onclick="document.getElementById('inspection-log-manager-modal').classList.add('hidden')">닫기</button>
+        </div>
+    </div>
+</div>
+
+<div id="history-records-modal" class="fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center hidden z-[60] p-4 transition-colors">
+    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-5xl h-[85vh] flex flex-col relative border border-gray-200 dark:border-gray-700 depth-panel">
+        <div class="p-6 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-800/80 rounded-t-2xl shrink-0">
+            <div>
+                <h2 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    📋 기록 관리 <span id="history-records-date" class="text-blue-600 dark:text-blue-400 text-lg font-mono ml-2"></span>
+                </h2>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5 font-medium">개별 기록을 수정하거나 일괄 변경할 수 있습니다.</p>
+            </div>
+            <button class="modal-close-btn text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors" onclick="document.getElementById('history-records-modal').classList.add('hidden')">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+
+        <div class="p-5 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-800 space-y-4 shrink-0">
+            <div class="flex flex-wrap gap-4 items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="flex flex-col">
+                        <label class="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wide mb-1">이름 필터</label>
+                        <select id="history-record-filter-member" class="p-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg text-sm font-medium w-32 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="">전체</option>
+                        </select>
+                    </div>
+                    <div class="flex flex-col">
+                        <label class="text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-wide mb-1">업무 필터</label>
+                        <select id="history-record-filter-task" class="p-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg text-sm font-medium w-40 focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="">전체</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <button id="history-record-add-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-5 rounded-xl text-sm flex items-center gap-1.5 shadow-md transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" /></svg>
+                    새 기록 추가
+                </button>
+            </div>
+
+            <div id="history-record-batch-edit-area" class="hidden items-end gap-3 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800/50 mt-2 animate-fade-in">
+                <div class="text-sm font-extrabold text-blue-800 dark:text-blue-400 mb-1 mr-2">⚡ 일괄 수정<br/><span class="text-[10px] font-medium text-blue-600 dark:text-blue-300">(선택된 업무 전체)</span></div>
+                <div>
+                    <label class="text-[10px] text-blue-600 dark:text-blue-400 font-bold block mb-1">일괄 시작 시간</label>
+                    <input type="time" id="history-batch-start-time" class="p-2 border border-blue-300 dark:border-blue-700 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="text-[10px] text-blue-600 dark:text-blue-400 font-bold block mb-1">일괄 종료 시간</label>
+                    <input type="time" id="history-batch-end-time" class="p-2 border border-blue-300 dark:border-blue-700 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-800 dark:text-white outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <button id="history-batch-apply-btn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-2 px-4 rounded-lg shadow-md transition-colors h-[38px] flex items-center">
+                    적용
+                </button>
+            </div>
+        </div>
+        
+        <div class="overflow-y-auto flex-grow bg-gray-50 dark:bg-gray-900 p-6">
+            <div class="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden depth-panel transition-colors">
+                <table class="w-full text-sm text-left text-gray-600 dark:text-gray-300">
+                    <thead class="text-xs text-gray-700 dark:text-gray-300 uppercase bg-gray-100 dark:bg-gray-700/50 border-b dark:border-gray-700">
+                        <tr>
+                            <th class="px-6 py-4 w-[15%] font-bold">이름</th>
+                            <th class="px-6 py-4 w-[20%] font-bold">업무</th>
+                            <th class="px-6 py-4 w-[15%] font-bold">시작</th>
+                            <th class="px-6 py-4 w-[15%] font-bold">종료</th>
+                            <th class="px-6 py-4 w-[15%] font-bold">소요/휴식</th>
+                            <th class="px-6 py-4 w-[20%] text-right font-bold">관리</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-records-table-body" class="divide-y divide-gray-100 dark:divide-gray-700 bg-white dark:bg-gray-800">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="p-5 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-800 rounded-b-2xl flex justify-end shrink-0">
+            <button class="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 font-bold py-2.5 px-8 rounded-xl transition shadow-sm" onclick="document.getElementById('history-records-modal').classList.add('hidden')">닫기</button>
+        </div>
+    </div>
+</div>
+
+<div id="history-add-record-modal" class="fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center hidden z-[70] p-4 transition-colors">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md relative border border-gray-200 dark:border-gray-700 depth-panel">
+        <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white">새 기록 추가 <span id="history-add-date-display" class="text-blue-600 dark:text-blue-400 ml-1 font-mono text-base bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-lg"></span></h3>
+            <button class="modal-close-btn text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors" onclick="document.getElementById('history-add-record-modal').classList.add('hidden')">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+        <div class="p-6 space-y-5">
+            <form id="history-add-record-form" class="space-y-5">
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1.5">이름</label>
+                    <input type="text" id="history-add-member" list="history-add-member-list" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" placeholder="이름 입력/선택">
+                    <datalist id="history-add-member-list"></datalist>
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1.5">업무</label>
+                    <input type="text" id="history-add-task" list="history-add-task-list" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" placeholder="업무 입력/선택">
+                    <datalist id="history-add-task-list"></datalist>
+                </div>
+                <div class="grid grid-cols-2 gap-5">
+                    <div>
+                        <label class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1.5">시작 시간</label>
+                        <input type="time" id="history-add-start-time" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1.5">종료 시간</label>
+                        <input type="time" id="history-add-end-time" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm">
+                    </div>
+                </div>
+            </form>
+        </div>
+        <div class="p-5 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 rounded-b-2xl flex justify-end gap-3">
+            <button type="button" class="px-5 py-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-700 dark:text-gray-200 font-bold hover:bg-gray-50 dark:hover:bg-gray-600 transition shadow-sm" onclick="document.getElementById('history-add-record-modal').classList.add('hidden')">취소</button>
+            <button type="button" id="confirm-history-add-btn" class="px-6 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold shadow-md transition-colors">추가</button>
+        </div>
+    </div>
+</div>
+
+<div id="download-format-modal" class="fixed inset-0 bg-gray-900/75 backdrop-blur-sm flex items-center justify-center hidden z-[70] p-4 transition-colors">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm relative border border-gray-200 dark:border-gray-700 depth-panel">
+        <div class="p-6 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center">
+            <h2 class="text-xl font-bold text-gray-900 dark:text-white">다운로드 형식 선택</h2>
+            <button class="modal-close-btn text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors" data-modal-id="download-format-modal">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+        <div class="p-8 text-center">
+            <button class="download-option-btn w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl transition-colors text-lg shadow-md flex justify-center items-center gap-2" data-format="xlsx">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                Excel (.xlsx) 다운로드
+            </button>
+        </div>
+    </div>
+</div>
+
+<div id="pre-register-inspection-modal" class="fixed inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center hidden z-[80] p-4 transition-colors">
+    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col relative animate-fade-in-up border border-gray-200 dark:border-gray-700 depth-panel">
+        
+        <div class="p-6 border-b border-indigo-100 dark:border-indigo-900/50 bg-indigo-50 dark:bg-indigo-900/30 flex justify-between items-center rounded-t-2xl shrink-0 transition-colors">
+            <div>
+                <h2 class="text-xl font-bold text-indigo-900 dark:text-indigo-300 flex items-center gap-2">
+                    ➕ 수동 검수 상세 등록
+                </h2>
+                <p class="text-sm font-medium text-indigo-700 dark:text-indigo-400 mt-1">리스트에 없는 상품의 검수 결과를 직접 입력하고 즉시 저장합니다.</p>
+            </div>
+            <button id="close-pre-insp-modal" class="text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-200 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+        </div>
+        
+        <div class="p-6 overflow-y-auto flex-grow space-y-8 bg-gray-50 dark:bg-gray-900 transition-colors">
+            
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-5 depth-panel transition-colors">
+                <h3 class="text-base font-extrabold text-gray-800 dark:text-white border-b dark:border-gray-700 pb-3 flex items-center gap-2">
+                    📦 상품 기본 정보
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">검수 유형 <span class="text-red-500">*</span></label>
+                        <select id="manual-insp-type" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none">
+                            <option value="sample">샘플 검수</option>
+                            <option value="total">전량 검수</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">상품명 <span class="text-red-500">*</span></label>
+                        <input type="text" id="manual-insp-product-name" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none" placeholder="정확한 상품명을 입력하세요">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">공급처</label>
+                        <input type="text" id="manual-insp-supplier" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none" placeholder="공급처명">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">상품코드</label>
+                        <input type="text" id="manual-insp-code" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none" placeholder="예: CD-123">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">옵션</label>
+                        <input type="text" id="manual-insp-option" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none" placeholder="예: 블랙/FREE">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">출고일자 <span class="font-normal text-[10px] text-gray-500">(엑셀 기준)</span></label>
+                        <input type="date" id="manual-insp-packing-date" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">입고(검수)일자 <span class="text-red-500">*</span></label>
+                        <input type="date" id="manual-insp-inbound-date" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">수량</label>
+                        <input type="number" id="manual-insp-qty" class="w-full p-2.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none" placeholder="0">
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-5 depth-panel transition-colors">
+                <h3 class="text-base font-extrabold text-gray-800 dark:text-white border-b dark:border-gray-700 pb-3 flex items-center gap-2">
+                    ✅ 품질 체크리스트
+                </h3>
+                
+                <div class="mb-5">
+                    <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">기준 (두께 등) <span class="text-red-500">*</span></label>
+                    <input type="text" id="manual-insp-check-thickness" class="w-full md:w-1/2 p-2.5 border border-yellow-400 dark:border-yellow-600 bg-yellow-50 dark:bg-yellow-900/20 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm font-bold outline-none shadow-sm" placeholder="예: 3">
+                </div>
+                
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">원단</label><select id="manual-insp-check-fabric" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">컬러</label><select id="manual-insp-check-color" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">뒤틀림</label><select id="manual-insp-check-distortion" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">올풀림</label><select id="manual-insp-check-unraveling" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">마감</label><select id="manual-insp-check-finishing" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">지퍼</label><select id="manual-insp-check-zipper" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="해당없음">해당없음</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">단추</label><select id="manual-insp-check-button" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="해당없음">해당없음</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">안감</label><select id="manual-insp-check-lining" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="해당없음">해당없음</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">보풀</label><select id="manual-insp-check-pilling" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="불량">불량</option></select></div>
+                    <div><label class="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1.5">이염</label><select id="manual-insp-check-dye" class="w-full p-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-white rounded-lg text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"><option value="정상">정상</option><option value="불량">불량</option></select></div>
+                </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-5 depth-panel transition-colors">
+                <h3 class="text-base font-extrabold text-gray-800 dark:text-white border-b dark:border-gray-700 pb-3 flex items-center gap-2">
+                    📝 특이사항 및 사진 첨부
+                </h3>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">특이사항 (메모)</label>
+                    <textarea id="manual-insp-note" rows="3" class="w-full p-3 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white rounded-xl focus:ring-2 focus:ring-indigo-500 text-sm shadow-sm outline-none resize-none" placeholder="불량 상세 내용이나 주의사항을 입력하세요"></textarea>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">사진 첨부 (선택사항)</label>
+                    <input type="file" id="manual-insp-image" accept="image/*" class="block w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-bold file:bg-indigo-50 dark:file:bg-indigo-900/30 file:text-indigo-700 dark:file:text-indigo-300 hover:file:bg-indigo-100 dark:hover:file:bg-indigo-800/50 transition cursor-pointer">
+                    <div id="manual-insp-image-preview-container" class="mt-4 hidden relative inline-block">
+                        <img id="manual-insp-image-preview" src="" class="h-40 object-contain border border-gray-300 dark:border-gray-600 rounded-xl shadow-md">
+                        <button type="button" id="manual-insp-image-clear-btn" class="absolute -top-3 -right-3 bg-red-500 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm shadow-lg hover:bg-red-600 transition-colors">&times;</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+        
+        <div class="p-5 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-3 rounded-b-2xl shrink-0 transition-colors">
+            <button type="button" id="cancel-pre-insp-btn" class="bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 font-bold py-2.5 px-6 rounded-xl transition shadow-sm text-sm">취소</button>
+            <button type="button" id="save-pre-insp-btn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-8 rounded-xl transition shadow-md text-sm flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                검수 완료 및 즉시 저장
+            </button>
+        </div>
+    </div>
+</div>
