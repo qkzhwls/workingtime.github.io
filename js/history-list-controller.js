@@ -10,12 +10,12 @@ import { checkMissingQuantities } from './analysis-logic.js';
 import { renderQuantityModalInputs } from './ui.js';
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-let isRenderingList = false;
-let renderListQueue = null;
-
+/**
+ * 이력 데이터를 로드하고 초기 화면을 렌더링합니다.
+ */
 export const loadAndRenderHistoryList = async () => {
     if (!DOM.historyDateList) return;
-    DOM.historyDateList.innerHTML = '<li><div class="p-4 text-center text-gray-500 text-sm">이력 로딩 중...</div></li>';
+    DOM.historyDateList.innerHTML = '<li><div class="p-4 text-center text-gray-500">이력 로딩 중...</div></li>';
 
     await fetchAllHistoryData(); 
     await syncTodayToHistory(); 
@@ -23,7 +23,7 @@ export const loadAndRenderHistoryList = async () => {
     augmentHistoryWithPersistentLeave(State.allHistoryData, State.persistentLeaveSchedule);
 
     if (State.allHistoryData.length === 0) {
-        DOM.historyDateList.innerHTML = '<li><div class="p-4 text-center text-gray-500 text-sm">저장된 이력이 없습니다.</div></li>';
+        DOM.historyDateList.innerHTML = '<li><div class="p-4 text-center text-gray-500">저장된 이력이 없습니다.</div></li>';
         const viewsToClear = [
             'history-daily-view', 'history-weekly-view', 'history-monthly-view',
             'history-attendance-daily-view', 'history-attendance-weekly-view', 'history-attendance-monthly-view',
@@ -36,7 +36,7 @@ export const loadAndRenderHistoryList = async () => {
         return;
     }
 
-    // 메인 탭 스타일 초기화
+    // 탭 스타일 초기화 (업무 이력 탭 활성화)
     document.querySelectorAll('.history-main-tab-btn[data-main-tab="work"]').forEach(btn => {
         btn.classList.add('font-semibold', 'text-blue-600', 'border-b-2', 'border-blue-600');
         btn.classList.remove('font-medium', 'text-gray-500');
@@ -46,7 +46,7 @@ export const loadAndRenderHistoryList = async () => {
         btn.classList.add('font-medium', 'text-gray-500');
     });
 
-    // 하위 탭 스타일 초기화
+    // 하위 탭 초기화 (일별 상세 활성화)
     document.querySelectorAll('#history-tabs button[data-view="daily"]').forEach(btn => {
         btn.classList.add('font-semibold', 'text-blue-600', 'border-blue-600', 'border-b-2');
         btn.classList.remove('text-gray-500');
@@ -68,7 +68,7 @@ export const loadAndRenderHistoryList = async () => {
     document.getElementById('history-attendance-daily-view')?.classList.add('hidden');
     document.getElementById('history-attendance-weekly-view')?.classList.add('hidden');
     document.getElementById('history-attendance-monthly-view')?.classList.add('hidden');
-    document.getElementById('report-daily-view')?.classList.remove('hidden');
+    document.getElementById('report-daily-view')?.classList.add('hidden');
     document.getElementById('report-weekly-view')?.classList.add('hidden');
     document.getElementById('report-monthly-view')?.classList.add('hidden');
     document.getElementById('report-yearly-view')?.classList.add('hidden');
@@ -80,184 +80,92 @@ export const loadAndRenderHistoryList = async () => {
     await renderHistoryDateListByMode('day');
 };
 
+/**
+ * 모드(일/주/월/년)에 따라 좌측 리스트를 렌더링합니다.
+ * ✅ [수정] selectedKey 파라미터 추가 (특정 날짜 선택 유지 기능)
+ */
 export const renderHistoryDateListByMode = async (mode = 'day', selectedKey = null) => {
     if (!DOM.historyDateList) return;
+    DOM.historyDateList.innerHTML = '';
 
-    if (isRenderingList) {
-        renderListQueue = { mode, selectedKey };
+    await syncTodayToHistory(); 
+    augmentHistoryWithPersistentLeave(State.allHistoryData, State.persistentLeaveSchedule);
+
+    const filteredData = (State.context.historyStartDate || State.context.historyEndDate)
+        ? State.allHistoryData.filter(d => {
+            const date = d.id;
+            const start = State.context.historyStartDate;
+            const end = State.context.historyEndDate;
+            if (start && end) return date >= start && date <= end;
+            if (start) return date >= start;
+            if (end) return date <= end;
+            return true;
+        })
+        : State.allHistoryData;
+
+    let keys = [];
+
+    if (mode === 'day') {
+        keys = filteredData.map(d => d.id);
+    } else if (mode === 'week') {
+        const weekSet = new Set(filteredData.map(d => getWeekOfYear(new Date(d.id + "T00:00:00"))));
+        keys = Array.from(weekSet).sort((a, b) => b.localeCompare(a));
+    } else if (mode === 'month') {
+        const monthSet = new Set(filteredData.map(d => d.id.substring(0, 7)));
+        keys = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
+    } else if (mode === 'year') {
+        const yearSet = new Set(filteredData.map(d => d.id.substring(0, 4)));
+        keys = Array.from(yearSet).sort((a, b) => b.localeCompare(a));
+    }
+
+    if (keys.length === 0) {
+        DOM.historyDateList.innerHTML = '<li><div class="p-4 text-center text-gray-500">데이터 없음</div></li>';
         return;
     }
-    isRenderingList = true;
 
-    try {
-        await syncTodayToHistory(); 
-        augmentHistoryWithPersistentLeave(State.allHistoryData, State.persistentLeaveSchedule);
-
-        const filteredData = (State.context.historyStartDate || State.context.historyEndDate)
-            ? State.allHistoryData.filter(d => {
-                const date = d.id;
-                const start = State.context.historyStartDate;
-                const end = State.context.historyEndDate;
-                if (start && end) return date >= start && date <= end;
-                if (start) return date >= start;
-                if (end) return date <= end;
-                return true;
-            })
-            : State.allHistoryData;
-
-        let keys = [];
+    keys.forEach(key => {
+        const li = document.createElement('li');
+        let hasWarning = false;
+        let titleAttr = '';
 
         if (mode === 'day') {
-            keys = filteredData.map(d => d.id);
-        } else if (mode === 'week') {
-            const weekSet = new Set(filteredData.map(d => getWeekOfYear(new Date(d.id + "T00:00:00"))));
-            keys = Array.from(weekSet).sort((a, b) => b.localeCompare(a));
-        } else if (mode === 'month') {
-            const monthSet = new Set(filteredData.map(d => d.id.substring(0, 7)));
-            keys = Array.from(monthSet).sort((a, b) => b.localeCompare(a));
-        } else if (mode === 'year') {
-            const yearSet = new Set(filteredData.map(d => d.id.substring(0, 4)));
-            keys = Array.from(yearSet).sort((a, b) => b.localeCompare(a));
-        }
-
-        keys = [...new Set(keys)];
-
-        if (keys.length === 0) {
-            DOM.historyDateList.innerHTML = '<li><div class="p-4 text-center text-gray-500 text-sm">데이터 없음</div></li>';
-        } else {
-            const groupedKeys = {};
-            keys.forEach(key => {
-                let groupName = '전체 이력';
-                if (mode === 'day') {
-                    groupName = `${key.substring(0, 4)}년 ${key.substring(5, 7)}월`;
-                } else if (mode === 'week' || mode === 'month') {
-                    groupName = `${key.substring(0, 4)}년`;
-                }
-                
-                if (!groupedKeys[groupName]) groupedKeys[groupName] = [];
-                groupedKeys[groupName].push(key);
-            });
-
-            let htmlContent = '';
-            let isFirstGroup = true;
-
-            let targetGroupName = null;
-            if (selectedKey) {
-                for (const [gName, gKeys] of Object.entries(groupedKeys)) {
-                    if (gKeys.includes(selectedKey)) {
-                        targetGroupName = gName;
-                        break;
-                    }
+            const dayData = filteredData.find(d => d.id === key);
+            if (dayData) {
+                const missingTasksList = checkMissingQuantities(dayData);
+                hasWarning = missingTasksList.length > 0;
+                if (hasWarning) {
+                    titleAttr = ` title="처리량 누락: ${missingTasksList.join(', ')}"`;
                 }
             }
-
-            for (const [groupName, groupItemKeys] of Object.entries(groupedKeys)) {
-                const isOpen = targetGroupName ? (groupName === targetGroupName) : isFirstGroup;
-                
-                // ✨ 수정 포인트: 좁은 영역에서도 폴더명 텍스트가 줄바꿈되거나 잘리지 않도록 (shrink-0, whitespace-nowrap) 강력 적용
-                htmlContent += `
-                <li class="mb-2">
-                    <button class="accordion-toggle w-full flex justify-between items-center py-2.5 px-3 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm focus:outline-none shrink-0">
-                        <div class="flex items-center gap-2 shrink-0">
-                            <span class="folder-icon text-[15px]">${isOpen ? '📂' : '📁'}</span>
-                            <span class="font-bold text-[14px] text-gray-700 dark:text-gray-200 whitespace-nowrap tracking-tight shrink-0">${groupName}</span>
-                        </div>
-                        <svg class="w-4 h-4 text-gray-400 transform transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                    </button>
-                    <ul class="accordion-content mt-1 space-y-0.5 overflow-hidden transition-all duration-300 ${isOpen ? 'block' : 'hidden'} border-l-2 border-gray-100 dark:border-gray-700 ml-2 pl-1.5">
-                `;
-
-                groupItemKeys.forEach(key => {
-                    let hasWarning = false;
-                    let titleAttr = '';
-
-                    if (mode === 'day') {
-                        const dayData = filteredData.find(d => d.id === key);
-                        if (dayData) {
-                            const missingTasksList = checkMissingQuantities(dayData);
-                            hasWarning = missingTasksList.length > 0;
-                            if (hasWarning) {
-                                titleAttr = ` title="처리량 누락: ${missingTasksList.join(', ')}"`;
-                            }
-                        }
-                    }
-                    
-                    // ✨ 요일 표시 로직 
-                    let displayKey = key;
-                    if (mode === 'day') {
-                        const d = new Date(key);
-                        const days = ['일', '월', '화', '수', '목', '금', '토'];
-                        const dayStr = isNaN(d.getDay()) ? '' : ` (${days[d.getDay()]})`;
-                        displayKey = `${key}${dayStr}`;
-                    }
-
-                    const isSelected = key === selectedKey;
-                    const baseClass = isSelected 
-                        ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400 font-bold' 
-                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50';
-
-                    // ✨ 수정 포인트: 좁은 영역에서도 날짜와 요일 텍스트가 줄바꿈되거나 잘리지 않도록 (shrink-0, whitespace-nowrap) 강력 적용
-                    htmlContent += `
-                        <li>
-                            <button data-key="${key}" class="history-date-btn w-full text-left py-2 px-2.5 text-[13px] rounded-md transition-colors focus:outline-none flex items-center gap-2 shrink-0 ${baseClass} ${hasWarning ? 'warning-no-quantity' : ''}"${titleAttr}>
-                                <span class="inline-block w-1.5 h-1.5 rounded-full ${hasWarning ? 'bg-red-500' : (isSelected ? 'bg-blue-500' : 'bg-gray-300 dark:bg-gray-600')} shrink-0"></span>
-                                <span class="whitespace-nowrap tracking-tight shrink-0">${displayKey}</span>
-                            </button>
-                        </li>`;
-                });
-
-                htmlContent += `</ul></li>`;
-                isFirstGroup = false;
-            }
-
-            DOM.historyDateList.innerHTML = htmlContent;
-
-            // 아코디언 토글 이벤트 부착
-            const toggleBtns = DOM.historyDateList.querySelectorAll('.accordion-toggle');
-            toggleBtns.forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const content = this.nextElementSibling;
-                    const icon = this.querySelector('svg');
-                    const folderIcon = this.querySelector('.folder-icon');
-                    
-                    if (content.classList.contains('hidden')) {
-                        content.classList.remove('hidden');
-                        icon.classList.add('rotate-180');
-                        if(folderIcon) folderIcon.textContent = '📂';
-                    } else {
-                        content.classList.add('hidden');
-                        icon.classList.remove('rotate-180');
-                        if(folderIcon) folderIcon.textContent = '📁';
-                    }
-                });
-            });
         }
 
-        let targetBtn = null;
+        li.innerHTML = `<button data-key="${key}" class="history-date-btn w-full text-left p-3 rounded-md hover:bg-blue-100 transition focus:outline-none focus:ring-2 focus:ring-blue-300 ${hasWarning ? 'warning-no-quantity' : ''}"${titleAttr}>${key}</button>`;
+        DOM.historyDateList.appendChild(li);
+    });
+
+    // ✅ [수정] 지정된 키가 있으면 해당 버튼 클릭, 없으면 첫 번째 버튼 클릭
+    let targetBtn = null;
+    if (selectedKey) {
+        targetBtn = DOM.historyDateList.querySelector(`button[data-key="${selectedKey}"]`);
+    }
+    
+    if (!targetBtn) {
+        targetBtn = DOM.historyDateList.firstChild?.querySelector('button');
+    }
+
+    if (targetBtn) {
+        targetBtn.click();
+        // 선택된 항목으로 스크롤 이동 (사용자 편의)
         if (selectedKey) {
-            targetBtn = DOM.historyDateList.querySelector(`button[data-key="${selectedKey}"]`);
-        }
-        if (!targetBtn) {
-            targetBtn = DOM.historyDateList.querySelector('.history-date-btn');
-        }
-
-        if (targetBtn) {
-            targetBtn.click();
-            if (selectedKey) {
-                targetBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
-            }
-        }
-
-    } finally {
-        isRenderingList = false;
-        if (renderListQueue) {
-            const nextJob = renderListQueue;
-            renderListQueue = null;
-            renderHistoryDateListByMode(nextJob.mode, nextJob.selectedKey);
+            targetBtn.scrollIntoView({ block: 'center', behavior: 'smooth' });
         }
     }
 };
 
+/**
+ * 이력 보기 내의 뷰(일/주/월 리포트 등) 전환을 처리합니다.
+ * ✅ [수정] preserveKey 파라미터 추가
+ */
 export const switchHistoryView = async (view, preserveKey = null) => {
     const allViews = [
         document.getElementById('history-daily-view'),
@@ -273,6 +181,7 @@ export const switchHistoryView = async (view, preserveKey = null) => {
     ];
     allViews.forEach(v => v && v.classList.add('hidden'));
 
+    // 탭 버튼 스타일 리셋
     const resetTabs = (container) => {
         if (container) {
             container.querySelectorAll('button').forEach(btn => {
@@ -347,6 +256,7 @@ export const switchHistoryView = async (view, preserveKey = null) => {
             break;
     }
 
+    // ✅ [수정] 리스트 렌더링 시 보존할 키 전달
     await renderHistoryDateListByMode(listMode, preserveKey);
 
     if (viewToShow) viewToShow.classList.remove('hidden');
@@ -356,6 +266,9 @@ export const switchHistoryView = async (view, preserveKey = null) => {
     }
 };
 
+/**
+ * 처리량 수정 모달을 엽니다.
+ */
 export const openHistoryQuantityModal = (dateKey) => {
     const todayDateString = getTodayDateString();
 
@@ -404,21 +317,18 @@ export const openHistoryQuantityModal = (dateKey) => {
 
             showToast(`${dateKey}의 처리량이 수정되었습니다.`);
 
-            sessionStorage.removeItem('historyDataCache');
-            sessionStorage.removeItem('historyDataCacheTime');
-            sessionStorage.removeItem('unverifiedDataCache');
-            sessionStorage.removeItem('unverifiedDataCacheTime');
-
             if (dateKey === getTodayDateString()) {
                  const dailyDocRef = getDailyDocRef();
                  await setDoc(dailyDocRef, { taskQuantities: newQuantities, confirmedZeroTasks: confirmedZeroTasks }, { merge: true });
             }
 
             if (DOM.historyModal && !DOM.historyModal.classList.contains('hidden')) {
+                // 현재 보고 있는 뷰 갱신
                 const activeSubTabBtn = document.querySelector('#history-tabs button.font-semibold')
                                      || document.querySelector('#report-tabs button.font-semibold');
                 const currentView = activeSubTabBtn ? activeSubTabBtn.dataset.view : 'daily';
                 
+                // ✅ [수정] 수정 후에도 현재 날짜 선택 유지
                 await switchHistoryView(currentView, dateKey);
             }
 
@@ -435,7 +345,16 @@ export const openHistoryQuantityModal = (dateKey) => {
     if (DOM.quantityModal) DOM.quantityModal.classList.remove('hidden');
 };
 
+/**
+ * 이력 삭제 요청을 처리합니다. (실제 삭제는 Confirmation 모달에서 수행)
+ */
 export const requestHistoryDeletion = (dateKey) => {
+    // ... (이전과 동일, 삭제 대상 안내 메시지 로직) ...
+    // (listeners-history.js 파일 내부에 로직이 있으므로 여기서는 모달 호출만 담당)
+    // 하지만 실제 로직은 listeners-history.js에서 처리하고, 여기 있는 함수는 
+    // 다른 곳에서 호출하기 위한 껍데기 역할을 하거나, 중복될 수 있음.
+    // 현재 listeners-history.js가 메인이므로 여기서는 DOM 제어만 수행.
+    
     State.context.historyKeyToDelete = dateKey;
     const activeTab = State.context.activeMainHistoryTab || 'work';
     let targetName = '모든';

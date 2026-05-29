@@ -1,5 +1,7 @@
 // === ui.js (파일 분리 후 인덱스 역할) ===
 
+// ⛔️ [삭제] 기존 함수들 (모두 ui-main.js, ui-history.js, ui-modals.js로 이동)
+
 // ✅ [유지] 앱 전역에서 사용하는 차트 인스턴스 (app.js에서 사용)
 let trendCharts = {};
 export { trendCharts }; // ❗ app.js에서 trendCharts를 직접 수정하므로 export 필요
@@ -88,6 +90,11 @@ export const taskTitleColors = {
     'default': 'text-blue-700'
 };
 
+// ⛔️ [삭제] ---
+// ⛔️ getDiffHtmlForMetric 함수 정의 (약 40줄)가 여기서 삭제되었습니다.
+// ⛔️ (ui-history-reports.js로 완전히 이동했습니다.)
+// ⛔️ ---
+
 
 // --- 1. Main UI 함수들 가져오기 및 내보내기 ---
 import {
@@ -96,8 +103,7 @@ import {
     renderRealtimeStatus,
     renderCompletedWorkLog,
     renderDashboardLayout,
-    updateSummary,
-    applyDynamicSidebar // ✨ 신규 임포트
+    updateSummary
 } from './ui-main.js';
 
 export {
@@ -106,8 +112,7 @@ export {
     renderRealtimeStatus,
     renderCompletedWorkLog,
     renderDashboardLayout,
-    updateSummary,
-    applyDynamicSidebar // ✨ 신규 익스포트
+    updateSummary
 };
 
 // --- 2. History UI 함수들 가져오기 및 내보내기 ---
@@ -118,6 +123,7 @@ import {
     renderAttendanceWeeklyHistory,
     renderAttendanceMonthlyHistory,
     renderTrendAnalysisCharts,
+    // ✅ [추가] 리포트 렌더링 함수
     renderReportDaily,
     renderReportWeekly,
     renderReportMonthly,
@@ -131,11 +137,15 @@ export {
     renderAttendanceWeeklyHistory,
     renderAttendanceMonthlyHistory,
     renderTrendAnalysisCharts,
+    // ✅ [추가] 리포트 렌더링 함수
     renderReportDaily,
     renderReportWeekly,
     renderReportMonthly,
     renderReportYearly
+    // ❗참고: renderSummaryView, renderAggregatedAttendanceSummary 등은
+    // ui-history.js 내부에서만 쓰이므로 여기서 내보낼 필요가 없습니다.
 };
+
 
 // --- 3. Modal UI 함수들 가져오기 및 내보내기 ---
 import {

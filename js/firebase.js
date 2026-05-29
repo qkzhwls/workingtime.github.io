@@ -6,14 +6,14 @@ import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-aut
 
 // 1. Firebase 설정 (config.js에서 이동)
 export const firebaseConfig = {
-    apiKey: "AIzaSyBxmX7fEISWYs_JGktAZrFjdb8cb_ZcmSY",
-    authDomain: "work-tool-e2943.firebaseapp.com",
-    projectId: "work-tool-e2943",
-    storageBucket: "work-tool-e2943.appspot.com",
-    messagingSenderId: "133294945093",
-    appId: "1:133294945093:web:cde90aab6716127512842c",
-    measurementId: "G-ZZQLKB0057"
-};
+    apiKey: "AIzaSyAguJOtoqoSipA-wXH3jSYX2yH1RX7tQQw",
+    authDomain: "location-e2ff9.firebaseapp.com",
+    projectId: "location-e2ff9",
+    storageBucket: "location-e2ff9.firebasestorage.app",
+    messagingSenderId: "559399838918",
+    appId: "1:559399838918:web:91c3bbf98adb92d2a863c7",
+    measurementId: "G-RTBSE9SN1Q"
+  };
 
 // 2. 앱 ID
 export const APP_ID = 'team-work-logger-v2';
@@ -38,4 +38,5 @@ export const initializeFirebase = () => {
 
 // 5. 초기화된 인스턴스 내보내기
 // (initializeFirebase가 호출된 후에 이 변수들이 채워집니다)
+
 export { db, auth };

@@ -219,6 +219,8 @@ export const adminClockInBtn = document.getElementById('admin-clock-in-btn');
 export const adminClockOutBtn = document.getElementById('admin-clock-out-btn');
 export const adminCancelClockOutBtn = document.getElementById('admin-cancel-clock-out-btn');
 export const openLeaveModalBtn = document.getElementById('open-leave-modal-btn');
+
+// ✅ [추가] 근태 취소 버튼 요소
 export const adminCancelLeaveBtn = document.getElementById('admin-cancel-leave-btn');
 export const adminCancelLeaveText = document.getElementById('admin-cancel-leave-text');
 
@@ -359,25 +361,3 @@ export const editInspCheckDye = document.getElementById('edit-insp-check-dye');
 
 export const deleteInspLogBtn = document.getElementById('delete-insp-log-btn');
 export const saveInspLogBtn = document.getElementById('save-insp-log-btn');
-
-// [신규] 전량 검수 매니저 관련 요소
-export const totalInspModal = document.getElementById('total-inspection-manager-modal');
-export const totalInspProductName = document.getElementById('total-insp-product-name');
-export const totalInspSearchBtn = document.getElementById('total-insp-search-btn');
-export const totalInspContentArea = document.getElementById('total-insp-content-area');
-export const totalInspReason = document.getElementById('total-insp-reason');
-export const totalInspTotalStock = document.getElementById('total-insp-total-stock');
-export const totalInspAccumulated = document.getElementById('total-insp-accumulated');
-export const totalInspTodayNormal = document.getElementById('total-insp-today-normal');
-export const totalInspTodayDefective = document.getElementById('total-insp-today-defective');
-export const totalInspRemaining = document.getElementById('total-insp-remaining');
-export const totalInspSaveBtn = document.getElementById('total-insp-save-btn');
-
-// ✅ [신규] 샘플 -> 전량 전환용 버튼 및 전량 검수 상세 필드 추가
-export const inspSwitchToTotalBtn = document.getElementById('insp-switch-to-total-btn');
-export const totalInspCode = document.getElementById('total-insp-code');
-export const totalInspOption = document.getElementById('total-insp-option');
-export const totalInspSupplier = document.getElementById('total-insp-supplier');
-export const totalInspLocation = document.getElementById('total-insp-location');
-export const totalInspInboundDate = document.getElementById('total-insp-inbound-date');
-export const totalInspBackBtn = document.getElementById('total-insp-back-btn');

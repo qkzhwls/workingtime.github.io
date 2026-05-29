@@ -45,22 +45,7 @@ const getFilterDropdown = (target, key, currentFilterValue, options = []) => {
     `;
 };
 
-// ✅ [수정] 상단 KPI 카드 - COQ 비율 툴팁 추가
 const _generateKPIHTML = (tKPIs, pKPIs) => {
-    const coqTooltip = `<span class="group relative ml-1 inline-block cursor-help text-red-400 hover:text-red-600 transition-colors">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 inline">
-          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3 3 0 112.871 5.026v.345a.75.75 0 01-1.5 0v-.5c0-.72.57-1.172 1.081-1.287A1.5 1.5 0 108.94 6.94zM10 15a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
-        </svg>
-        <span class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition bg-gray-800 text-white text-xs rounded-lg p-3 absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 break-keep leading-relaxed text-left shadow-xl pointer-events-none" data-html2canvas-ignore="true">
-            <strong class="block mb-1 text-yellow-300 text-sm font-bold">💡 COQ (품질비용) 비율</strong>
-            <span class="block mb-2 font-mono bg-gray-700 p-1.5 rounded text-center font-bold tracking-wide text-xs">
-                (품질관리 인건비 ÷ 총 인건비) × 100
-            </span>
-            <span class="text-gray-200 block">전체 인건비 중에서 검수, 재작업, 불량 처리 등 <strong>품질을 유지하거나 실패를 복구하는 데 쓰인 인건비</strong>의 비율입니다. 수치가 낮을수록 비용 효율이 높습니다.</span>
-            <svg class="absolute text-gray-800 h-2 w-full left-0 top-full" x="0px" y="0px" viewBox="0 0 255 255" xml:space="preserve"><polygon class="fill-current" points="0,0 127.5,127.5 255,0"/></svg>
-        </span>
-    </span>`;
-
     return `
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
             <div class="bg-white p-3 rounded-lg shadow-sm">
@@ -99,81 +84,12 @@ const _generateKPIHTML = (tKPIs, pKPIs) => {
                 ${getDiffHtmlForMetric('nonWorkTime', tKPIs.nonWorkMinutes, pKPIs.nonWorkMinutes)}
             </div>
             <div class="bg-white p-3 rounded-lg shadow-sm border-2 border-red-200 cursor-pointer hover:bg-red-50 transition" data-action="show-coq-modal">
-                <div class="text-xs text-red-600 font-semibold flex items-center justify-center">
-                    COQ 비율 (총 ${Math.round(tKPIs.totalQualityCost).toLocaleString()}원)
-                    ${coqTooltip}
-                </div>
+                <div class="text-xs text-red-600 font-semibold">COQ 비율 (총 ${Math.round(tKPIs.totalQualityCost).toLocaleString()}원) ⓘ</div>
                 <div class="text-xl font-bold text-red-600">${tKPIs.coqPercentage.toFixed(1)} %</div>
                 ${getDiffHtmlForMetric('coqPercentage', tKPIs.coqPercentage, pKPIs.coqPercentage)}
             </div>
         </div>
     `;
-};
-
-// ✅ [신규] 인당 생산성 지표 카드 렌더러 (설명 툴팁 아이콘 추가)
-const _generateProductivityPerPersonHTML = (tMetrics, pMetrics) => {
-    const getTaskProd = (aggr, taskName) => {
-        if (!aggr || !aggr.taskSummary) return 0;
-        let task = aggr.taskSummary[taskName];
-        if (!task && taskName === '중국제작(입고)') {
-            task = aggr.taskSummary['중국제작입고'] || aggr.taskSummary['중국제작'];
-        }
-        if (task && task.duration > 0) {
-            // 인당 시간당 생산성 (총 개수 / 총 시간 * 60)
-            return (task.quantity / task.duration) * 60;
-        }
-        return 0;
-    };
-
-    const tOverall = tMetrics.kpis.totalDuration > 0 ? (tMetrics.kpis.totalQuantity / tMetrics.kpis.totalDuration) * 60 : 0;
-    const pOverall = pMetrics?.kpis?.totalDuration > 0 ? (pMetrics.kpis.totalQuantity / pMetrics.kpis.totalDuration) * 60 : 0;
-
-    const tasks = [
-        { label: '종합 (전체)', t: tOverall, p: pOverall },
-        { label: '국내배송', t: getTaskProd(tMetrics.aggr, '국내배송'), p: getTaskProd(pMetrics?.aggr, '국내배송') },
-        { label: '중국제작(입고)', t: getTaskProd(tMetrics.aggr, '중국제작(입고)'), p: getTaskProd(pMetrics?.aggr, '중국제작(입고)') },
-        { label: '직진배송', t: getTaskProd(tMetrics.aggr, '직진배송'), p: getTaskProd(pMetrics?.aggr, '직진배송') }
-    ];
-
-    // 💡 계산식 및 의미를 설명하는 툴팁 HTML 정의
-    const infoTooltip = `<span class="group relative ml-2 inline-block cursor-pointer text-indigo-500 hover:text-indigo-700 transition-colors">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-6 h-6 inline">
-          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3 3 0 112.871 5.026v.345a.75.75 0 01-1.5 0v-.5c0-.72.57-1.172 1.081-1.287A1.5 1.5 0 108.94 6.94zM10 15a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
-        </svg>
-        <span class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition bg-gray-800 text-white text-xs rounded-lg p-4 absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 break-keep leading-relaxed text-left shadow-xl pointer-events-none" data-html2canvas-ignore="true">
-            <strong class="block mb-2 text-yellow-300 text-sm font-bold">💡 인당 생산성 (UPH)</strong>
-            <span class="block mb-3 font-mono bg-gray-700 p-2 rounded text-center font-bold tracking-wide text-sm">
-                (총 수량 ÷ 총 소요시간) × 60
-            </span>
-            <ul class="list-disc pl-4 space-y-1.5 text-gray-200">
-                <li><span class="text-white font-semibold">총 소요시간:</span> 투입된 모든 작업자의 분(Minute) 단위 누적 업무 시간의 합</li>
-                <li><span class="text-white font-semibold">의미:</span> 1명의 작업자가 1시간 동안 평균적으로 몇 개를 처리했는지 나타내는 체력 지표</li>
-            </ul>
-            <svg class="absolute text-gray-800 h-2 w-full left-0 top-full" x="0px" y="0px" viewBox="0 0 255 255" xml:space="preserve"><polygon class="fill-current" points="0,0 127.5,127.5 255,0"/></svg>
-        </span>
-    </span>`;
-
-    let html = `
-        <div class="bg-white p-5 rounded-lg shadow-sm">
-            <h3 class="text-lg font-bold mb-4 text-gray-800 flex items-center">
-                🧑‍💻 주요 업무 인당 생산성
-                ${infoTooltip}
-            </h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-    `;
-
-    tasks.forEach(task => {
-        html += `
-            <div class="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100 shadow-sm relative group">
-                <div class="text-sm font-bold text-gray-700 mb-1">${task.label}</div>
-                <div class="text-2xl font-extrabold text-indigo-700">${task.t.toFixed(1)} <span class="text-sm font-medium text-gray-500">개/H</span></div>
-                ${getDiffHtmlForMetric('overallAvgThroughput', task.t, task.p)}
-            </div>
-        `;
-    });
-
-    html += `</div></div>`;
-    return html;
 };
 
 const _renderTooltip = (metricKey) => {
@@ -666,7 +582,8 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="workDays">진행 일수 ${getSortIcon(tSort.key, tSort.dir, 'workDays')}</th>
             
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgThroughput">분당 처리량 ${getSortIcon(tSort.key, tSort.dir, 'avgThroughput')}</th>
-            <th class="px-4 py-2">기간 평균 속도</th> <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgCostPerItem">개당 처리비용 ${getSortIcon(tSort.key, tSort.dir, 'avgCostPerItem')}</th>
+            <th class="px-4 py-2">표준 속도 (Top3)</th>
+            <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgCostPerItem">개당 처리비용 ${getSortIcon(tSort.key, tSort.dir, 'avgCostPerItem')}</th>
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgDailyStaff">평균 투입인원 ${getSortIcon(tSort.key, tSort.dir, 'avgDailyStaff')}</th>
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgStaff">총 인원 ${getSortIcon(tSort.key, tSort.dir, 'avgStaff')}</th>
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgTime">평균 시간 ${getSortIcon(tSort.key, tSort.dir, 'avgTime')}</th>
@@ -821,8 +738,6 @@ export const renderGenericReport = (targetId, title, tData, tMetrics, pMetrics, 
 
     let html = `<div class="space-y-6">${headerHtml}`;
     html += _generateKPIHTML(tMetrics.kpis, pMetrics.kpis);
-    // ✅ [신규] 인당 생산성 (시간당 UPH) 영역 추가
-    html += _generateProductivityPerPersonHTML(tMetrics, pMetrics);
     html += _generateProductivityAnalysisHTML(tMetrics, pMetrics, periodText, benchmarkOEE);
     html += _generateRevenueAnalysisHTML(periodText, tMetrics.revenueAnalysis, tMetrics.revenueTrend, currentRevenue, prevRevenue);
     html += _generateInsightsHTML(tMetrics.aggr, pMetrics.aggr, appConfig, periodText);
