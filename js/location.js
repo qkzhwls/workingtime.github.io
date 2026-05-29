@@ -5511,12 +5511,19 @@ window.showPairRecommendation = function() {
     window._v44_calculateCurrentStock = function() {
         let stock3F = 0;
         const codes3F = new Set();
+        // v4.4 추가: 2층 창고재고 SKU (stock2f > 0인 셀의 고유 상품코드)
+        const codes2층 = new Set();
         try {
             (originalData || []).forEach(loc => {
                 const s = Number(loc.stock || 0);
                 if (!isNaN(s) && s > 0) stock3F += s;
                 const c = (loc.code || '').toString().trim();
                 if (c && c !== loc.id) codes3F.add(c);
+                // 2층창고재고 값이 0이 아닌 셀의 상품코드 모음
+                const s2 = Number(loc.stock2f || 0);
+                if (!isNaN(s2) && s2 > 0 && c && c !== loc.id) {
+                    codes2층.add(c);
+                }
             });
         } catch (e) {
             console.warn('[v4.4] 3층 재고 집계 오류:', e);
@@ -5531,6 +5538,7 @@ window.showPairRecommendation = function() {
             stock2F: stock2F,
             sku3F: codes3F.size,
             sku2F: sku2F,
+            sku2층: codes2층.size, // v4.4 추가: 2층 창고재고 SKU
             date: window._v44_getTodayDateString()
         };
     };
@@ -5728,7 +5736,9 @@ window.showPairRecommendation = function() {
         
         const sku3F = currentStock.sku3F;
         const sku2F = currentStock.sku2F;
-        const skuTotal = sku3F + sku2F;
+        const sku2층 = currentStock.sku2층 || 0; // v4.4: 2층 창고재고 SKU
+        // v4.4: 총 SKU = 3층 SKU + 2층 SKU (2F SKU는 별도 표시)
+        const skuTotal = sku3F + sku2층;
         
         // 카드 렌더링 헬퍼
         const card = (icon, title, value, sub, color) => {
@@ -5747,12 +5757,14 @@ window.showPairRecommendation = function() {
         };
         
         // 첫째 줄: 지정 + SKU
+        // v4.4: 순서 = 당일지정 / 선지정 / 3층 SKU / 2층 SKU / 2F SKU / 총 SKU
         let cardsRow1 = '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">';
         cardsRow1 += card('📌', '당일지정수량', codeTagCount.toLocaleString());
         cardsRow1 += card('🔒', '선지정수량', preAssignCount.toLocaleString());
         cardsRow1 += card('📦', '3층 SKU', sku3F.toLocaleString(), '고유 상품코드');
-        cardsRow1 += card('🏬', '2F SKU', sku2F.toLocaleString(), '2F 로케이션');
-        cardsRow1 += card('🎯', '총 SKU', skuTotal.toLocaleString(), '3층 + 2F');
+        cardsRow1 += card('🏬', '2층 SKU', sku2층.toLocaleString(), '2층창고재고 보유');
+        cardsRow1 += card('🏷️', '2F SKU', sku2F.toLocaleString(), '2F 로케이션 지정');
+        cardsRow1 += card('🎯', '총 SKU', skuTotal.toLocaleString(), '3층 + 2층');
         cardsRow1 += '</div>';
         
         // 둘째 줄: 재고회전율
