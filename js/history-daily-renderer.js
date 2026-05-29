@@ -1,6 +1,6 @@
 // === js/history-daily-renderer.js ===
 // 설명: 이력 보기의 '일별 상세' 탭 화면을 렌더링하는 모듈입니다.
-// (수정됨: 현황판과 동일한 기준으로 유효 멤버 필터링 강화, 시스템 계정 제외)
+// (수정됨: 현황판과 동일한 기준으로 유효 멤버 필터링 강화, 시스템 계정 제외 및 타입 에러 방어 적용)
 
 import * as State from './state.js';
 import { 
@@ -35,40 +35,49 @@ export const renderHistoryDetail = (dateKey, previousDayData = null) => {
         }
     });
     
-    // ✅ [수정] 2. 근무 인원 계산 (엄격한 필터링 적용)
+    // ✅ [수정] 2. 근무 인원 계산 (엄격한 필터링 및 데이터 타입 방어)
     const attendanceMap = data.dailyAttendance || {};
     const isToday = (dateKey === getTodayDateString());
     
-    // 시스템 계정 (관리자 등) 목록 가져오기
-    const systemAccounts = new Set((State.appConfig.systemAccounts || []).map(s => s.trim()));
+    // 시스템 계정 (관리자 등) 목록 가져오기 - 에러 방지 로직 적용
+    const systemAccounts = new Set(
+        (State.appConfig.systemAccounts || [])
+            .map(s => {
+                if (!s) return '';
+                // 문자열이면 그대로 trim, 객체(Object)면 name 속성을 찾아 trim, 그 외는 문자열로 변환 후 trim
+                return typeof s === 'string' ? s.trim() : (s.name ? String(s.name).trim() : String(s).trim());
+            })
+            .filter(Boolean)
+    );
 
     // 유효한 멤버 목록 생성 (현황판과 동일한 기준)
-    // - 오늘: 현재 앱 상태(State.appConfig)의 실시간 목록 사용
-    // - 과거: 당시 저장된 이력 데이터(data) 사용
     let validMemberNames = new Set();
 
     if (isToday) {
         // 오늘: 설정에 있는 정직원 + 현재 등록된 알바
         (State.appConfig.teamGroups || []).forEach(g => {
-            g.members.forEach(m => validMemberNames.add(m.trim()));
+            (g.members || []).forEach(m => {
+                if (m) validMemberNames.add(typeof m === 'string' ? m.trim() : String(m).trim());
+            });
         });
         (State.appState.partTimers || []).forEach(p => {
-            if (p.name) validMemberNames.add(p.name.trim());
+            if (p && p.name) validMemberNames.add(typeof p.name === 'string' ? p.name.trim() : String(p.name).trim());
         });
     } else {
-        // 과거: 설정에 있는 정직원(과거라 변경됐을 수 있으니 이력 우선이 맞으나 팀원은 보통 설정 기준) + 이력에 저장된 알바
-        // (과거 이력의 경우, 퇴사자도 기록엔 남아있어야 하므로 이력 데이터의 partTimers를 신뢰)
+        // 과거: 설정에 있는 정직원 + 이력에 저장된 알바
         (State.appConfig.teamGroups || []).forEach(g => {
-            g.members.forEach(m => validMemberNames.add(m.trim()));
+            (g.members || []).forEach(m => {
+                if (m) validMemberNames.add(typeof m === 'string' ? m.trim() : String(m).trim());
+            });
         });
         partTimersFromHistory.forEach(p => {
-            if (p.name) validMemberNames.add(p.name.trim());
+            if (p && p.name) validMemberNames.add(typeof p.name === 'string' ? p.name.trim() : String(p.name).trim());
         });
     }
 
     const clockedInMembers = new Set(
         Object.keys(attendanceMap).filter(rawName => {
-            const member = rawName.trim();
+            const member = rawName ? String(rawName).trim() : '';
             if (!member) return false;
 
             // 1) 시스템 계정 제외
@@ -78,7 +87,6 @@ export const renderHistoryDetail = (dateKey, previousDayData = null) => {
             if (!validMemberNames.has(member)) return false;
 
             // 3) 출근(active) 또는 퇴근(returned) 상태인지 확인
-            // (주의: 현황판은 active만 세지만, 이력은 '다녀간 사람'을 세야 하므로 returned도 포함)
             const status = attendanceMap[rawName].status;
             return status === 'active' || status === 'returned';
         })
@@ -87,7 +95,7 @@ export const renderHistoryDetail = (dateKey, previousDayData = null) => {
     // 출퇴근 기록이 없는 과거 데이터 호환성 (유효 멤버만 카운트)
     if (Object.keys(attendanceMap).length === 0 && records.length > 0) {
          records.forEach(r => {
-             const mName = r.member ? r.member.trim() : '';
+             const mName = r.member ? String(r.member).trim() : '';
              if (mName && validMemberNames.has(mName) && !systemAccounts.has(mName)) {
                  clockedInMembers.add(mName);
              }

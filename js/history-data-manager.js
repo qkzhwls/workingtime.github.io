@@ -3,10 +3,24 @@ import * as State from './state.js';
 import { getTodayDateString, getCurrentTime, calcElapsedMinutes, showToast } from './utils.js';
 import {
     doc, setDoc, getDoc, collection, getDocs, deleteDoc,
-    query, where, writeBatch, updateDoc, increment
+    query, where, writeBatch, updateDoc, increment, documentId
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-// --- Helper Functions ---
+let isHistoryCached = false;
+let cachedUnverifiedDates = null;
+let lastUnverifiedCheckTime = 0;
+
+let historyFetchPromise = null;
+let unverifiedFetchPromise = null;
+
+// ✨ 데이터가 변경되었을 때 로컬 캐시를 초기화하는 헬퍼 함수 (읽기 요금 방어용)
+const clearLocalCache = () => {
+    sessionStorage.removeItem('historyDataCache');
+    sessionStorage.removeItem('historyDataCacheTime');
+    sessionStorage.removeItem('unverifiedDataCache');
+    sessionStorage.removeItem('unverifiedDataCacheTime');
+};
+
 export const getWorkRecordsCollectionRef = () => {
     const today = getTodayDateString();
     return collection(State.db, 'artifacts', 'team-work-logger-v2', 'daily_data', today, 'workRecords');
@@ -21,10 +35,8 @@ export const syncTodayToHistory = async () => {
     const now = getCurrentTime();
 
     try {
-        const workRecordsColRef = getWorkRecordsCollectionRef();
-        const recordsSnapshot = await getDocs(workRecordsColRef);
-        const liveWorkRecords = recordsSnapshot.docs.map(doc => {
-            const data = doc.data();
+        const liveWorkRecords = (State.appState.workRecords || []).map(record => {
+            const data = { ...record };
             if (data.status === 'ongoing' || data.status === 'paused') {
                 data.duration = calcElapsedMinutes(data.startTime, now, data.pauses);
                 data.endTime = now;
@@ -32,56 +44,45 @@ export const syncTodayToHistory = async () => {
             return data;
         });
 
-        const dailyDocSnap = await getDoc(getDailyDocRef());
-        const dailyData = dailyDocSnap.exists() ? dailyDocSnap.data() : {};
-
-        const historyDocRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'history', todayKey);
-        const historyDocSnap = await getDoc(historyDocRef);
-        const historyData = historyDocSnap.exists() ? historyDocSnap.data() : {};
-
-        let finalWorkRecords = liveWorkRecords;
-        let finalDailyData = dailyData;
+        const idx = State.allHistoryData.findIndex(d => d.id === todayKey);
+        const existingHistory = idx > -1 ? State.allHistoryData[idx] : null;
 
         const isLiveEmpty = liveWorkRecords.length === 0;
-        const hasHistoryData = historyData.workRecords && historyData.workRecords.length > 0;
+        const isLiveQtyEmpty = !State.appState.taskQuantities || Object.keys(State.appState.taskQuantities).length === 0;
+        const hasHistoryData = existingHistory && existingHistory.workRecords && existingHistory.workRecords.length > 0;
 
-        if (isLiveEmpty && hasHistoryData) {
-            finalWorkRecords = historyData.workRecords;
-            finalDailyData = historyData;
+        let finalWorkRecords = liveWorkRecords;
+        let finalQuantities = State.appState.taskQuantities || {};
+
+        if (isLiveEmpty && isLiveQtyEmpty && hasHistoryData) {
+            finalWorkRecords = existingHistory.workRecords;
+            finalQuantities = existingHistory.taskQuantities || {};
         }
-
-        const mergedInspectionList = (finalDailyData.inspectionList && finalDailyData.inspectionList.length > 0) 
-                                     ? finalDailyData.inspectionList 
-                                     : (historyData.inspectionList || []);
 
         const liveTodayData = {
             id: todayKey,
             workRecords: finalWorkRecords,
-            taskQuantities: finalDailyData.taskQuantities || {},
-            confirmedZeroTasks: finalDailyData.confirmedZeroTasks || [],
-            onLeaveMembers: finalDailyData.onLeaveMembers || [],
-            partTimers: finalDailyData.partTimers || [],
-            dailyAttendance: finalDailyData.dailyAttendance || {},
-            management: finalDailyData.management || {},
-            inspectionList: mergedInspectionList,
-            // 동기화 시 기존 확정 여부 유지 (없으면 false)
-            isQuantityVerified: finalDailyData.isQuantityVerified || historyData.isQuantityVerified || false
+            taskQuantities: finalQuantities,
+            confirmedZeroTasks: State.appState.confirmedZeroTasks || (existingHistory?.confirmedZeroTasks || []),
+            onLeaveMembers: State.appState.dailyOnLeaveMembers || (existingHistory?.onLeaveMembers || []),
+            partTimers: State.appState.partTimers || (existingHistory?.partTimers || []),
+            dailyAttendance: State.appState.dailyAttendance || (existingHistory?.dailyAttendance || {}),
+            management: State.appState.management || (existingHistory?.management || {}),
+            inspectionList: State.appState.inspectionList || (existingHistory?.inspectionList || []),
+            isQuantityVerified: State.appState.isQuantityVerified || (existingHistory?.isQuantityVerified || false)
         };
 
-        const idx = State.allHistoryData.findIndex(d => d.id === todayKey);
         if (idx > -1) {
             State.allHistoryData[idx] = liveTodayData;
         } else {
             State.allHistoryData.unshift(liveTodayData);
             State.allHistoryData.sort((a, b) => b.id.localeCompare(a.id));
         }
-
     } catch (e) {
         console.error("Error syncing today to history cache: ", e);
     }
 };
 
-// [수정] isQuantityVerified 파라미터 추가
 export async function saveProgress(isAutoSave = false, isQuantityVerified = false) {
     const dateStr = getTodayDateString();
     const now = getCurrentTime();
@@ -93,22 +94,23 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
     const historyDocRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'history', dateStr);
 
     try {
-        const dailyDocSnap = await getDoc(getDailyDocRef());
-        const dailyData = dailyDocSnap.exists() ? dailyDocSnap.data() : {};
+        const dailyData = {
+            taskQuantities: State.appState.taskQuantities || {},
+            confirmedZeroTasks: State.appState.confirmedZeroTasks || [],
+            onLeaveMembers: State.appState.dailyOnLeaveMembers || [],
+            partTimers: State.appState.partTimers || [],
+            dailyAttendance: State.appState.dailyAttendance || {},
+            management: State.appState.management || {},
+            inspectionList: State.appState.inspectionList || [],
+            isQuantityVerified: State.appState.isQuantityVerified || false
+        };
 
-        const workRecordsColRef = getWorkRecordsCollectionRef();
-        const recordsSnapshot = await getDocs(workRecordsColRef);
-        
-        const liveWorkRecords = recordsSnapshot.docs.map(doc => {
-            const data = doc.data();
+        const liveWorkRecords = (State.appState.workRecords || []).map(record => {
+            const data = { ...record };
             if (data.status === 'ongoing' || data.status === 'paused') {
                 data.duration = calcElapsedMinutes(data.startTime, now, data.pauses);
                 data.endTime = now;
-
-                if (data.duration > 1200) { 
-                    data.status = 'completed';
-                    console.warn(`[Auto-Fix] 20시간 초과 업무 강제 종료: ${data.task} (${data.member})`);
-                }
+                if (data.duration > 1200) data.status = 'completed';
             }
             return data;
         }).filter(record => {
@@ -116,62 +118,52 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
             return Math.round(record.duration || 0) > 0;
         });
 
-        if (liveWorkRecords.length === 0) {
-            const historySnap = await getDoc(historyDocRef);
-            if (historySnap.exists()) {
-                const existingHistory = historySnap.data();
-                if (existingHistory.workRecords && existingHistory.workRecords.length > 0) {
-                    console.log("Safe-guard: Valid history exists. Skipping overwrite with empty records.");
-                    if (!isAutoSave) showToast("이미 다른 관리자가 마감했습니다. (중복 저장 방지)");
-                    return; 
-                }
-            }
+        const existingHistory = State.allHistoryData.find(d => d.id === dateStr) || {};
+        const existingRecordsCount = (existingHistory.workRecords || []).length;
+        
+        if (existingRecordsCount > 0 && liveWorkRecords.length < existingRecordsCount) {
+            if (!isAutoSave) showToast("이미 데이터가 안전하게 마감/저장되었습니다.");
+            return; 
         }
 
         if (liveWorkRecords.length === 0 && 
-            Object.keys(dailyData.taskQuantities || {}).length === 0 && 
+            Object.keys(dailyData.taskQuantities).length === 0 && 
             (!dailyData.inspectionList || dailyData.inspectionList.length === 0)) {
              return;
         }
 
-        // [추가] DB에 저장된 기존 상태 확인 (이미 확정된 경우 false로 덮어쓰지 않기 위함)
-        const currentVerifiedStatus = dailyData.isQuantityVerified === true;
+        const mergedAttendance = { ...dailyData.dailyAttendance, ...State.appState.dailyAttendance };
 
         const historyData = {
             id: dateStr,
             workRecords: liveWorkRecords,
-            taskQuantities: dailyData.taskQuantities || {},
-            confirmedZeroTasks: dailyData.confirmedZeroTasks || [],
-            onLeaveMembers: dailyData.onLeaveMembers || [],
-            partTimers: dailyData.partTimers || [],
-            dailyAttendance: dailyData.dailyAttendance || {},
-            management: dailyData.management || {},
-            inspectionList: dailyData.inspectionList || [],
-            // [수정] 파라미터가 true거나, 이미 DB에 true로 저장되어 있으면 true 유지
-            isQuantityVerified: isQuantityVerified || currentVerifiedStatus,
+            taskQuantities: dailyData.taskQuantities,
+            confirmedZeroTasks: dailyData.confirmedZeroTasks,
+            onLeaveMembers: dailyData.onLeaveMembers,
+            partTimers: dailyData.partTimers,
+            dailyAttendance: mergedAttendance, 
+            management: dailyData.management,
+            inspectionList: dailyData.inspectionList,
+            isQuantityVerified: isQuantityVerified || State.appState.isQuantityVerified || false,
             savedAt: now
         };
 
         await setDoc(historyDocRef, historyData, { merge: true });
         
-        // Daily Data에도 확정 여부 업데이트
         if (isQuantityVerified) {
             await setDoc(getDailyDocRef(), { isQuantityVerified: true }, { merge: true });
         }
 
         await syncTodayToHistory(); 
+        clearLocalCache(); // ✨ 데이터 변경 시 캐시 지우기
 
-        if (isAutoSave) {
-            console.log(`Auto-save completed at ${now}`);
-        } else {
+        if (!isAutoSave) {
             showToast('최신 상태가 이력에 안전하게 저장되었습니다.');
         }
 
     } catch (e) {
         console.error('Error in saveProgress: ', e);
-        if (!isAutoSave) {
-             showToast(`이력 저장 중 오류가 발생했습니다: ${e.message}`, true);
-        }
+        if (!isAutoSave) showToast(`저장 중 오류가 발생했습니다: ${e.message}`, true);
     }
 }
 
@@ -183,34 +175,31 @@ export async function saveDayDataToHistory(shouldReset) {
         const dailyDocRef = getDailyDocRef();
         const dailyDocSnap = await getDoc(dailyDocRef);
         const dailyData = dailyDocSnap.exists() ? dailyDocSnap.data() : {};
-        const dailyAttendance = dailyData.dailyAttendance || {};
-
+        
+        const dailyAttendance = { ...dailyData.dailyAttendance, ...State.appState.dailyAttendance };
         const querySnapshot = await getDocs(workRecordsColRef);
         
         let attendanceUpdated = false;
-        
         Object.keys(dailyAttendance).forEach(member => {
-            if (dailyAttendance[member].status === 'working') {
+            if (dailyAttendance[member].status === 'active') {
                 let autoOutTime = globalEndTime; 
                 if (dailyAttendance[member].inTime && autoOutTime < dailyAttendance[member].inTime) {
                     autoOutTime = globalEndTime;
                 }
-                dailyAttendance[member].status = 'returned';
+                dailyAttendance[member].status = 'returned'; 
                 dailyAttendance[member].outTime = autoOutTime;
                 attendanceUpdated = true;
-                console.log(`[Auto-Clock-out] ${member}: ${autoOutTime} 퇴근 처리 (업무 마감 실행)`);
             }
         });
 
         if (attendanceUpdated) {
             await updateDoc(dailyDocRef, { dailyAttendance: dailyAttendance });
-            showToast("미퇴근 인원을 현재 시간으로 퇴근 처리했습니다.");
+            State.appState.dailyAttendance = dailyAttendance;
         }
         
         if (!querySnapshot.empty) {
             const batch = writeBatch(State.db);
             let removedCount = 0;
-            let completedCount = 0;
 
             querySnapshot.forEach(docSnap => {
                 const record = docSnap.data();
@@ -219,29 +208,26 @@ export async function saveDayDataToHistory(shouldReset) {
                 let needsUpdate = false;
                 
                 let recordEndTime = globalEndTime;
-
                 const attendance = dailyAttendance[record.member];
+                
                 if (attendance && attendance.status === 'returned' && attendance.outTime) {
                     if (attendance.outTime > record.startTime) {
-                        recordEndTime = attendance.outTime;
+                        recordEndTime = (attendance.outTime <= globalEndTime) ? attendance.outTime : globalEndTime;
+                    } else {
+                        recordEndTime = globalEndTime;
                     }
                 }
+
+                if (record.startTime > recordEndTime) recordEndTime = record.startTime;
 
                 if (record.status === 'ongoing' || record.status === 'paused') {
                     if (record.status === 'paused') {
                         const lastPause = pauses.length > 0 ? pauses[pauses.length - 1] : null;
-                        if (lastPause && lastPause.end === null) {
-                            lastPause.end = recordEndTime;
-                        }
+                        if (lastPause && lastPause.end === null) lastPause.end = recordEndTime;
                     }
                     duration = calcElapsedMinutes(record.startTime, recordEndTime, pauses);
                     
-                    record.status = 'completed';
-                    record.endTime = recordEndTime;
-                    record.duration = duration;
-                    record.pauses = pauses;
                     needsUpdate = true;
-                    completedCount++;
                 }
 
                 if (Math.round(duration) <= 0) {
@@ -256,19 +242,14 @@ export async function saveDayDataToHistory(shouldReset) {
                     });
                 }
             });
-            
             await batch.commit();
-            
-            if (completedCount > 0) console.log(`${completedCount}개 진행 중 업무 강제 종료`);
-            if (removedCount > 0) showToast(`${removedCount}건 정리됨`);
         }
     } catch (e) {
          console.error("Finalizing error: ", e);
-         showToast("마감 중 오류 (이력 저장은 시도함)", true);
     }
 
     await new Promise(resolve => setTimeout(resolve, 500));
-    await saveProgress(false);
+    await saveProgress(false); 
 
     if (shouldReset) {
          try {
@@ -279,70 +260,105 @@ export async function saveDayDataToHistory(shouldReset) {
                 snapshotAll.forEach(doc => deleteBatch.delete(doc.ref));
                 await deleteBatch.commit();
             }
-             await setDoc(getDailyDocRef(), { state: '{}' });
+            await setDoc(getDailyDocRef(), { taskQuantities: {}, confirmedZeroTasks: [], isQuantityVerified: false }, { merge: true });
         } catch (e) {
              console.error("Error clearing daily data: ", e);
         }
         
         State.appState.workRecords = []; 
+        clearLocalCache();
         showToast('오늘의 업무 기록을 초기화했습니다.');
-        await syncTodayToHistory();
     }
 }
 
-export async function fetchAllHistoryData() {
-    const historyCollectionRef = collection(State.db, 'artifacts', 'team-work-logger-v2', 'history');
-    try {
-        const querySnapshot = await getDocs(historyCollectionRef);
-        const dataMap = new Map();
-        querySnapshot.forEach((doc) => {
-            const docData = doc.data();
-            if (docData) {
-                 dataMap.set(doc.id, { id: doc.id, ...docData });
-            }
-        });
-
-        const today = getTodayDateString();
-        let minDate = today;
-        
-        if (dataMap.size > 0) {
-            const keys = Array.from(dataMap.keys());
-            keys.sort();
-            minDate = keys[0];
-        }
-
-        const fullHistory = [];
-        const current = new Date(minDate);
-        const end = new Date(today);
-
-        while (current <= end) {
-            const dateStr = current.toISOString().slice(0, 10);
-            if (dataMap.has(dateStr)) {
-                fullHistory.push(dataMap.get(dateStr));
-            } else {
-                fullHistory.push({
-                    id: dateStr,
-                    workRecords: [],
-                    taskQuantities: {},
-                    onLeaveMembers: [],
-                    partTimers: [],
-                    management: { revenue: 0, orderCount: 0, inventoryQty: 0, inventoryAmt: 0 },
-                    inspectionList: []
-                });
-            }
-            current.setDate(current.getDate() + 1);
-        }
-
-        fullHistory.sort((a, b) => b.id.localeCompare(a.id));
-        State.allHistoryData.length = 0; 
-        State.allHistoryData.push(...fullHistory); 
+export async function fetchAllHistoryData(forceRefresh = false) {
+    if (!forceRefresh && isHistoryCached && State.allHistoryData.length > 0) {
         return State.allHistoryData;
-    } catch (error) {
-        console.error('Error fetching all history data:', error);
-        showToast('전체 이력 로딩 실패', true);
-        State.allHistoryData.length = 0;
-        return [];
     }
+
+    // ✨ 브라우저 세션 스토리지 확인 (새로고침 시 DB 읽기 요금 방어)
+    if (!forceRefresh) {
+        const cached = sessionStorage.getItem('historyDataCache');
+        const cacheTime = sessionStorage.getItem('historyDataCacheTime');
+        const now = Date.now();
+        // 5분(300,000ms) 이내의 캐시가 있다면 통신 없이 바로 재사용!
+        if (cached && cacheTime && (now - parseInt(cacheTime) < 300000)) {
+            try {
+                State.allHistoryData.length = 0;
+                State.allHistoryData.push(...JSON.parse(cached));
+                isHistoryCached = true;
+                return State.allHistoryData;
+            } catch(e) {}
+        }
+    }
+
+    if (historyFetchPromise && !forceRefresh) {
+        return historyFetchPromise; 
+    }
+
+    historyFetchPromise = (async () => {
+        const historyCollectionRef = collection(State.db, 'artifacts', 'team-work-logger-v2', 'history');
+        try {
+            const d = new Date();
+            // 🚨 기존 2개월 -> 1개월로 축소 (기본 읽기 비용 50% 절감)
+            d.setMonth(d.getMonth() - 1); 
+            const oneMonthAgoStr = d.toISOString().split('T')[0];
+
+            const q = query(historyCollectionRef, where(documentId(), ">=", oneMonthAgoStr));
+            const querySnapshot = await getDocs(q);
+            
+            const dataMap = new Map();
+            querySnapshot.forEach((doc) => {
+                const docData = doc.data();
+                if (docData) dataMap.set(doc.id, { id: doc.id, ...docData });
+            });
+
+            const today = getTodayDateString();
+            let minDate = today;
+            if (dataMap.size > 0) {
+                const keys = Array.from(dataMap.keys());
+                keys.sort();
+                minDate = keys[0];
+            }
+
+            const fullHistory = [];
+            const current = new Date(minDate);
+            const end = new Date(today);
+
+            while (current <= end) {
+                const dateStr = current.toISOString().slice(0, 10);
+                if (dataMap.has(dateStr)) {
+                    fullHistory.push(dataMap.get(dateStr));
+                } else {
+                    fullHistory.push({
+                        id: dateStr, workRecords: [], taskQuantities: {}, onLeaveMembers: [], partTimers: [],
+                        management: { revenue: 0, orderCount: 0, inventoryQty: 0, inventoryAmt: 0 }, inspectionList: []
+                    });
+                }
+                current.setDate(current.getDate() + 1);
+            }
+
+            fullHistory.sort((a, b) => b.id.localeCompare(a.id));
+            State.allHistoryData.length = 0; 
+            State.allHistoryData.push(...fullHistory); 
+            
+            isHistoryCached = true; 
+            
+            // ✨ 성공적으로 가져왔다면 브라우저 메모리에 캐싱
+            sessionStorage.setItem('historyDataCache', JSON.stringify(State.allHistoryData));
+            sessionStorage.setItem('historyDataCacheTime', Date.now().toString());
+
+            return State.allHistoryData;
+        } catch (error) {
+            console.error('Error fetching all history data:', error);
+            State.allHistoryData.length = 0;
+            return [];
+        } finally {
+            historyFetchPromise = null;
+        }
+    })();
+
+    return historyFetchPromise;
 }
 
 export async function addHistoryWorkRecord(dateKey, newRecordData) {
@@ -352,15 +368,13 @@ export async function addHistoryWorkRecord(dateKey, newRecordData) {
         newRecordData.duration = calcElapsedMinutes(newRecordData.startTime, newRecordData.endTime, newRecordData.pauses || []);
     }
     
-    if (newRecordData.status === 'completed' && Math.round(newRecordData.duration || 0) <= 0) {
-        showToast('소요 시간이 0분이어 기록이 저장되지 않았습니다.', true);
-        return;
-    }
+    if (newRecordData.status === 'completed' && Math.round(newRecordData.duration || 0) <= 0) return;
 
     if (dateKey === todayKey) {
         const docRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'daily_data', todayKey, 'workRecords', newRecordData.id);
         await setDoc(docRef, newRecordData);
         await syncTodayToHistory();
+        clearLocalCache();
         return;
     }
 
@@ -378,6 +392,7 @@ export async function addHistoryWorkRecord(dateKey, newRecordData) {
 
     const historyDocRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'history', dateKey);
     await setDoc(historyDocRef, { workRecords: dayData.workRecords }, { merge: true });
+    clearLocalCache();
 }
 
 export async function updateHistoryWorkRecord(dateKey, recordId, updateData) {
@@ -391,9 +406,7 @@ export async function updateHistoryWorkRecord(dateKey, recordId, updateData) {
                 if (dayIndex > -1) {
                     const dayData = State.allHistoryData[dayIndex];
                     const recIdx = dayData.workRecords.findIndex(r => r.id === recordId);
-                    if (recIdx > -1) {
-                         return await updateHistoryDirectly(dateKey, recordId, updateData);
-                    }
+                    if (recIdx > -1) return await updateHistoryDirectly(dateKey, recordId, updateData);
                 }
              } catch(e) {}
              throw new Error("기록을 찾을 수 없습니다.");
@@ -406,21 +419,19 @@ export async function updateHistoryWorkRecord(dateKey, recordId, updateData) {
             const start = updateData.startTime || localRecord.startTime;
             const end = updateData.endTime || localRecord.endTime;
             const pauses = updateData.pauses || localRecord.pauses || [];
-            if (end) {
-                newDuration = calcElapsedMinutes(start, end, pauses);
-                updateData.duration = newDuration;
-            }
+            if (end) newDuration = calcElapsedMinutes(start, end, pauses);
+            updateData.duration = newDuration;
         }
 
         if (newStatus === 'completed' && newDuration !== null && Math.round(newDuration) <= 0) {
             await deleteHistoryWorkRecord(dateKey, recordId);
-            showToast('수정 후 소요 시간이 0분이 되어 기록이 삭제되었습니다.');
             return;
         }
         
         const docRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'daily_data', todayKey, 'workRecords', recordId);
         await updateDoc(docRef, updateData);
         await syncTodayToHistory(); 
+        clearLocalCache();
         return;
     }
 
@@ -438,7 +449,7 @@ async function updateHistoryDirectly(dateKey, recordId, updateData) {
     const originalRecord = dayData.workRecords[recordIndex];
     const updatedRecord = { ...originalRecord, ...updateData };
 
-    if (updateData.startTime || updateData.endTime || updateData.pauses) {
+    if (updateData.startTime || updateData.endTime || originalRecord.pauses) {
         const start = updateData.startTime || originalRecord.startTime;
         const end = updateData.endTime || originalRecord.endTime;
         const pauses = updateData.pauses || originalRecord.pauses || [];
@@ -447,13 +458,13 @@ async function updateHistoryDirectly(dateKey, recordId, updateData) {
 
     if (updatedRecord.status === 'completed' && Math.round(updatedRecord.duration || 0) <= 0) {
         await deleteHistoryWorkRecord(dateKey, recordId);
-        showToast('0분 기록 삭제됨');
         return;
     }
 
     dayData.workRecords[recordIndex] = updatedRecord;
     const historyDocRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'history', dateKey);
     await setDoc(historyDocRef, { workRecords: dayData.workRecords }, { merge: true });
+    clearLocalCache();
 }
 
 export async function deleteHistoryWorkRecord(dateKey, recordId) {
@@ -466,6 +477,7 @@ export async function deleteHistoryWorkRecord(dateKey, recordId) {
         if (dailySnap.exists()) {
             await deleteDoc(dailyRecordRef);
             await syncTodayToHistory();
+            clearLocalCache();
             return;
         }
     }
@@ -476,13 +488,12 @@ export async function deleteHistoryWorkRecord(dateKey, recordId) {
     const dayData = State.allHistoryData[dayIndex];
     const newRecords = dayData.workRecords.filter(r => r.id !== recordId);
 
-    if (dayData.workRecords.length === newRecords.length) {
-        return;
-    }
+    if (dayData.workRecords.length === newRecords.length) return;
 
     dayData.workRecords = newRecords; 
     const historyDocRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'history', dateKey);
     await setDoc(historyDocRef, { workRecords: newRecords }, { merge: true });
+    clearLocalCache();
 }
 
 export async function saveManagementData(dateKey, managementData) {
@@ -493,12 +504,7 @@ export async function saveManagementData(dateKey, managementData) {
         State.allHistoryData[dayIndex].management = managementData;
     } else {
         State.allHistoryData.push({
-            id: dateKey,
-            workRecords: [],
-            taskQuantities: {},
-            onLeaveMembers: [],
-            partTimers: [],
-            management: managementData
+            id: dateKey, workRecords: [], taskQuantities: {}, onLeaveMembers: [], partTimers: [], management: managementData
         });
         State.allHistoryData.sort((a, b) => b.id.localeCompare(a.id));
     }
@@ -506,48 +512,77 @@ export async function saveManagementData(dateKey, managementData) {
     const updates = { management: managementData };
 
     try {
-        if (dateKey === todayKey) {
-            const dailyDocRef = getDailyDocRef();
-            await setDoc(dailyDocRef, updates, { merge: true });
-        }
+        if (dateKey === todayKey) await setDoc(getDailyDocRef(), updates, { merge: true });
         const historyDocRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'history', dateKey);
         await setDoc(historyDocRef, updates, { merge: true });
-
+        clearLocalCache();
     } catch (e) {
         console.error("Error saving management data:", e);
         throw e; 
     }
 }
 
-// [신규] 미확정(예상치) 처리량 데이터 확인 함수
-export async function checkUnverifiedRecords() {
-    const historyCol = collection(State.db, 'artifacts', 'team-work-logger-v2', 'history');
-    
-    try {
-        const q = query(historyCol); 
-        const snapshot = await getDocs(q);
-        
-        const unverifiedDates = [];
-        const today = getTodayDateString();
-
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            // 오늘 날짜는 제외 (오늘은 아직 입력 중이므로)
-            if (doc.id !== today) {
-                const hasQuantities = data.taskQuantities && Object.keys(data.taskQuantities).length > 0;
-                // 처리량이 있는데 확정 플래그가 없거나 false인 경우
-                if (hasQuantities && !data.isQuantityVerified) {
-                    unverifiedDates.push(doc.id);
-                }
-            }
-        });
-
-        // 날짜순 정렬 (과거 -> 최신)
-        unverifiedDates.sort();
-        
-        return unverifiedDates; 
-    } catch (e) {
-        console.error("Failed to check unverified records:", e);
-        return [];
+export async function checkUnverifiedRecords(forceRefresh = false) {
+    const now = Date.now();
+    if (!forceRefresh && cachedUnverifiedDates && (now - lastUnverifiedCheckTime < 3600000)) {
+        return cachedUnverifiedDates;
     }
+
+    // ✨ 브라우저 세션 스토리지 캐시 확인
+    if (!forceRefresh) {
+        const cached = sessionStorage.getItem('unverifiedDataCache');
+        const cacheTime = sessionStorage.getItem('unverifiedDataCacheTime');
+        if (cached && cacheTime && (now - parseInt(cacheTime) < 300000)) { // 5분
+            try {
+                cachedUnverifiedDates = JSON.parse(cached);
+                lastUnverifiedCheckTime = now;
+                return cachedUnverifiedDates;
+            } catch(e) {}
+        }
+    }
+
+    if (unverifiedFetchPromise && !forceRefresh) {
+        return unverifiedFetchPromise;
+    }
+
+    unverifiedFetchPromise = (async () => {
+        const historyCol = collection(State.db, 'artifacts', 'team-work-logger-v2', 'history');
+        
+        try {
+            const d = new Date();
+            // 🚨 기존 14일 -> 7일로 축소하여 읽기 요금 반토막
+            d.setDate(d.getDate() - 7); 
+            const sevenDaysAgoStr = d.toISOString().split('T')[0];
+
+            const q = query(historyCol, where(documentId(), ">=", sevenDaysAgoStr)); 
+            const snapshot = await getDocs(q);
+            
+            const unverifiedDates = [];
+            const today = getTodayDateString();
+
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                if (doc.id !== today) {
+                    const hasQuantities = data.taskQuantities && Object.keys(data.taskQuantities).length > 0;
+                    if (hasQuantities && !data.isQuantityVerified) unverifiedDates.push(doc.id);
+                }
+            });
+
+            unverifiedDates.sort();
+            cachedUnverifiedDates = unverifiedDates;
+            lastUnverifiedCheckTime = Date.now();
+            
+            sessionStorage.setItem('unverifiedDataCache', JSON.stringify(unverifiedDates));
+            sessionStorage.setItem('unverifiedDataCacheTime', Date.now().toString());
+
+            return unverifiedDates; 
+        } catch (e) {
+            console.error("Failed to check unverified records:", e);
+            return [];
+        } finally {
+            unverifiedFetchPromise = null;
+        }
+    })();
+
+    return unverifiedFetchPromise;
 }

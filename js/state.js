@@ -43,7 +43,8 @@ export const setPersistentLeaveSchedule = (val) => { persistentLeaveSchedule = v
 
 // --- Constants ---
 export const AUTO_SAVE_INTERVAL = 1 * 60 * 1000;
-export const LEAVE_TYPES = ['연차', '외출', '조퇴', '결근', '출장', '지각'];
+// ✅ '재택근무', '휴직' 항목 추가
+export const LEAVE_TYPES = ['연차', '외출', '조퇴', '결근', '출장', '지각', '매장근무', '재택근무', '휴직', '외근'];
 
 // --- State Objects ---
 export const context = {
@@ -137,12 +138,11 @@ export const appState = {
     simulationResults: null,
     lunchPauseExecuted: false,
     lunchResumeExecuted: false,
-    // shiftEndAlertExecuted: false, // <-- 제거됨
     
     // 검수 대기 리스트 (서버 동기화용)
     inspectionList: [],
 
-    // ✅ [신규] 관리자 To-Do 리스트 상태 추가
+    // 관리자 To-Do 리스트 상태 추가
     adminTodos: [] 
 };
 

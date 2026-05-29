@@ -6,6 +6,7 @@ import {
     calculateReportAggregations,
     aggregateDaysToSingleData,
     calculateStandardThroughputs,
+    calculatePeriodThroughputs, // 🌟 [추가] 기간별 평균 속도 계산 함수 가져오기
     analyzeRevenueBasedStaffing,
     analyzeRevenueWorkloadTrend,
     calculateAdvancedProductivity,
@@ -86,10 +87,12 @@ export const renderReportDaily = (dateKey, allHistoryData, appConfig, context) =
         prevAggr.taskSummary[t].avgDailyStaff = prevAvgStaff[t] || 0;
     });
 
-    const standardThroughputs = calculateStandardThroughputs(allHistoryData);
+    // 🌟 [수정] 해당 기간(당일)만의 평균 속도 산출
+    const todayThroughputs = calculatePeriodThroughputs([data]);
+    const prevThroughputs = calculatePeriodThroughputs([previousDayData].filter(Boolean));
 
-    const todayStaffing = calculateAdvancedProductivity([data], todayAggr, standardThroughputs, appConfig, wageMap);
-    const prevStaffing = calculateAdvancedProductivity([previousDayData].filter(Boolean), prevAggr, standardThroughputs, appConfig, wageMap);
+    const todayStaffing = calculateAdvancedProductivity([data], todayAggr, todayThroughputs, appConfig, wageMap);
+    const prevStaffing = calculateAdvancedProductivity([previousDayData].filter(Boolean), prevAggr, prevThroughputs, appConfig, wageMap);
 
     const benchmarkOEE = calculateBenchmarkOEE(allHistoryData, appConfig);
 
@@ -101,7 +104,7 @@ export const renderReportDaily = (dateKey, allHistoryData, appConfig, context) =
         tData: { raw: data, memberToPartMap },
         tMetrics: { kpis: todayKPIs, aggr: todayAggr, staffing: todayStaffing },
         pMetrics: { kpis: prevKPIs, aggr: prevAggr, staffing: prevStaffing },
-        standardThroughputs
+        standardThroughputs: todayThroughputs // 렌더러에 넘길 속도
     };
 
     renderGenericReport(
@@ -115,7 +118,7 @@ export const renderReportDaily = (dateKey, allHistoryData, appConfig, context) =
         '기록',
         0,
         benchmarkOEE,
-        standardThroughputs
+        todayThroughputs
     );
 };
 
@@ -156,10 +159,12 @@ export const renderReportWeekly = (weekKey, allHistoryData, appConfig, context) 
         prevAggr.taskSummary[t].avgDailyStaff = prevAvgStaff[t] || 0;
     });
 
-    const standardThroughputs = calculateStandardThroughputs(allHistoryData);
+    // 🌟 [수정] 해당 기간(주간)만의 평균 속도 산출
+    const todayThroughputs = calculatePeriodThroughputs(currentWeekDays);
+    const prevThroughputs = calculatePeriodThroughputs(prevWeekDays);
 
-    const todayStaffing = calculateAdvancedProductivity(currentWeekDays, todayAggr, standardThroughputs, appConfig, wageMap);
-    const prevStaffing = calculateAdvancedProductivity(prevWeekDays, prevAggr, standardThroughputs, appConfig, wageMap);
+    const todayStaffing = calculateAdvancedProductivity(currentWeekDays, todayAggr, todayThroughputs, appConfig, wageMap);
+    const prevStaffing = calculateAdvancedProductivity(prevWeekDays, prevAggr, prevThroughputs, appConfig, wageMap);
     
     const benchmarkOEE = calculateBenchmarkOEE(allHistoryData, appConfig);
 
@@ -171,7 +176,7 @@ export const renderReportWeekly = (weekKey, allHistoryData, appConfig, context) 
         tData: { raw: todayData, memberToPartMap },
         tMetrics: { kpis: todayKPIs, aggr: todayAggr, staffing: todayStaffing },
         pMetrics: { kpis: prevKPIs, aggr: prevAggr, staffing: prevStaffing },
-        standardThroughputs
+        standardThroughputs: todayThroughputs
     };
 
     renderGenericReport(
@@ -185,7 +190,7 @@ export const renderReportWeekly = (weekKey, allHistoryData, appConfig, context) 
         '주',
         0,
         benchmarkOEE,
-        standardThroughputs
+        todayThroughputs
     );
 };
 
@@ -226,10 +231,12 @@ export const renderReportMonthly = (monthKey, allHistoryData, appConfig, context
         prevAggr.taskSummary[t].avgDailyStaff = prevAvgStaff[t] || 0;
     });
 
-    const standardThroughputs = calculateStandardThroughputs(allHistoryData);
+    // 🌟 [수정] 해당 기간(월간)만의 평균 속도 산출
+    const todayThroughputs = calculatePeriodThroughputs(currentMonthDays);
+    const prevThroughputs = calculatePeriodThroughputs(prevMonthDays);
 
-    const todayStaffing = calculateAdvancedProductivity(currentMonthDays, todayAggr, standardThroughputs, appConfig, wageMap);
-    const prevStaffing = calculateAdvancedProductivity(prevMonthDays, prevAggr, standardThroughputs, appConfig, wageMap);
+    const todayStaffing = calculateAdvancedProductivity(currentMonthDays, todayAggr, todayThroughputs, appConfig, wageMap);
+    const prevStaffing = calculateAdvancedProductivity(prevMonthDays, prevAggr, prevThroughputs, appConfig, wageMap);
 
     context.monthlyRevenues = context.monthlyRevenues || {};
     const currentRevenue = context.monthlyRevenues[monthKey] || 0;
@@ -260,7 +267,7 @@ export const renderReportMonthly = (monthKey, allHistoryData, appConfig, context
         tData: { raw: todayData, memberToPartMap, revenue: currentRevenue },
         tMetrics: { kpis: todayKPIs, aggr: todayAggr, staffing: todayStaffing, revenueAnalysis, revenueTrend: revenueTrendAnalysis },
         pMetrics: { kpis: prevKPIs, aggr: prevAggr, staffing: prevStaffing },
-        standardThroughputs
+        standardThroughputs: todayThroughputs
     };
 
     renderGenericReport(
@@ -274,7 +281,7 @@ export const renderReportMonthly = (monthKey, allHistoryData, appConfig, context
         '월',
         prevRevenue,
         benchmarkOEE,
-        standardThroughputs
+        todayThroughputs
     );
 };
 
@@ -315,10 +322,12 @@ export const renderReportYearly = (yearKey, allHistoryData, appConfig, context) 
         prevAggr.taskSummary[t].avgDailyStaff = prevAvgStaff[t] || 0;
     });
 
-    const standardThroughputs = calculateStandardThroughputs(allHistoryData);
+    // 🌟 [수정] 해당 기간(연간)만의 평균 속도 산출
+    const todayThroughputs = calculatePeriodThroughputs(currentYearDays);
+    const prevThroughputs = calculatePeriodThroughputs(prevYearDays);
 
-    const todayStaffing = calculateAdvancedProductivity(currentYearDays, todayAggr, standardThroughputs, appConfig, wageMap);
-    const prevStaffing = calculateAdvancedProductivity(prevYearDays, prevAggr, standardThroughputs, appConfig, wageMap);
+    const todayStaffing = calculateAdvancedProductivity(currentYearDays, todayAggr, todayThroughputs, appConfig, wageMap);
+    const prevStaffing = calculateAdvancedProductivity(prevYearDays, prevAggr, prevThroughputs, appConfig, wageMap);
 
     const sortState = context.reportSortState || {};
 
@@ -328,7 +337,7 @@ export const renderReportYearly = (yearKey, allHistoryData, appConfig, context) 
         tData: { raw: todayData, memberToPartMap },
         tMetrics: { kpis: todayKPIs, aggr: todayAggr, staffing: todayStaffing },
         pMetrics: { kpis: prevKPIs, aggr: prevAggr, staffing: prevStaffing },
-        standardThroughputs
+        standardThroughputs: todayThroughputs
     };
 
     renderGenericReport(
@@ -342,6 +351,6 @@ export const renderReportYearly = (yearKey, allHistoryData, appConfig, context) 
         '연도',
         0,
         null,
-        standardThroughputs
+        todayThroughputs
     );
 };

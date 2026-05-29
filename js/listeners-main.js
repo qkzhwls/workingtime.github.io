@@ -159,6 +159,7 @@ export function setupMainScreenListeners() {
     }
 
     // --- 하단 버튼 (마감, 저장, 수동추가) 리스너 ---
+    // 🔥 [핵심 수정] 진행 중인 업무가 없어도 확인 창을 띄우도록 수정
     if (DOM.endShiftBtn) {
         DOM.endShiftBtn.addEventListener('click', () => {
             const ongoingRecords = (State.appState.workRecords || []).filter(r => r.status === 'ongoing' || r.status === 'paused');
@@ -168,10 +169,11 @@ export function setupMainScreenListeners() {
                 const ongoingTaskCount = ongoingTaskNames.size;
                 if (DOM.endShiftConfirmTitle) DOM.endShiftConfirmTitle.textContent = `진행 중인 업무 ${ongoingTaskCount}종`;
                 if (DOM.endShiftConfirmMessage) DOM.endShiftConfirmMessage.textContent = `총 ${ongoingRecords.length}명이 참여 중인 ${ongoingTaskCount}종의 업무가 있습니다. 모두 종료하고 마감하시겠습니까?`;
-                if (DOM.endShiftConfirmModal) DOM.endShiftConfirmModal.classList.remove('hidden');
             } else {
-                saveDayDataToHistory(true);
+                if (DOM.endShiftConfirmTitle) DOM.endShiftConfirmTitle.textContent = `오늘 업무 마감`;
+                if (DOM.endShiftConfirmMessage) DOM.endShiftConfirmMessage.textContent = `진행 중인 업무가 없습니다. 이대로 오늘 업무를 마감하시겠습니까?`;
             }
+            if (DOM.endShiftConfirmModal) DOM.endShiftConfirmModal.classList.remove('hidden');
         });
     }
     
@@ -184,10 +186,12 @@ export function setupMainScreenListeners() {
                 const ongoingTaskCount = ongoingTaskNames.size;
                 if (DOM.endShiftConfirmTitle) DOM.endShiftConfirmTitle.textContent = `진행 중인 업무 ${ongoingTaskCount}종`;
                 if (DOM.endShiftConfirmMessage) DOM.endShiftConfirmMessage.textContent = `총 ${ongoingRecords.length}명이 참여 중인 ${ongoingTaskCount}종의 업무가 있습니다. 모두 종료하고 마감하시겠습니까?`;
-                if (DOM.endShiftConfirmModal) DOM.endShiftConfirmModal.classList.remove('hidden');
             } else {
-                saveDayDataToHistory(true);
+                if (DOM.endShiftConfirmTitle) DOM.endShiftConfirmTitle.textContent = `오늘 업무 마감`;
+                if (DOM.endShiftConfirmMessage) DOM.endShiftConfirmMessage.textContent = `진행 중인 업무가 없습니다. 이대로 오늘 업무를 마감하시겠습니까?`;
             }
+            if (DOM.endShiftConfirmModal) DOM.endShiftConfirmModal.classList.remove('hidden');
+            
             if (DOM.navContent) DOM.navContent.classList.add('hidden');
         });
     }

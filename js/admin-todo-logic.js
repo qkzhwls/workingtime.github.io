@@ -1,13 +1,15 @@
 // === js/admin-todo-logic.js ===
 import * as State from './state.js';
-import * as DOM from './dom-elements.js'; // ✅ DOM 요소 임포트 추가
+import * as DOM from './dom-elements.js';
 import { showToast } from './utils.js';
-import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { initializeFirebase } from './config.js';
 
-// 헬퍼: ID 생성
+// 🔥 [신규] 멘션 발송을 위해 알림 함수 가져오기
+import { sendNotification } from './app-notifications.js';
+
 const createId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
-// 헬퍼: 날짜 포맷 (MM/DD HH:mm)
 const formatDateTimeShort = (isoString) => {
     if (!isoString) return '';
     const date = new Date(isoString);
@@ -18,35 +20,63 @@ const formatDateTimeShort = (isoString) => {
     return `${m}/${d} ${h}:${min}`;
 };
 
-// Firestore 참조
-const getTodoDocRef = () => doc(State.db, 'artifacts', 'team-work-logger-v2', 'persistent_data', 'adminTodos');
+const getTodoDocRef = () => {
+    const firebase = initializeFirebase();
+    return doc(firebase.db, 'artifacts', 'team-work-logger-v2', 'persistent_data', 'adminTodos');
+};
 
-// 1. 데이터 로드
-export const loadAdminTodos = async () => {
-    try {
-        const docSnap = await getDoc(getTodoDocRef());
-        if (docSnap.exists()) {
-            State.appState.adminTodos = docSnap.data().tasks || [];
-        } else {
-            State.appState.adminTodos = [];
+let isSnapshotAttached = false; 
+
+// ==========================================
+// 1. 공통 데이터 로드 및 저장 (실시간 동기화)
+// ==========================================
+export const loadAdminTodos = () => {
+    return new Promise((resolve) => {
+        try {
+            if (isSnapshotAttached) {
+                resolve();
+                return;
+            }
+            isSnapshotAttached = true;
+            
+            onSnapshot(getTodoDocRef(), (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    State.appState.adminTodos = data.tasks || [];
+                    State.appState.importantNotices = data.notices || [];
+                } else {
+                    State.appState.adminTodos = [];
+                    State.appState.importantNotices = [];
+                }
+                
+                renderAdminTodoList();
+                document.dispatchEvent(new CustomEvent('renderNotices'));
+                resolve(); 
+            }, (error) => {
+                console.error("실시간 동기화 오류:", error);
+                resolve(); 
+            });
+        } catch (e) {
+            console.error("데이터 로딩 오류:", e);
+            resolve();
         }
-        renderAdminTodoList();
-    } catch (e) {
-        console.error("Error loading admin todos:", e);
-        showToast("할 일 목록을 불러오지 못했습니다.", true);
-    }
+    });
 };
 
-// 2. 데이터 저장
-const saveAdminTodos = async () => {
+export const saveAdminTodos = async () => {
     try {
-        await setDoc(getTodoDocRef(), { tasks: State.appState.adminTodos }, { merge: true });
+        await setDoc(getTodoDocRef(), { 
+            tasks: State.appState.adminTodos || [],
+            notices: State.appState.importantNotices || [] 
+        }, { merge: true });
     } catch (e) {
-        console.error("Error saving admin todos:", e);
+        console.error("데이터 저장 오류:", e);
     }
 };
 
-// 3. 리스트 렌더링
+// ==========================================
+// 2. 관리자 투두(Todo) 전용 로직
+// ==========================================
 export const renderAdminTodoList = () => {
     const listEl = document.getElementById('admin-todo-list');
     if (!listEl) return;
@@ -59,7 +89,6 @@ export const renderAdminTodoList = () => {
         return;
     }
 
-    // 정렬: 미완료 상단 > 날짜 임박순 > 최신순
     const sortedTodos = [...todos].sort((a, b) => {
         if (a.completed !== b.completed) return a.completed ? 1 : -1;
         const dateA = a.dueDateTime ? new Date(a.dueDateTime).getTime() : Infinity;
@@ -78,7 +107,6 @@ export const renderAdminTodoList = () => {
         if (todo.dueDateTime) {
             const dueDate = new Date(todo.dueDateTime);
             const isOverdue = !todo.completed && dueDate < now;
-            // alertConfirmed 여부에 따라 스타일 다르게 (미확인이면 빨간색 강조)
             const isUnconfirmed = isOverdue && !todo.alertConfirmed;
             
             const dateClass = isUnconfirmed ? 'text-red-600 bg-red-50 border-red-200 font-bold animate-pulse' : 
@@ -111,58 +139,36 @@ export const renderAdminTodoList = () => {
     });
 };
 
-// 4. 액션: 추가
 export const addTodo = async (text, dateStr) => {
-    if (!text.trim()) {
-        showToast("내용을 입력해주세요.", true);
-        return;
-    }
+    if (!text.trim()) { showToast("내용을 입력해주세요.", true); return; }
     const newTodo = {
-        id: createId(),
-        text: text.trim(),
-        completed: false,
-        dueDateTime: dateStr || null, 
-        alertConfirmed: false, // ✅ 수정: alertSent -> alertConfirmed
-        createdAt: Date.now()
+        id: createId(), text: text.trim(), completed: false, dueDateTime: dateStr || null, alertConfirmed: false, createdAt: Date.now()
     };
     State.appState.adminTodos.push(newTodo);
-    renderAdminTodoList();
     await saveAdminTodos();
 };
 
-// 5. 액션: 토글
 export const toggleTodo = async (id) => {
     const todo = State.appState.adminTodos.find(t => t.id === id);
     if (todo) {
         todo.completed = !todo.completed;
-        renderAdminTodoList();
         await saveAdminTodos();
     }
 };
 
-// 6. 액션: 삭제
 export const deleteTodo = async (id) => {
     if (!confirm("이 할 일을 삭제하시겠습니까?")) return;
     State.appState.adminTodos = State.appState.adminTodos.filter(t => t.id !== id);
-    renderAdminTodoList();
     await saveAdminTodos();
 };
 
-// ✅ [수정] 7. 알림 체크 (사라지지 않는 팝업 로직)
 export const checkAdminTodoNotifications = async () => {
     const todos = State.appState.adminTodos || [];
     const now = new Date();
     
-    // 조건: 미완료 + 마감시간 지남 + 아직 확인 안 함(alertConfirmed == false)
-    const pendingTasks = todos.filter(t => 
-        !t.completed && 
-        t.dueDateTime && 
-        new Date(t.dueDateTime) <= now && 
-        !t.alertConfirmed
-    );
+    const pendingTasks = todos.filter(t => !t.completed && t.dueDateTime && new Date(t.dueDateTime) <= now && !t.alertConfirmed);
 
     if (pendingTasks.length > 0) {
-        // 모달 내용 업데이트
         if (DOM.adminTodoAlertModal && DOM.adminTodoAlertList) {
             DOM.adminTodoAlertList.innerHTML = pendingTasks.map(t => `
                 <div class="flex items-start gap-3 bg-white p-3 rounded border border-indigo-100 shadow-sm">
@@ -176,12 +182,8 @@ export const checkAdminTodoNotifications = async () => {
                 </div>
             `).join('');
             
-            // 🚨 여기서 바로 저장하지 않습니다! (버튼 누를 때 저장)
-            // 모달이 꺼져있다면 켬 (이미 켜져있으면 내용만 갱신됨)
             if (DOM.adminTodoAlertModal.classList.contains('hidden')) {
                 DOM.adminTodoAlertModal.classList.remove('hidden');
-                
-                // 브라우저 알림은 최초 팝업 시 1회만 (선택 사항)
                 if (Notification.permission === "granted") {
                     new Notification("할 일 마감 알림", { body: `${pendingTasks.length}건의 마감된 할 일이 있습니다.` });
                 }
@@ -190,13 +192,11 @@ export const checkAdminTodoNotifications = async () => {
     }
 };
 
-// ✅ [신규] 8. 알림 확인 처리 (버튼 클릭 시 호출)
 export const confirmPendingAlerts = async () => {
     const todos = State.appState.adminTodos || [];
     const now = new Date();
     let hasChanges = false;
 
-    // 현재 시점 기준으로 마감된 모든 미확인 항목을 '확인됨'으로 변경
     todos.forEach(t => {
         if (!t.completed && t.dueDateTime && new Date(t.dueDateTime) <= now && !t.alertConfirmed) {
             t.alertConfirmed = true; 
@@ -204,14 +204,76 @@ export const confirmPendingAlerts = async () => {
         }
     });
 
-    // 변경사항이 있으면 DB 저장 및 UI 갱신
     if (hasChanges) {
         await saveAdminTodos();
-        renderAdminTodoList(); // To-Do 리스트의 빨간 배지 제거 등 업데이트
     }
+    if (DOM.adminTodoAlertModal) { DOM.adminTodoAlertModal.classList.add('hidden'); }
+};
+
+// ==========================================
+// 3. 중요 알림(Notice) 전용 로직
+// ==========================================
+
+// 🔥 [신규] 텍스트 내에서 '@이름' 멘션을 찾아 알림을 발송하는 헬퍼 함수
+const processMentions = async (text) => {
+    const sender = State.appState.currentUser || '관리자';
+    const mentionRegex = /@([가-힣a-zA-Z0-9]+)/g;
+    const matches = [...text.matchAll(mentionRegex)];
     
-    // 모달 닫기
-    if (DOM.adminTodoAlertModal) {
-        DOM.adminTodoAlertModal.classList.add('hidden');
+    if (matches.length > 0) {
+        const uniqueMentions = [...new Set(matches.map(m => m[1]))];
+        
+        // 유효한 대상자인지 확인하기 위해 전체 멤버 세트 구성
+        const allMembers = new Set();
+        (State.appConfig?.teamGroups || []).forEach(g => g.members?.forEach(m => allMembers.add(m)));
+        (State.appState?.partTimers || []).forEach(p => allMembers.add(p.name));
+
+        const shortText = text.length > 20 ? text.substring(0, 20) + '...' : text;
+
+        for (const name of uniqueMentions) {
+            if (allMembers.has(name) && name !== sender) {
+                // 발송
+                await sendNotification(name, `🔔 중요 알림에서 ${sender}님이 회원님을 멘션했습니다:\n"${shortText}"`, 'mention');
+            }
+        }
+    }
+};
+
+export const addNotice = async (text) => {
+    if (!text.trim()) { showToast("알림 내용을 입력해주세요.", true); return; }
+    const newNotice = {
+        id: createId(), text: text.trim(), completed: false, createdAt: Date.now()
+    };
+    if(!State.appState.importantNotices) State.appState.importantNotices = [];
+    State.appState.importantNotices.push(newNotice);
+    
+    await saveAdminTodos();
+    
+    // 멘션 감지 및 푸시
+    await processMentions(text.trim());
+};
+
+export const toggleNotice = async (id) => {
+    const notice = State.appState.importantNotices.find(n => n.id === id);
+    if (notice) {
+        notice.completed = !notice.completed;
+        await saveAdminTodos();
+    }
+};
+
+export const deleteNotice = async (id) => {
+    if (!confirm("이 중요 알림을 삭제하시겠습니까?")) return;
+    State.appState.importantNotices = State.appState.importantNotices.filter(n => n.id !== id);
+    await saveAdminTodos();
+};
+
+export const editNotice = async (id, newText) => {
+    const notice = State.appState.importantNotices.find(n => n.id === id);
+    if (notice && newText.trim()) {
+        notice.text = newText.trim();
+        await saveAdminTodos();
+
+        // 수정 시에도 새롭게 멘션된 사람이 있다면 푸시
+        await processMentions(newText.trim());
     }
 };
