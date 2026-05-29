@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
+    <title>물류팀 데이터 관리</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = { darkMode: 'class', }
+        if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* 💡 탭 전환 시 hidden 클래스가 충돌하는 문제 방지 */
+        .hidden { display: none !important; }
+
+        /* HTML/Body 스크롤 꼬임 및 모바일 높이 무너짐 방지 */
+        html, body { 
+            height: 100% !important; 
+            margin: 0 !important; 
+            padding: 0 !important; 
+            overflow: hidden !important; 
+        }
+        body { 
+            background-color: #f9fafb; 
+            height: 100vh !important; /* 구형 기기 호환용 폴백(Fallback) */
+            height: 100dvh !important; 
+            display: flex; 
+            flex-direction: column; 
+        }
+        #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
+        
+        #modals-container-history { 
+            flex: 1 1 auto !important;
+            width: 100% !important; 
+            height: 100% !important; 
+            display: flex !important; 
+            flex-direction: column !important; 
+        }
+        
+        /* 💡 화면 깜빡임 방지: 페이드인 효과 */
+        #history-modal { 
+            position: fixed !important; 
+            inset: 0 !important;
+            display: flex !important; 
+            flex-direction: column !important;
+            background: #f9fafb !important; 
+            width: 100vw !important; 
+            height: 100vh !important; 
+            height: 100dvh !important; 
+            padding: 0 !important; 
+            margin: 0 !important;
+            z-index: 50 !important; 
+            opacity: 0; 
+            pointer-events: none;
+            transition: opacity 0.4s ease-out; 
+        }
+        
+        #history-modal.ready-show {
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
+        
+        #history-modal-content-box { 
+            flex: 1 1 auto !important;
+            width: 100% !important; 
+            max-width: none !important; 
+            height: 100% !important; 
+            max-height: none !important; 
+            border-radius: 0 !important; 
+            box-shadow: none !important; 
+            border: none !important;
+            margin: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+        
+        #history-modal-content-box > .flex-grow {
+            min-height: 0 !important; 
+            flex: 1 1 auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+        }
+
+        /* 💡 패널별 속성 분리 (rawdata-panel은 스크롤이 되면 안됩니다!) */
+        #dashboard-panel, #productivity-panel, #staffing-panel, #rawdata-panel {
+            min-height: 0 !important;
+            flex: 1 1 auto !important;
+        }
+        #dashboard-panel, #productivity-panel, #staffing-panel {
+            overflow-y: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+        }
+        #rawdata-panel {
+            overflow: hidden !important; 
+        }
+        
+        #toggle-history-fullscreen-btn, #close-history-btn, #history-modal-header { display: none !important; }
+    </style>
+</head>
+<body class="text-gray-800 font-['Inter'] transition-colors duration-200">
+    <div id="toast-container" class="space-y-2 w-full max-w-xs"></div>
+
+    <div id="modals-container-history" class="w-full h-full"></div>
+    <div id="modals-container-history-popups"></div>
+    <div id="modals-container-form"></div> 
+    <div id="modals-container-download"></div>
+    <div id="modals-container-confirm"></div>
+    
+    <script>
+        async function loadComponent(url, containerId) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const html = await response.text();
+                document.getElementById(containerId).innerHTML = html;
+            } catch (error) {
+                console.error("컴포넌트 로딩 실패:", error);
+            }
+        }
+
+        async function initHistoryApp() {
+            await Promise.all([
+                loadComponent('components/modals-history.html', 'modals-container-history'),
+                loadComponent('components/modals-history-popups.html', 'modals-container-history-popups'),
+                loadComponent('components/modals-confirm.html', 'modals-container-confirm'),
+                loadComponent('components/modals-form.html', 'modals-container-form') 
+            ]);
+
+            try {
+                const State = await import('./js/state.js');
+                try { await import('./js/app.js'); } catch(e) {} 
+                
+                const { loadAndRenderHistoryList, switchHistoryView } = await import('./js/app-history-logic.js');
+
+                const triggerInitialUI = () => {
+                    // 💡 [안전장치 추가] 0.3초 뒤 무조건 화면을 표시하여 투명한 상태에 영원히 갇히는 현상 방지
+                    setTimeout(() => {
+                        const modal = document.getElementById('history-modal');
+                        if (modal) {
+                            modal.classList.remove('hidden');
+                            modal.classList.add('ready-show');
+                        }
+                    }, 300);
+
+                    let uiAttempts = 0;
+                    const triggerInterval = setInterval(() => {
+                        uiAttempts++;
+                        
+                        const dashboardMainTabBtn = document.querySelector('[data-main-tab="dashboard"]');
+                        const rawdataMainTabBtn = document.querySelector('[data-main-tab="rawdata"]');
+                        const tabButtons = Array.from(document.querySelectorAll('.history-tab-btn, button'));
+                        const dailyTabBtn = tabButtons.find(btn => btn.textContent && btn.textContent.trim().includes('일별 상세'));
+                        const firstDateItem = document.querySelector('#history-date-list li');
+
+                        if (dashboardMainTabBtn && rawdataMainTabBtn && dailyTabBtn && firstDateItem) {
+                            clearInterval(triggerInterval);
+                            
+                            try {
+                                rawdataMainTabBtn.click();
+                                dailyTabBtn.click();
+                                if (typeof switchHistoryView === 'function') switchHistoryView('daily'); 
+                                
+                                setTimeout(() => {
+                                    if (firstDateItem) firstDateItem.click();
+                                    
+                                    setTimeout(() => {
+                                        if (dashboardMainTabBtn) dashboardMainTabBtn.click();
+                                        
+                                        setTimeout(() => {
+                                            const modal = document.getElementById('history-modal');
+                                            if (modal) {
+                                                modal.classList.remove('hidden');
+                                                modal.classList.add('ready-show');
+                                            }
+                                        }, 150);
+                                        
+                                    }, 100);
+                                }, 100);
+                            } catch (e) {
+                                console.error("백그라운드 UI 렌더링 오류:", e);
+                                if (dashboardMainTabBtn) dashboardMainTabBtn.click();
+                                setTimeout(() => {
+                                    const modal = document.getElementById('history-modal');
+                                    if (modal) modal.classList.add('ready-show');
+                                }, 150);
+                            }
+                            
+                        } else if (uiAttempts > 50) {
+                            clearInterval(triggerInterval);
+                            const dashboardMainTabBtn = document.querySelector('[data-main-tab="dashboard"]');
+                            if (dashboardMainTabBtn) dashboardMainTabBtn.click();
+                            setTimeout(() => {
+                                const modal = document.getElementById('history-modal');
+                                if (modal) modal.classList.add('ready-show');
+                            }, 150);
+                        }
+                    }, 100);
+                };
+
+                let checkCount = 0;
+                const waitForAuth = setInterval(async () => {
+                    if (State.auth && typeof State.auth.onAuthStateChanged === 'function') {
+                        clearInterval(waitForAuth);
+                        
+                        State.auth.onAuthStateChanged(async (user) => {
+                            if (!user) {
+                                alert("로그인이 필요합니다. 메인 대시보드 창에서 먼저 로그인해주세요.");
+                                window.close();
+                                return;
+                            }
+
+                            const waitForData = setInterval(async () => {
+                                if (State.appConfig && Object.keys(State.appConfig).length > 0) {
+                                    clearInterval(waitForData);
+                                    await loadAndRenderHistoryList();
+                                    
+                                    const modal = document.getElementById('history-modal');
+                                    if (modal) modal.classList.remove('hidden');
+
+                                    triggerInitialUI();
+                                }
+                            }, 100);
+                        });
+                    }
+                    
+                    if (checkCount > 30) {
+                        clearInterval(waitForAuth);
+                        if (!State.appState || !State.appState.currentUser) {
+                             alert("로그인 정보를 찾을 수 없습니다.");
+                             window.close();
+                             return;
+                        }
+                        
+                        const fallbackWaitForData = setInterval(async () => {
+                            if (State.appConfig && Object.keys(State.appConfig).length > 0) {
+                                clearInterval(fallbackWaitForData);
+                                await loadAndRenderHistoryList();
+                                
+                                const modal = document.getElementById('history-modal');
+                                if (modal) modal.classList.remove('hidden');
+                                
+                                triggerInitialUI();
+                            }
+                        }, 100);
+                    }
+                    checkCount++;
+                }, 100);
+
+            } catch (e) {
+                console.error("데이터 관리 스크립트 로딩 실패:", e);
+            }
+        }
+
+        initHistoryApp();
+    </script>
+</body>
+</html>

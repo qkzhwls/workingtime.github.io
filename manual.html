@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko" class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>업무 매뉴얼 - 물류팀 시스템</title>
+    
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <script>
+        tailwind.config = { darkMode: 'class' };
+        if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+    <script>window.Quill = Quill;</script>
+    <script src="https://cdn.jsdelivr.net/npm/quill-image-resize-module@3.0.0/image-resize.min.js"></script>
+
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .dark ::-webkit-scrollbar-thumb { background: #475569; }
+        
+        .ql-toolbar { flex-shrink: 0; background-color: #f9fafb; border: none !important; border-bottom: 1px solid #e5e7eb !important; border-top-left-radius: 0.5rem; border-top-right-radius: 0.5rem; z-10; padding: 0.5rem !important; }
+        .dark .ql-toolbar { background-color: #374151; border-bottom-color: #4b5563 !important; }
+        .dark .ql-stroke { stroke: #d1d5db; }
+        .dark .ql-fill { fill: #d1d5db; }
+        .dark .ql-picker { color: #d1d5db; }
+        
+        .ql-container { display: flex; flex-direction: column; flex: 1; min-height: 0; border: none !important; border-bottom-left-radius: 0.5rem; border-bottom-right-radius: 0.5rem; background-color: #fff; }
+        .dark .ql-container { background-color: #1f2937; color: #e5e7eb; }
+        
+        .ql-editor { flex: 1; overflow-y: auto; padding: 1rem 1.2rem; font-size: 14px; }
+        
+        .ql-editor img, .prose img { max-width: 100%; height: auto; border-radius: 6px; margin: 10px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; }
+        .prose p { margin-top: 0.5em; margin-bottom: 0.5em; }
+        
+        .prose .ql-align-center { text-align: center !important; }
+        .prose .ql-align-right { text-align: right !important; }
+        .prose .ql-align-justify { text-align: justify !important; }
+        .prose blockquote { border-left-color: #3b82f6; font-style: normal; background-color: #f3f4f6; padding: 0.5rem 1rem; border-radius: 0 0.5rem 0.5rem 0; }
+        .dark .prose blockquote { background-color: #374151; border-left-color: #60a5fa; color: #d1d5db; }
+        
+        .ql-editor hr, .prose hr { border: none; border-top: 2px solid #e2e8f0; margin: 2rem 0; }
+        .dark .ql-editor hr, .dark .prose hr { border-top-color: #374151; }
+        
+        #view-body, .ql-editor { transition: zoom 0.2s ease; }
+    </style>
+</head>
+<body class="text-gray-800 dark:text-gray-200 overflow-hidden flex h-screen relative">
+
+    <button id="mobile-menu-btn" class="md:hidden absolute top-4 left-4 z-50 p-2 bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+    </button>
+
+    <aside id="sidebar" class="absolute md:relative w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col z-40 shadow-2xl md:shadow-none shrink-0 transition-transform duration-300 h-full transform -translate-x-full md:translate-x-0">
+        <div class="p-5 border-b border-gray-100 dark:border-gray-700 flex flex-col gap-4 shrink-0 pt-16 md:pt-5">
+            <div class="flex items-center justify-between">
+                <h1 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><span>📚</span> 업무 매뉴얼</h1>
+                <button id="btn-close-window" class="text-xs text-gray-500 hover:text-gray-800 dark:hover:text-white bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded transition font-bold hidden md:block">창 닫기</button>
+                <button id="mobile-close-btn" class="md:hidden p-1 text-gray-500 hover:text-gray-800 dark:hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-900 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-inner">
+                <span class="text-xs font-bold text-gray-600 dark:text-gray-400">🔍 본문 배율</span>
+                <div class="flex items-center gap-2">
+                    <button id="btn-zoom-out" class="w-6 h-6 flex items-center justify-center bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-200 hover:bg-gray-100 font-bold transition shadow-sm">-</button>
+                    <span id="zoom-level" class="text-xs font-bold text-gray-800 dark:text-gray-200 w-10 text-center font-mono">80%</span>
+                    <button id="btn-zoom-in" class="w-6 h-6 flex items-center justify-center bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded text-gray-700 dark:text-gray-200 hover:bg-gray-100 font-bold transition shadow-sm">+</button>
+                </div>
+            </div>
+
+            <div>
+                <input type="text" id="manual-search-input" class="w-full p-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900 outline-none focus:border-blue-500 transition-colors shadow-inner" placeholder="🔍 제목, 파트, 담당자 검색...">
+            </div>
+            <button id="btn-new-manual" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg transition shadow-sm text-sm hidden">
+                + 새 매뉴얼 작성
+            </button>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto p-3 custom-scrollbar" id="manual-list-container">
+            <div class="flex justify-center items-center h-full text-gray-400 text-sm">목록을 불러오는 중...</div>
+        </div>
+    </aside>
+
+    <div id="mobile-dim" class="fixed inset-0 bg-black bg-opacity-50 z-30 hidden transition-opacity"></div>
+
+    <main class="flex-1 flex flex-col relative h-full overflow-hidden bg-gray-50 dark:bg-gray-900 w-full">
+        
+        <div id="manual-view-area" class="absolute inset-0 overflow-y-auto custom-scrollbar p-4 md:p-6 pt-16 md:pt-6 w-full bg-gray-50 dark:bg-gray-900">
+            <div class="w-full min-h-full bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col">
+                <div id="viewer-empty" class="flex-1 flex flex-col justify-center items-center text-gray-400 p-10 text-center min-h-[500px]">
+                    <span class="text-6xl mb-4">📖</span>
+                    <p class="text-lg">좌측에서 매뉴얼을 검색하거나 선택해주세요.</p>
+                </div>
+                <div id="viewer-content" class="hidden flex-col">
+                    <div class="p-6 md:p-8 border-b border-gray-100 dark:border-gray-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gray-50/50 dark:bg-gray-900/50 rounded-t-2xl">
+                        <div class="flex-1 w-full">
+                            <div class="flex flex-wrap items-center gap-3 mb-3">
+                                <span id="view-type-badge" class="px-2.5 py-1 text-xs font-bold rounded bg-indigo-100 text-indigo-800 border border-indigo-200 shadow-sm">분류</span>
+                                <span id="view-access-badge" class="hidden px-2.5 py-1 text-xs font-bold rounded bg-red-100 text-red-800 border border-red-200 shadow-sm">🔒 지정 인원만 열람 가능</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">담당 관리자: <span id="view-manager" class="font-bold text-gray-800 dark:text-gray-200"></span></span>
+                            </div>
+                            <h2 id="view-title" class="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-white leading-tight">제목</h2>
+                            <div class="flex flex-wrap gap-4 mt-3 text-[11px] text-gray-400 dark:text-gray-500 font-mono">
+                                <span>최초 작성일: <span id="view-created-date" class="text-gray-500 dark:text-gray-300"></span></span>
+                                <span>최종 수정일: <span id="view-updated-date" class="text-blue-500 dark:text-blue-400 font-bold"></span></span>
+                            </div>
+                        </div>
+                        <div class="flex gap-2 w-full md:w-auto justify-end mt-2 md:mt-0 shrink-0">
+                            <button id="btn-edit-manual" class="text-sm px-5 py-2 border border-gray-300 rounded-lg font-bold text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 hidden transition shadow-sm bg-white dark:bg-gray-800">수정</button>
+                            <button id="btn-delete-manual" class="text-sm px-5 py-2 border border-red-200 rounded-lg font-bold text-red-600 hover:bg-red-50 hidden transition shadow-sm bg-white dark:bg-gray-800">삭제</button>
+                        </div>
+                    </div>
+                    <div class="p-6 md:p-10 flex flex-col gap-6">
+                        <div id="view-body" class="prose prose-sm md:prose-base dark:prose-invert max-w-none w-full text-gray-800 dark:text-gray-200 leading-relaxed"></div>
+                        
+                        <div id="view-attachment" class="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 hidden">
+                            <h4 class="text-sm font-bold text-gray-500 mb-3 uppercase tracking-wider">📎 원본 파일 다운로드</h4>
+                            <a id="view-file-link" href="#" target="_blank" class="inline-flex items-center gap-4 px-6 py-4 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition group w-auto max-w-md shadow-sm">
+                                <span class="text-3xl">📄</span>
+                                <div class="flex flex-col overflow-hidden">
+                                    <span id="view-file-name" class="text-base font-bold text-blue-800 dark:text-blue-300 group-hover:underline transition truncate">파일명</span>
+                                    <span class="text-xs text-blue-600/70 dark:text-blue-400 mt-1">클릭하여 파일 열기 / 다운로드</span>
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="manual-edit-area" class="absolute inset-0 z-10 p-3 md:p-4 pt-14 md:pt-4 bg-gray-50 dark:bg-gray-900 hidden w-full flex flex-col">
+            <div class="w-full flex-1 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden min-h-0">
+                
+                <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-800 shrink-0">
+                    <h2 class="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">✍️ 매뉴얼 작성 및 수정</h2>
+                    <div class="flex gap-2 shrink-0">
+                        <button id="btn-cancel-edit" class="text-xs font-bold px-4 py-1.5 border border-gray-300 rounded text-gray-600 hover:bg-gray-100 transition shadow-sm bg-white dark:bg-gray-800">작성 취소</button>
+                        <button id="btn-save-manual" class="text-xs font-bold px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded transition shadow-sm">저장하기</button>
+                    </div>
+                </div>
+                
+                <div class="p-3 md:p-4 flex flex-col flex-1 gap-3 bg-white dark:bg-gray-800 min-h-0 overflow-y-auto custom-scrollbar">
+                    <div class="grid grid-cols-1 md:grid-cols-12 gap-3 shrink-0">
+                        <div class="md:col-span-6 flex flex-col justify-end">
+                            <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1">매뉴얼 제목</label>
+                            <input type="text" id="edit-title" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 text-sm font-bold dark:text-white outline-none focus:border-blue-500 transition-colors shadow-inner" placeholder="이해하기 쉬운 매뉴얼 제목을 입력하세요">
+                        </div>
+                        <div class="md:col-span-3 flex flex-col justify-end">
+                            <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1">담당 파트 (분류)</label>
+                            <select id="edit-category" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 text-sm font-bold dark:text-white outline-none focus:border-blue-500 transition-colors shadow-inner"></select>
+                        </div>
+                        <div class="md:col-span-3 flex flex-col justify-end">
+                            <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1">담당 관리자</label>
+                            <select id="edit-manager" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 text-sm font-bold dark:text-white outline-none focus:border-blue-500 transition-colors shadow-inner"></select>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col shrink-0 bg-gray-50 dark:bg-gray-800/50 p-3 rounded border border-gray-200 dark:border-gray-700">
+                        <div class="flex items-center gap-3">
+                            <label class="text-[11px] font-bold text-gray-500 dark:text-gray-400 whitespace-nowrap">열람 권한</label>
+                            <select id="edit-access-level" class="p-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-900 text-xs font-bold dark:text-white outline-none focus:border-blue-500 shadow-sm">
+                                <option value="public">🌐 전체 공개 (누구나 열람 가능)</option>
+                                <option value="private">🔒 특정 인원만 열람 (비공개)</option>
+                            </select>
+                        </div>
+                        <div id="edit-access-members-container" class="hidden mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex flex-wrap gap-x-6 gap-y-3">
+                            </div>
+                    </div>
+
+                    <div class="flex flex-col flex-1 min-h-[300px]">
+                        <div class="flex flex-col md:flex-row md:items-end justify-between mb-1.5 shrink-0 gap-2">
+                            <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400">
+                                본문 내용 <span class="font-normal text-gray-400 text-[10px] ml-1">※ 이미지는 복사해서 붙여넣기 후 드래그하여 크기 조절</span>
+                            </label>
+                            <div class="flex items-center gap-1 overflow-x-auto custom-scrollbar pb-1">
+                                <button type="button" id="btn-load-template" class="text-[11px] px-2.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 border border-indigo-200 dark:border-indigo-800 rounded transition shadow-sm text-indigo-700 dark:text-indigo-300 font-bold mr-2 flex items-center gap-1">
+                                    <span class="text-xs">📝</span> 기본 양식 삽입
+                                </button>
+                                
+                                <span class="text-[10px] text-gray-500 font-bold mr-1 whitespace-nowrap">자주 쓰는 기호:</span>
+                                <button type="button" class="symbol-btn text-xs px-2 py-0.5 bg-white dark:bg-gray-700 hover:bg-blue-50 border border-gray-200 dark:border-gray-600 rounded transition shadow-sm text-gray-700 dark:text-gray-200">★</button>
+                                <button type="button" class="symbol-btn text-xs px-2 py-0.5 bg-white dark:bg-gray-700 hover:bg-blue-50 border border-gray-200 dark:border-gray-600 rounded transition shadow-sm text-gray-700 dark:text-gray-200">※</button>
+                                <button type="button" class="symbol-btn text-xs px-2 py-0.5 bg-white dark:bg-gray-700 hover:bg-blue-50 border border-gray-200 dark:border-gray-600 rounded transition shadow-sm text-gray-700 dark:text-gray-200">✓</button>
+                                <button type="button" class="symbol-btn text-xs px-2 py-0.5 bg-white dark:bg-gray-700 hover:bg-blue-50 border border-gray-200 dark:border-gray-600 rounded transition shadow-sm text-gray-700 dark:text-gray-200">→</button>
+                                <button type="button" class="symbol-btn text-xs px-2 py-0.5 bg-white dark:bg-gray-700 hover:bg-blue-50 border border-gray-200 dark:border-gray-600 rounded transition shadow-sm text-gray-700 dark:text-gray-200">▶</button>
+                                <button type="button" class="symbol-btn text-xs px-2 py-0.5 bg-white dark:bg-gray-700 hover:bg-blue-50 border border-gray-200 dark:border-gray-600 rounded transition shadow-sm text-gray-700 dark:text-gray-200">■</button>
+                                <button type="button" class="symbol-btn text-xs px-2 py-0.5 bg-white dark:bg-gray-700 hover:bg-blue-50 border border-gray-200 dark:border-gray-600 rounded transition shadow-sm text-gray-700 dark:text-gray-200">💡</button>
+                                <button type="button" class="symbol-btn text-xs px-2 py-0.5 bg-white dark:bg-gray-700 hover:bg-blue-50 border border-gray-200 dark:border-gray-600 rounded transition shadow-sm text-gray-700 dark:text-gray-200">🚨</button>
+                                <button type="button" id="btn-divider" class="text-[11px] px-2.5 py-0.5 bg-gray-100 dark:bg-gray-600 hover:bg-gray-200 dark:hover:bg-gray-500 border border-gray-200 dark:border-gray-500 rounded transition shadow-sm text-gray-700 dark:text-gray-200 font-bold ml-1 flex items-center gap-1"><span class="text-xs">➖</span> 구분선</button>
+                                
+                                <button type="button" id="btn-add-step" class="text-[11px] px-2.5 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 rounded transition shadow-sm text-emerald-700 dark:text-emerald-300 font-bold ml-1 flex items-center gap-1">
+                                    <span class="text-xs">➕</span> 단계 추가
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col flex-1 border border-gray-300 dark:border-gray-600 rounded shadow-sm overflow-hidden bg-white">
+                            <div id="quill-editor" class="w-full flex-1"></div>
+                        </div>
+                    </div>
+
+                    <div class="shrink-0 bg-gray-50 dark:bg-gray-900/50 p-2.5 rounded border border-gray-200 dark:border-gray-700 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div class="flex flex-col">
+                            <label class="text-[11px] font-bold text-gray-600 dark:text-gray-300 flex items-center gap-1">📁 참고 파일 첨부 (선택)</label>
+                            <span class="text-[10px] text-gray-400">워드, 엑셀, PDF, 압축파일, 실행파일(.exe) 등 모든 파일 첨부 가능</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="file" id="edit-file-upload" accept=".pdf, .xlsx, .xls, .doc, .docx, .ppt, .pptx, .hwp, .txt, .zip, .rar, .7z, .exe, .msi, .bat, .apk" class="hidden">
+                            <span id="upload-file-name" class="text-xs font-medium text-gray-500 px-2 py-1.5 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700 truncate max-w-[200px] shadow-sm">선택된 파일 없음</span>
+                            <button id="btn-trigger-upload" class="px-3 py-1.5 border border-indigo-200 bg-indigo-50 text-indigo-700 text-xs font-bold rounded hover:bg-indigo-100 transition shadow-sm whitespace-nowrap">
+                                파일 찾기
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    
+    <script>
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const mobileCloseBtn = document.getElementById('mobile-close-btn');
+        const sidebar = document.getElementById('sidebar');
+        const mobileDim = document.getElementById('mobile-dim');
+
+        function toggleSidebar() {
+            const isClosed = sidebar.classList.contains('-translate-x-full');
+            if (isClosed) {
+                sidebar.classList.remove('-translate-x-full');
+                mobileDim.classList.remove('hidden');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                mobileDim.classList.add('hidden');
+            }
+        }
+
+        if(mobileMenuBtn) mobileMenuBtn.addEventListener('click', toggleSidebar);
+        if(mobileCloseBtn) mobileCloseBtn.addEventListener('click', toggleSidebar);
+        if(mobileDim) mobileDim.addEventListener('click', toggleSidebar);
+    </script>
+
+    <script type="module" src="js/manual.js"></script>
+</body>
+</html>
