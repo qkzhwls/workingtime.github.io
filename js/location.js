@@ -268,6 +268,11 @@ window.onload = () => {
     if (typeof window.loadOrderPairsCache === 'function') {
         window.loadOrderPairsCache();
     }
+    // v4.4: 종합 대시보드 + 재고 스냅샷 초기화 (history 리스너 + 사후 보정)
+    if (typeof window._v44_init === 'function') {
+        // 다른 리스너들이 먼저 초기화될 시간을 주기 위해 약간 지연
+        setTimeout(() => { window._v44_init(); }, 1500);
+    }
 };
 
 window.handleDragStart = (e) => {
@@ -3405,6 +3410,10 @@ async function updateDatabaseA(rows, mode = 'daily') {
         let skipCount = 0;
         let zoneUpdates = {};
         
+        // v4.4: 2F SKU 카운트 (로케이션이 "2F-..." 형태인 행의 고유 상품코드 수)
+        const twoFloorCodes = new Set();
+        let twoFloorStockSum = 0;
+        
         let existingLocMap = {};
         originalData.forEach(d => { existingLocMap[d.id] = d; });
         
@@ -3444,6 +3453,39 @@ async function updateDatabaseA(rows, mode = 'daily') {
 
             const rawLoc = row['로케이션']?.toString().trim();
             if (rawLoc) {
+                // v4.4: 2F 로케이션 감지 ("2F-..." 형태)
+                // 예: "2F-S614130 I-49"
+                if (rawLoc.toUpperCase().startsWith('2F-')) {
+                    // 2F 행: 상품코드 추출
+                    // "2F-S614130 I-49" → "S614130"
+                    const afterPrefix = rawLoc.substring(3).trim(); // "S614130 I-49"
+                    let twoFCode = '';
+                    // S로 시작하는 첫 토큰 추출
+                    const tokens = afterPrefix.split(/\s+/);
+                    for (const tk of tokens) {
+                        const trimmed = tk.trim();
+                        if (trimmed && trimmed.charAt(0).toUpperCase() === 'S') {
+                            twoFCode = trimmed;
+                            break;
+                        }
+                    }
+                    // S로 시작하는 토큰이 없으면 row['상품코드'] 사용
+                    if (!twoFCode) {
+                        twoFCode = (row['상품코드'] || '').toString().trim();
+                    }
+                    if (twoFCode) {
+                        twoFloorCodes.add(twoFCode);
+                        // 2F 재고 수량 누적 (정상재고 또는 2층창고재고 컬럼 사용)
+                        const stockVal = Number(row['정상재고'] || row['2층창고재고'] || 0);
+                        if (!isNaN(stockVal) && stockVal > 0) {
+                            twoFloorStockSum += stockVal;
+                        }
+                    }
+                    // 2F 행은 3층 로케이션 시스템에 저장하지 않음 (계속 skip)
+                    skipCount++;
+                    continue;
+                }
+                
                 let cleanLocId = ''; let extractedCode = '';
                 if (rawLoc.includes('(')) {
                     cleanLocId = rawLoc.split('(')[0].trim();
@@ -3579,11 +3621,34 @@ async function updateDatabaseA(rows, mode = 'daily') {
             await batch.commit();
         }
         
+        // v4.4: 2F SKU 데이터 Firestore에 저장 (daily 모드에서만)
+        let twoFloorMsgPart = '';
+        if (mode === 'daily') {
+            try {
+                const twoFloorData = {
+                    skuCount: twoFloorCodes.size,
+                    totalStock: twoFloorStockSum,
+                    codes: Array.from(twoFloorCodes), // 디버그/검증용
+                    savedAt: new Date(),
+                    sourceDate: window._v44_getTodayDateString ? window._v44_getTodayDateString() : new Date().toISOString().slice(0, 10)
+                };
+                await setDoc(doc(db, 'artifacts', 'team-work-logger-v2', 'locationStock', 'twoFloorLatest'), twoFloorData);
+                console.log('[v4.4] 2F SKU 데이터 저장 완료: SKU', twoFloorCodes.size, '개 / 총 재고', twoFloorStockSum);
+                twoFloorMsgPart = `\n(2F 상품 ${twoFloorCodes.size}종 / 재고 ${twoFloorStockSum.toLocaleString()}장도 별도 집계됨)`;
+                
+                // 메모리 캐시 갱신 (대시보드 즉시 반영용)
+                window._cached2FloorStock = twoFloorData;
+            } catch (e) {
+                console.error('[v4.4] 2F SKU 저장 실패:', e);
+            }
+        }
+        
         if (mode === 'permanent') {
             alert(`✅ 완료! ${updateCount}개 로케이션의 랙 구조(동/위치) 영구 세팅이 완료되었습니다.`);
         } else {
             let msg = `✅ 스마트 클린 업데이트 완료!\n과거 유령 재고는 완벽히 비워졌고, 엑셀의 최신 데이터 ${updateCount}건만 정확하게 반영되었습니다.`;
-            if(skipCount > 0) msg += `\n(※ 기존 도면에 없는 낯선 로케이션 ${skipCount}건 무시됨)`;
+            if(skipCount > 0) msg += `\n(※ 기존 도면에 없거나 2F 로케이션 ${skipCount}건은 3층 시스템에서 무시됨)`;
+            if(twoFloorMsgPart) msg += twoFloorMsgPart;
             alert(msg);
             
             // v3.97b: 일일 최신화 완료 후 단종 페어 자동 정리 (비동기, alert 차단 안 함)
@@ -5421,3 +5486,421 @@ window.showPairRecommendation = function() {
         }
     }, 500);
 };
+// ====================================================================
+// ===== v4.4: 종합 대시보드 + 전일 재고 스냅샷 (메인 시스템 연동) =====
+// ====================================================================
+// 알고리즘:
+//   1. 메인 시스템의 artifacts/team-work-logger-v2/history 컬렉션 감시
+//   2. 새 문서(YYYY-MM-DD) 추가 = 업무 마감 발생 → 재고 스냅샷 저장
+//   3. 페이지 로드 시 사후 보정: 마지막 history 날짜 vs 저장된 재고 날짜 비교
+//      - 다르면 마감 후 미저장 상태 → 현재 시점에 사후 저장
+//   4. 저장 구조: artifacts/team-work-logger-v2/locationStock/latest
+//      { current: {...}, previous: {...} } 형태로 직전 1개만 유지
+//   5. 종합 대시보드 탭: 사용률 팝업 내용 + SKU + 재고회전율 통합
+(function v44Module() {
+    // ===== 유틸: 오늘 날짜 문자열 (메인 시스템과 동일 KST 보정 방식) =====
+    window._v44_getTodayDateString = function() {
+        const now = new Date();
+        const offset = now.getTimezoneOffset() * 60000;
+        const localDate = new Date(now - offset);
+        return localDate.toISOString().slice(0, 10);
+    };
+    
+    // ===== 현재 재고 집계 =====
+    // 3층은 originalData에서 stock 합산, 2F는 캐시된 데이터에서 가져옴
+    window._v44_calculateCurrentStock = function() {
+        let stock3F = 0;
+        const codes3F = new Set();
+        try {
+            (originalData || []).forEach(loc => {
+                const s = Number(loc.stock || 0);
+                if (!isNaN(s) && s > 0) stock3F += s;
+                const c = (loc.code || '').toString().trim();
+                if (c && c !== loc.id) codes3F.add(c);
+            });
+        } catch (e) {
+            console.warn('[v4.4] 3층 재고 집계 오류:', e);
+        }
+        
+        const cached2F = window._cached2FloorStock || {};
+        const stock2F = Number(cached2F.totalStock || 0);
+        const sku2F = Number(cached2F.skuCount || 0);
+        
+        return {
+            stock3F: stock3F,
+            stock2F: stock2F,
+            sku3F: codes3F.size,
+            sku2F: sku2F,
+            date: window._v44_getTodayDateString()
+        };
+    };
+    
+    // ===== 2F 캐시 로드 =====
+    window._v44_load2FloorCache = async function() {
+        try {
+            const docRef = doc(db, 'artifacts', 'team-work-logger-v2', 'locationStock', 'twoFloorLatest');
+            const snap = await getDoc(docRef);
+            if (snap.exists()) {
+                window._cached2FloorStock = snap.data();
+                console.log('[v4.4] 2F 캐시 로드 완료: SKU', window._cached2FloorStock.skuCount, '개');
+            } else {
+                window._cached2FloorStock = { skuCount: 0, totalStock: 0 };
+                console.log('[v4.4] 2F 캐시 없음 (첫 적용)');
+            }
+        } catch (e) {
+            console.warn('[v4.4] 2F 캐시 로드 실패:', e);
+            window._cached2FloorStock = { skuCount: 0, totalStock: 0 };
+        }
+    };
+    
+    // ===== 재고 스냅샷 로드 =====
+    window._v44_loadStockSnapshot = async function() {
+        try {
+            const docRef = doc(db, 'artifacts', 'team-work-logger-v2', 'locationStock', 'latest');
+            const snap = await getDoc(docRef);
+            if (snap.exists()) {
+                window._cachedStockSnapshot = snap.data();
+                console.log('[v4.4] 재고 스냅샷 로드: current.date =', (window._cachedStockSnapshot.current || {}).date, '/ previous.date =', (window._cachedStockSnapshot.previous || {}).date);
+            } else {
+                window._cachedStockSnapshot = { current: null, previous: null };
+                console.log('[v4.4] 재고 스냅샷 없음 (첫 적용)');
+            }
+        } catch (e) {
+            console.warn('[v4.4] 재고 스냅샷 로드 실패:', e);
+            window._cachedStockSnapshot = { current: null, previous: null };
+        }
+    };
+    
+    // ===== 재고 스냅샷 저장 (current → previous로 밀고, 새 값을 current에 저장) =====
+    window._v44_saveStockSnapshot = async function(triggerDate) {
+        const newCurrent = window._v44_calculateCurrentStock();
+        newCurrent.triggerDate = triggerDate || newCurrent.date; // 업무 마감일 (history 문서 ID)
+        newCurrent.savedAt = new Date();
+        
+        const existing = window._cachedStockSnapshot || { current: null, previous: null };
+        const newSnapshot = {
+            current: newCurrent,
+            previous: existing.current || null  // 직전 current가 previous로 이동
+        };
+        
+        try {
+            const docRef = doc(db, 'artifacts', 'team-work-logger-v2', 'locationStock', 'latest');
+            await setDoc(docRef, newSnapshot);
+            window._cachedStockSnapshot = newSnapshot;
+            console.log('[v4.4] 재고 스냅샷 저장 완료: triggerDate =', triggerDate, '/ 3층', newCurrent.stock3F, '/ 2F', newCurrent.stock2F);
+            return true;
+        } catch (e) {
+            console.error('[v4.4] 재고 스냅샷 저장 실패:', e);
+            return false;
+        }
+    };
+    
+    // ===== history 컬렉션 감시 (업무 마감 트리거) =====
+    // 새 문서 추가만 감지
+    window._v44_setupHistoryListener = function() {
+        try {
+            const historyColl = collection(db, 'artifacts', 'team-work-logger-v2', 'history');
+            window._v44_historyUnsub = onSnapshot(historyColl, (snapshot) => {
+                let newDocs = [];
+                snapshot.docChanges().forEach(change => {
+                    if (change.type === 'added') {
+                        newDocs.push(change.doc.id);
+                    }
+                });
+                if (newDocs.length === 0) return;
+                
+                // 초기 리스너 호출(처음 데이터 로드 시)도 'added'로 분류되므로, 
+                // 캐시된 last triggerDate와 비교해서 진짜 새 마감만 처리
+                const latestNew = newDocs.sort().pop(); // 가장 최신 날짜
+                const cached = window._cachedStockSnapshot || {};
+                const lastSaved = (cached.current || {}).triggerDate || '';
+                
+                if (latestNew > lastSaved) {
+                    console.log('[v4.4] history 신규 문서 감지:', latestNew, '/ 직전 저장:', lastSaved || '없음');
+                    window._v44_saveStockSnapshot(latestNew).then(ok => {
+                        if (ok) {
+                            // 대시보드 보고 있으면 자동 새로고침
+                            const dashView = document.getElementById('view-dashboard');
+                            if (dashView && dashView.style.display !== 'none') {
+                                window._v44_renderDashboard();
+                            }
+                        }
+                    });
+                }
+            }, (err) => {
+                console.warn('[v4.4] history 리스너 오류:', err);
+            });
+        } catch (e) {
+            console.warn('[v4.4] history 리스너 설정 실패:', e);
+        }
+    };
+    
+    // ===== 페이지 로드 시 사후 보정 =====
+    // 마지막 history 문서와 저장된 재고 날짜 비교 → 다르면 현재 시점에 저장
+    window._v44_postLoadCheck = async function() {
+        try {
+            const historyColl = collection(db, 'artifacts', 'team-work-logger-v2', 'history');
+            const historySnap = await getDocs(historyColl);
+            if (historySnap.empty) {
+                console.log('[v4.4] 사후 보정: history 컬렉션 비어있음 → 보정 불필요');
+                return;
+            }
+            
+            // 가장 최신 history 문서 ID 찾기 (날짜 문자열이므로 sort 가능)
+            const allDates = [];
+            historySnap.forEach(d => allDates.push(d.id));
+            allDates.sort();
+            const latestHistoryDate = allDates[allDates.length - 1];
+            
+            const cached = window._cachedStockSnapshot || {};
+            const lastSavedTrigger = (cached.current || {}).triggerDate || '';
+            
+            if (latestHistoryDate > lastSavedTrigger) {
+                console.log('[v4.4] 사후 보정 필요: 마지막 마감일', latestHistoryDate, '> 저장된 재고', lastSavedTrigger || '없음');
+                console.log('[v4.4] 현재 시점 재고로 사후 저장 (마감 시점 재고가 아닌 페이지 로드 시점 재고)');
+                await window._v44_saveStockSnapshot(latestHistoryDate);
+            } else {
+                console.log('[v4.4] 사후 보정 불필요: 저장된 재고가 최신');
+            }
+        } catch (e) {
+            console.warn('[v4.4] 사후 보정 실패:', e);
+        }
+    };
+    
+    // ===== 재고회전율 계산 =====
+    // 산출식: (전일 - 오늘) / 전일 × 100 (음수도 그대로 표시)
+    window._v44_calculateTurnover = function() {
+        const snap = window._cachedStockSnapshot || {};
+        const current = snap.current;
+        const previous = snap.previous;
+        
+        // 데이터 부족
+        if (!current || !previous) {
+            return {
+                sufficient: false,
+                message: '데이터 부족 (다음 마감 후 계산 가능)'
+            };
+        }
+        
+        const calc = (prev, curr) => {
+            if (!prev || prev === 0) return null; // 0 나누기 방지
+            return ((prev - curr) / prev) * 100;
+        };
+        
+        const rate3F = calc(previous.stock3F || 0, current.stock3F || 0);
+        const rate2F = calc(previous.stock2F || 0, current.stock2F || 0);
+        const prevTotal = (previous.stock3F || 0) + (previous.stock2F || 0);
+        const currTotal = (current.stock3F || 0) + (current.stock2F || 0);
+        const rateAll = calc(prevTotal, currTotal);
+        
+        return {
+            sufficient: true,
+            previousDate: previous.date || previous.triggerDate,
+            currentDate: current.date || current.triggerDate,
+            rate3F: rate3F,
+            rate2F: rate2F,
+            rateAll: rateAll,
+            previousStock3F: previous.stock3F,
+            previousStock2F: previous.stock2F,
+            currentStock3F: current.stock3F,
+            currentStock2F: current.stock2F
+        };
+    };
+    
+    // ===== 대시보드 렌더링 =====
+    window._v44_renderDashboard = function() {
+        const container = document.getElementById('dashboard-content');
+        if (!container) return;
+        
+        // 1. 요약 카드용 데이터
+        const currentStock = window._v44_calculateCurrentStock();
+        const turnover = window._v44_calculateTurnover();
+        
+        // 당일지정수량 / 선지정수량 (기존 사용률 팝업과 동일 계산)
+        let codeTagCount = 0;
+        let preAssignCount = 0;
+        try {
+            (originalData || []).forEach(loc => {
+                if (loc.codeTag && loc.codeTag.trim() !== '') codeTagCount++;
+                if (loc.preAssigned) preAssignCount++;
+            });
+        } catch (e) {}
+        
+        const sku3F = currentStock.sku3F;
+        const sku2F = currentStock.sku2F;
+        const skuTotal = sku3F + sku2F;
+        
+        // 카드 렌더링 헬퍼
+        const card = (icon, title, value, sub, color) => {
+            return `<div style="background:white; border:1px solid #e0e0e0; border-radius:8px; padding:12px 16px; min-width:140px; flex:1; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-size:11px; color:#888; font-weight:bold; margin-bottom:4px;">${icon} ${title}</div>
+                <div style="font-size:22px; font-weight:900; color:${color || '#333'};">${value}</div>
+                ${sub ? `<div style="font-size:11px; color:#999; margin-top:3px;">${sub}</div>` : ''}
+            </div>`;
+        };
+        
+        const formatRate = (rate) => {
+            if (rate === null || rate === undefined) return '-';
+            const sign = rate > 0 ? '+' : '';
+            const color = rate > 0 ? '#e65100' : (rate < 0 ? '#1976d2' : '#666');
+            return `<span style="color:${color};">${sign}${rate.toFixed(1)}%</span>`;
+        };
+        
+        // 첫째 줄: 지정 + SKU
+        let cardsRow1 = '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">';
+        cardsRow1 += card('📌', '당일지정수량', codeTagCount.toLocaleString());
+        cardsRow1 += card('🔒', '선지정수량', preAssignCount.toLocaleString());
+        cardsRow1 += card('📦', '3층 SKU', sku3F.toLocaleString(), '고유 상품코드');
+        cardsRow1 += card('🏬', '2F SKU', sku2F.toLocaleString(), '2F 로케이션');
+        cardsRow1 += card('🎯', '총 SKU', skuTotal.toLocaleString(), '3층 + 2F');
+        cardsRow1 += '</div>';
+        
+        // 둘째 줄: 재고회전율
+        let cardsRow2 = '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px;">';
+        if (!turnover.sufficient) {
+            cardsRow2 += `<div style="background:#fff8e1; border:1px solid #ffd54f; border-radius:8px; padding:12px 16px; flex:1; font-size:12px; color:#a36800;">
+                ⚠️ ${turnover.message}<br>
+                <span style="font-size:11px; color:#999;">메인 시스템에서 업무 마감 2회 이상 발생해야 회전율 계산 가능</span>
+            </div>`;
+        } else {
+            const subText = `${turnover.previousDate} → ${turnover.currentDate}`;
+            cardsRow2 += card('🔄', '재고회전율 (3층)', formatRate(turnover.rate3F), subText);
+            cardsRow2 += card('🔄', '재고회전율 (2F)', formatRate(turnover.rate2F), subText);
+            cardsRow2 += card('🔄', '재고회전율 (합산)', formatRate(turnover.rateAll), subText);
+        }
+        cardsRow2 += '</div>';
+        
+        // 2. 기존 사용률 데이터 통합 (3층 + 2층)
+        // 기존 calculateAndRenderUsage 결과를 가져오기 위해 임시로 popup div 사용
+        // → 더 깔끔하게 직접 계산
+        const usage3FHtml = window._v44_renderUsage3F();
+        const usage2FHtml = window._v44_renderUsage2F();
+        
+        const sectionTitle = (text) => `<div style="font-size:14px; font-weight:bold; color:var(--primary); margin:12px 0 8px 0; padding-bottom:4px; border-bottom:2px solid #e0e0e0;">${text}</div>`;
+        
+        container.innerHTML = `
+            <div style="padding: 8px 12px;">
+                ${sectionTitle('📊 요약 정보')}
+                ${cardsRow1}
+                ${cardsRow2}
+                
+                ${sectionTitle('🏢 3층 로케이션 사용률')}
+                <div style="margin-bottom:18px;">${usage3FHtml}</div>
+                
+                ${sectionTitle('🏬 2층 창고 사용률')}
+                <div>${usage2FHtml}</div>
+            </div>
+        `;
+    };
+    
+    // ===== 3층 사용률 렌더링 (기존 calculateAndRenderUsage의 3F 부분 재사용) =====
+    window._v44_renderUsage3F = function() {
+        // 기존 사용률 팝업과 동일한 계산 로직을 임시로 호출
+        // → 가장 간단: 기존 함수를 호출 후 그 결과 HTML을 추출
+        // 그러나 popup div는 별도 영역이므로, 여기서는 임시로 hidden div 사용
+        const tempDiv = document.createElement('div');
+        tempDiv.id = '_v44_temp_usage';
+        tempDiv.style.display = 'none';
+        document.body.appendChild(tempDiv);
+        
+        const prevTab = window.currentUsageTab;
+        window.currentUsageTab = '3F';
+        
+        // 기존 사용률 함수가 usage-popup에 출력하므로 임시로 그 div를 대체
+        const popupEl = document.getElementById('usage-popup');
+        const fakePopup = document.createElement('div');
+        fakePopup.id = 'usage-popup';
+        if (popupEl && popupEl.parentNode) {
+            popupEl.id = '_v44_real_popup';
+        }
+        tempDiv.appendChild(fakePopup);
+        
+        let html = '';
+        try {
+            window.calculateAndRenderUsage();
+            // 첫 줄(탭 버튼)은 제거
+            const inner = fakePopup.innerHTML;
+            // 탭 버튼 div를 제거하기 위해 첫 </div> 이후만 사용
+            const firstDivEnd = inner.indexOf('</div>');
+            if (firstDivEnd >= 0) {
+                html = inner.substring(firstDivEnd + 6);
+            } else {
+                html = inner;
+            }
+        } catch (e) {
+            console.warn('[v4.4] 3층 사용률 렌더링 실패:', e);
+            html = '<div style="padding:20px; text-align:center; color:#999;">사용률 정보를 불러올 수 없습니다.</div>';
+        }
+        
+        // 원복
+        window.currentUsageTab = prevTab;
+        if (document.getElementById('_v44_real_popup')) {
+            document.getElementById('_v44_real_popup').id = 'usage-popup';
+        }
+        tempDiv.remove();
+        
+        return html;
+    };
+    
+    // ===== 2층 사용률 렌더링 (기존 함수 재사용) =====
+    window._v44_renderUsage2F = function() {
+        const tempDiv = document.createElement('div');
+        tempDiv.id = '_v44_temp_usage2';
+        tempDiv.style.display = 'none';
+        document.body.appendChild(tempDiv);
+        
+        const prevTab = window.currentUsageTab;
+        window.currentUsageTab = '2F';
+        
+        const popupEl = document.getElementById('usage-popup');
+        const fakePopup = document.createElement('div');
+        fakePopup.id = 'usage-popup';
+        if (popupEl && popupEl.parentNode) {
+            popupEl.id = '_v44_real_popup2';
+        }
+        tempDiv.appendChild(fakePopup);
+        
+        let html = '';
+        try {
+            window.calculateAndRenderUsage();
+            const inner = fakePopup.innerHTML;
+            const firstDivEnd = inner.indexOf('</div>');
+            if (firstDivEnd >= 0) {
+                html = inner.substring(firstDivEnd + 6);
+            } else {
+                html = inner;
+            }
+        } catch (e) {
+            console.warn('[v4.4] 2F 사용률 렌더링 실패:', e);
+            html = '<div style="padding:20px; text-align:center; color:#999;">2F 사용률 정보를 불러올 수 없습니다.</div>';
+        }
+        
+        window.currentUsageTab = prevTab;
+        if (document.getElementById('_v44_real_popup2')) {
+            document.getElementById('_v44_real_popup2').id = 'usage-popup';
+        }
+        tempDiv.remove();
+        
+        return html;
+    };
+    
+    // ===== 초기화 (페이지 로드 후 호출됨) =====
+    window._v44_init = async function() {
+        try {
+            console.log('[v4.4] 초기화 시작');
+            // 1. 2F 캐시 + 재고 스냅샷 로드
+            await window._v44_load2FloorCache();
+            await window._v44_loadStockSnapshot();
+            
+            // 2. 사후 보정 체크
+            await window._v44_postLoadCheck();
+            
+            // 3. history 리스너 설정 (이후 업무 마감 자동 감지)
+            window._v44_setupHistoryListener();
+            
+            console.log('[v4.4] 초기화 완료');
+        } catch (e) {
+            console.warn('[v4.4] 초기화 오류:', e);
+        }
+    };
+})();
