@@ -3641,6 +3641,23 @@ async function updateDatabaseA(rows, mode = 'daily') {
             } catch (e) {
                 console.error('[v4.4] 2F SKU 저장 실패:', e);
             }
+            
+            // v4.4 v2: 재고 스냅샷 저장 (회전율 계산용)
+            // 트리거 시점: 일일 최신화 업로드 직후 (마감 트리거 대체)
+            // originalData는 batch.commit() 이후 onSnapshot으로 비동기 갱신되므로 잠시 대기
+            setTimeout(() => {
+                if (typeof window._v44_saveStockSnapshot === 'function') {
+                    window._v44_saveStockSnapshot().then(ok => {
+                        if (ok) {
+                            // 대시보드 보고 있으면 자동 새로고침
+                            const dashView = document.getElementById('view-dashboard');
+                            if (dashView && dashView.style.display !== 'none' && typeof window._v44_renderDashboard === 'function') {
+                                window._v44_renderDashboard();
+                            }
+                        }
+                    });
+                }
+            }, 2000);  // onSnapshot으로 originalData 반영될 시간 확보
         }
         
         if (mode === 'permanent') {
@@ -5579,23 +5596,50 @@ window.showPairRecommendation = function() {
         }
     };
     
-    // ===== 재고 스냅샷 저장 (current → previous로 밀고, 새 값을 current에 저장) =====
-    window._v44_saveStockSnapshot = async function(triggerDate) {
+    // ===== 재고 스냅샷 저장 (v4.4 v2: 일일 최신화 업로드 시 호출) =====
+    // 변경 이유: 마감 시점 트리거 → 일일 최신화 트리거로 변경
+    //   - 마감 시점은 그날의 originalData 변동이 없을 수 있어 회전율 0% 문제 발생
+    //   - 일일 최신화는 실제 새 재고 데이터가 들어오는 시점이라 의미 있음
+    // 흐름:
+    //   - current.date < 오늘 → 새 영업일 시작: 이전 current를 previous로 이동, 새 current 저장
+    //   - current.date == 오늘 → 당일 내 업데이트: previous 유지, current만 덮어쓰기
+    //   - current 없음 → 첫 적용: current만 저장
+    window._v44_saveStockSnapshot = async function() {
         const newCurrent = window._v44_calculateCurrentStock();
-        newCurrent.triggerDate = triggerDate || newCurrent.date; // 업무 마감일 (history 문서 ID)
+        const today = window._v44_getTodayDateString();
+        newCurrent.date = today;
         newCurrent.savedAt = new Date();
         
         const existing = window._cachedStockSnapshot || { current: null, previous: null };
+        const oldCurrent = existing.current;
+        const oldCurrentDate = oldCurrent?.date || '';
+        
+        let newPrevious;
+        let logMode;
+        if (oldCurrentDate && oldCurrentDate < today) {
+            // 새 영업일 시작 → 어제 마지막 값을 previous로 이동
+            newPrevious = oldCurrent;
+            logMode = `새 영업일 시작 (이전 current[${oldCurrentDate}] → previous로 이동)`;
+        } else if (oldCurrentDate === today) {
+            // 당일 내 업데이트 → previous 그대로, current만 갱신
+            newPrevious = existing.previous || null;
+            logMode = `당일 내 갱신 (previous 유지)`;
+        } else {
+            // 첫 적용 (current 없음)
+            newPrevious = existing.previous || null;
+            logMode = `첫 저장`;
+        }
+        
         const newSnapshot = {
             current: newCurrent,
-            previous: existing.current || null  // 직전 current가 previous로 이동
+            previous: newPrevious
         };
         
         try {
             const docRef = doc(db, 'artifacts', 'team-work-logger-v2', 'locationStock', 'latest');
             await setDoc(docRef, newSnapshot);
             window._cachedStockSnapshot = newSnapshot;
-            console.log('[v4.4] 재고 스냅샷 저장 완료: triggerDate =', triggerDate, '/ 3층', newCurrent.stock3F, '/ 2F', newCurrent.stock2F);
+            console.log(`[v4.4] 재고 스냅샷 저장 완료: ${logMode} / 3층 ${newCurrent.stock3F} / 2층 ${newCurrent.stock2F}`);
             return true;
         } catch (e) {
             console.error('[v4.4] 재고 스냅샷 저장 실패:', e);
@@ -5603,76 +5647,21 @@ window.showPairRecommendation = function() {
         }
     };
     
-    // ===== history 컬렉션 감시 (업무 마감 트리거) =====
-    // 새 문서 추가만 감지
+    // ===== v4.4 v2: history 리스너 제거됨 =====
+    // 이전 v4.4: 메인 시스템의 history 컬렉션 onSnapshot 감지 → 마감 시점에 재고 저장
+    // 변경 이유: 마감 시점 originalData가 그날 일일 최신화 결과와 같으면 회전율 0% 문제
+    // 새 방식: 일일 최신화 업로드 시점에 저장 (updateDatabaseA 함수가 _v44_saveStockSnapshot 직접 호출)
+    // 사용자 운영 패턴상 마감 후 일일 최신화 없음 → 의미 있는 회전율 자연스럽게 나옴
     window._v44_setupHistoryListener = function() {
-        try {
-            const historyColl = collection(db, 'artifacts', 'team-work-logger-v2', 'history');
-            window._v44_historyUnsub = onSnapshot(historyColl, (snapshot) => {
-                let newDocs = [];
-                snapshot.docChanges().forEach(change => {
-                    if (change.type === 'added') {
-                        newDocs.push(change.doc.id);
-                    }
-                });
-                if (newDocs.length === 0) return;
-                
-                // 초기 리스너 호출(처음 데이터 로드 시)도 'added'로 분류되므로, 
-                // 캐시된 last triggerDate와 비교해서 진짜 새 마감만 처리
-                const latestNew = newDocs.sort().pop(); // 가장 최신 날짜
-                const cached = window._cachedStockSnapshot || {};
-                const lastSaved = (cached.current || {}).triggerDate || '';
-                
-                if (latestNew > lastSaved) {
-                    console.log('[v4.4] history 신규 문서 감지:', latestNew, '/ 직전 저장:', lastSaved || '없음');
-                    window._v44_saveStockSnapshot(latestNew).then(ok => {
-                        if (ok) {
-                            // 대시보드 보고 있으면 자동 새로고침
-                            const dashView = document.getElementById('view-dashboard');
-                            if (dashView && dashView.style.display !== 'none') {
-                                window._v44_renderDashboard();
-                            }
-                        }
-                    });
-                }
-            }, (err) => {
-                console.warn('[v4.4] history 리스너 오류:', err);
-            });
-        } catch (e) {
-            console.warn('[v4.4] history 리스너 설정 실패:', e);
-        }
+        console.log('[v4.4] history 리스너는 사용하지 않음 (일일 최신화 업로드 트리거 방식)');
     };
     
-    // ===== 페이지 로드 시 사후 보정 =====
-    // 마지막 history 문서와 저장된 재고 날짜 비교 → 다르면 현재 시점에 저장
+    // ===== v4.4 v2: 사후 보정 제거됨 =====
+    // 이전 v4.4: 페이지 로드 시 history 최신 문서 vs 저장된 재고 날짜 비교 → 사후 저장
+    // 변경 이유: history 리스너 제거에 따라 사후 보정 불필요
+    // 일일 최신화 업로드가 명시적 트리거이므로 사후 보정 개념 자체가 없음
     window._v44_postLoadCheck = async function() {
-        try {
-            const historyColl = collection(db, 'artifacts', 'team-work-logger-v2', 'history');
-            const historySnap = await getDocs(historyColl);
-            if (historySnap.empty) {
-                console.log('[v4.4] 사후 보정: history 컬렉션 비어있음 → 보정 불필요');
-                return;
-            }
-            
-            // 가장 최신 history 문서 ID 찾기 (날짜 문자열이므로 sort 가능)
-            const allDates = [];
-            historySnap.forEach(d => allDates.push(d.id));
-            allDates.sort();
-            const latestHistoryDate = allDates[allDates.length - 1];
-            
-            const cached = window._cachedStockSnapshot || {};
-            const lastSavedTrigger = (cached.current || {}).triggerDate || '';
-            
-            if (latestHistoryDate > lastSavedTrigger) {
-                console.log('[v4.4] 사후 보정 필요: 마지막 마감일', latestHistoryDate, '> 저장된 재고', lastSavedTrigger || '없음');
-                console.log('[v4.4] 현재 시점 재고로 사후 저장 (마감 시점 재고가 아닌 페이지 로드 시점 재고)');
-                await window._v44_saveStockSnapshot(latestHistoryDate);
-            } else {
-                console.log('[v4.4] 사후 보정 불필요: 저장된 재고가 최신');
-            }
-        } catch (e) {
-            console.warn('[v4.4] 사후 보정 실패:', e);
-        }
+        // No-op
     };
     
     // ===== 재고회전율 계산 =====
@@ -5686,13 +5675,15 @@ window.showPairRecommendation = function() {
         if (!current || !previous) {
             return {
                 sufficient: false,
-                message: '데이터 부족 (다음 마감 후 계산 가능)'
+                message: '데이터 부족 (다음 일일 최신화 후 계산 가능)'
             };
         }
         
+        // v4.4 v2: 부호 반전. 증가=양수, 감소=음수
+        // 산출식: (current - previous) / previous × 100
         const calc = (prev, curr) => {
             if (!prev || prev === 0) return null; // 0 나누기 방지
-            return ((prev - curr) / prev) * 100;
+            return ((curr - prev) / prev) * 100;
         };
         
         const rate3F = calc(previous.stock3F || 0, current.stock3F || 0);
@@ -5772,13 +5763,18 @@ window.showPairRecommendation = function() {
         if (!turnover.sufficient) {
             cardsRow2 += `<div style="background:#fff8e1; border:1px solid #ffd54f; border-radius:8px; padding:12px 16px; flex:1; font-size:12px; color:#a36800;">
                 ⚠️ ${turnover.message}<br>
-                <span style="font-size:11px; color:#999;">메인 시스템에서 업무 마감 2회 이상 발생해야 회전율 계산 가능</span>
+                <span style="font-size:11px; color:#999;">일일 최신화 업로드를 2영업일 이상 반복하면 회전율이 계산됩니다</span>
             </div>`;
         } else {
-            const subText = `${turnover.previousDate} → ${turnover.currentDate}`;
-            cardsRow2 += card('🔄', '재고회전율 (3층)', formatRate(turnover.rate3F), subText);
-            cardsRow2 += card('🔄', '재고회전율 (2F)', formatRate(turnover.rate2F), subText);
-            cardsRow2 += card('🔄', '재고회전율 (합산)', formatRate(turnover.rateAll), subText);
+            // v4.4 v2: 날짜+수량을 두 줄로 표시
+            const sub3F = `${turnover.previousDate}: ${(turnover.previousStock3F || 0).toLocaleString()}<br>${turnover.currentDate}: ${(turnover.currentStock3F || 0).toLocaleString()}`;
+            const sub2F = `${turnover.previousDate}: ${(turnover.previousStock2F || 0).toLocaleString()}<br>${turnover.currentDate}: ${(turnover.currentStock2F || 0).toLocaleString()}`;
+            const prevTotal = (turnover.previousStock3F || 0) + (turnover.previousStock2F || 0);
+            const currTotal = (turnover.currentStock3F || 0) + (turnover.currentStock2F || 0);
+            const subAll = `${turnover.previousDate}: ${prevTotal.toLocaleString()}<br>${turnover.currentDate}: ${currTotal.toLocaleString()}`;
+            cardsRow2 += card('🔄', '재고회전율 (3층)', formatRate(turnover.rate3F), sub3F);
+            cardsRow2 += card('🔄', '재고회전율 (2F)', formatRate(turnover.rate2F), sub2F);
+            cardsRow2 += card('🔄', '재고회전율 (합산)', formatRate(turnover.rateAll), subAll);
         }
         cardsRow2 += '</div>';
         
