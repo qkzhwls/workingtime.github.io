@@ -3179,7 +3179,9 @@ window.processOrderData = async function(rows) {
             window.loadOrderPairsCache();
         }
         
-        window.openOrderAnalysisReport();
+        // v4.4 v3: 주문 업로드 후 자동 팝업 호출 삭제
+        // 사용자가 [📊 페어 분석 리포트 보기] 버튼을 직접 클릭해서 열도록 변경
+        // window.openOrderAnalysisReport();
     } catch (e) {
         window.hideLoading();
         console.error('processOrderData 오류:', e);
@@ -4857,6 +4859,7 @@ function renderCorridor(idx) {
     window._initRecLimitUI = function() {
         const select = document.getElementById('rec-limit-select');
         const prioritySelect = document.getElementById('rec-priority-mode');
+        const editBtn = document.getElementById('rec-limit-edit-btn');
         if (!select) return;
         
         const panel = document.getElementById('rec-limit-panel');
@@ -4866,28 +4869,7 @@ function renderCorridor(idx) {
             // 추천 갯수 드롭다운 change 이벤트
             select.addEventListener('change', () => {
                 if (select.value === 'custom') {
-                    // 사용자지정 선택 시 즉시 prompt 띄움
-                    const promptDefault = _customLimitValue ? String(_customLimitValue) : '';
-                    const input = window.prompt('추천 갯수를 입력하세요 (1 이상)', promptDefault);
-                    
-                    if (input === null) {
-                        // 취소: 직전 값으로 되돌림
-                        select.value = _lastNonCustomMode;
-                        updateCustomDisplay();
-                        return; // 재계산 안 함
-                    }
-                    
-                    const num = parseInt(input.trim(), 10);
-                    if (isNaN(num) || num < 1) {
-                        alert('올바른 숫자를 입력하세요 (1 이상)');
-                        select.value = _lastNonCustomMode;
-                        updateCustomDisplay();
-                        return;
-                    }
-                    
-                    _customLimitValue = num;
-                    updateCustomDisplay();
-                    triggerRecalcIfNeeded();
+                    _promptCustomLimit(select);
                 } else {
                     // 일반 옵션 선택: 직전 값 기록 후 재계산
                     _lastNonCustomMode = select.value;
@@ -4895,6 +4877,14 @@ function renderCorridor(idx) {
                     triggerRecalcIfNeeded();
                 }
             });
+            
+            // v4.4 v3: 사용자지정 값 변경 버튼 (사용자지정 선택 시에만 표시됨)
+            // 사용자지정으로 N개 적용 후 다른 N개로 바꿀 때 사용
+            if (editBtn) {
+                editBtn.addEventListener('click', () => {
+                    _promptCustomLimit(select);
+                });
+            }
         }
         
         // 우선순위 드롭다운 change 이벤트
@@ -4908,16 +4898,52 @@ function renderCorridor(idx) {
         updateCustomDisplay();
     };
     
+    // v4.4 v3: 사용자지정 prompt 로직을 별도 함수로 분리
+    function _promptCustomLimit(select) {
+        const promptDefault = _customLimitValue ? String(_customLimitValue) : '';
+        const input = window.prompt('추천 갯수를 입력하세요 (1 이상)', promptDefault);
+        
+        if (input === null) {
+            // 취소: select.value가 'custom'이 아니면 직전 값으로 되돌림
+            // (변경 버튼에서 호출된 경우엔 이미 'custom' 상태이므로 그대로 유지)
+            if (select.value !== 'custom') {
+                select.value = _lastNonCustomMode;
+            }
+            updateCustomDisplay();
+            return; // 재계산 안 함
+        }
+        
+        const num = parseInt(input.trim(), 10);
+        if (isNaN(num) || num < 1) {
+            alert('올바른 숫자를 입력하세요 (1 이상)');
+            if (select.value !== 'custom') {
+                select.value = _lastNonCustomMode;
+            }
+            updateCustomDisplay();
+            return;
+        }
+        
+        _customLimitValue = num;
+        // select.value는 'custom'으로 유지 (이미 그렇거나, 변경 버튼 경유)
+        updateCustomDisplay();
+        triggerRecalcIfNeeded();
+    }
+    
     function updateCustomDisplay() {
         const select = document.getElementById('rec-limit-select');
         const display = document.getElementById('rec-limit-custom-display');
         const numSpan = document.getElementById('rec-limit-custom-num');
+        const editBtn = document.getElementById('rec-limit-edit-btn');
         if (!select || !display || !numSpan) return;
         if (select.value === 'custom' && _customLimitValue) {
             display.style.display = 'inline';
             numSpan.textContent = String(_customLimitValue);
+            // v4.4 v3: 사용자지정 선택 시 변경 버튼 표시
+            if (editBtn) editBtn.style.display = 'inline-block';
         } else {
             display.style.display = 'none';
+            // v4.4 v3: 사용자지정 아닐 때 변경 버튼 숨김
+            if (editBtn) editBtn.style.display = 'none';
         }
     }
     
@@ -5748,17 +5774,17 @@ window.showPairRecommendation = function() {
         };
         
         // 첫째 줄: 지정 + SKU
-        // v4.4: 순서 = 당일지정 / 선지정 / 3층 SKU / 2층 SKU / 2F SKU / 총 SKU
+        // v4.4 v3: 2F SKU 카드 삭제 - 순서 = 당일지정 / 선지정 / 3층 SKU / 2층 SKU / 총 SKU
         let cardsRow1 = '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">';
         cardsRow1 += card('📌', '당일지정수량', codeTagCount.toLocaleString());
         cardsRow1 += card('🔒', '선지정수량', preAssignCount.toLocaleString());
         cardsRow1 += card('📦', '3층 SKU', sku3F.toLocaleString(), '고유 상품코드');
         cardsRow1 += card('🏬', '2층 SKU', sku2층.toLocaleString(), '2층창고재고 보유');
-        cardsRow1 += card('🏷️', '2F SKU', sku2F.toLocaleString(), '2F 로케이션 지정');
         cardsRow1 += card('🎯', '총 SKU', skuTotal.toLocaleString(), '3층 + 2층');
         cardsRow1 += '</div>';
         
         // 둘째 줄: 재고회전율
+        // v4.4 v3: 재고회전율(2F) 삭제 - 3층 + 합산만 표시
         let cardsRow2 = '<div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px;">';
         if (!turnover.sufficient) {
             cardsRow2 += `<div style="background:#fff8e1; border:1px solid #ffd54f; border-radius:8px; padding:12px 16px; flex:1; font-size:12px; color:#a36800;">
@@ -5768,12 +5794,10 @@ window.showPairRecommendation = function() {
         } else {
             // v4.4 v2: 날짜+수량을 두 줄로 표시
             const sub3F = `${turnover.previousDate}: ${(turnover.previousStock3F || 0).toLocaleString()}<br>${turnover.currentDate}: ${(turnover.currentStock3F || 0).toLocaleString()}`;
-            const sub2F = `${turnover.previousDate}: ${(turnover.previousStock2F || 0).toLocaleString()}<br>${turnover.currentDate}: ${(turnover.currentStock2F || 0).toLocaleString()}`;
             const prevTotal = (turnover.previousStock3F || 0) + (turnover.previousStock2F || 0);
             const currTotal = (turnover.currentStock3F || 0) + (turnover.currentStock2F || 0);
             const subAll = `${turnover.previousDate}: ${prevTotal.toLocaleString()}<br>${turnover.currentDate}: ${currTotal.toLocaleString()}`;
             cardsRow2 += card('🔄', '재고회전율 (3층)', formatRate(turnover.rate3F), sub3F);
-            cardsRow2 += card('🔄', '재고회전율 (2F)', formatRate(turnover.rate2F), sub2F);
             cardsRow2 += card('🔄', '재고회전율 (합산)', formatRate(turnover.rateAll), subAll);
         }
         cardsRow2 += '</div>';
