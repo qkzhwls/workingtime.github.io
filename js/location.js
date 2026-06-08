@@ -1537,6 +1537,176 @@ window.saveIncomingPriorities = async function() {
     }
 };
 
+// [3단계] 입고대기 상품용 추천 자리 계산 함수
+// 반환값: { case: 'A'|'B', loc: <originalData 원소>, score: number, partnerCount: number } 또는 null
+// - Case A: 주문 데이터의 신뢰 페어(count≥5, lift≥2.0) 발견 → 페어 위치 점수 최고 빈칸
+// - Case B: 신뢰 페어 0개(또는 모든 partner가 시스템에 미배치) → incomingRecommendPriorities 기준 1순위 빈칸
+// - 빈칸 없거나 입력 오류 → null
+window.calcIncomingRecommend = function(code) {
+    // 입력/시스템 상태 검증
+    if (!code || typeof code !== 'string') return null;
+    if (!Array.isArray(originalData) || originalData.length === 0) return null;
+    
+    // 우선순위 선택 (incomingRecommendPriorities 우선, 없으면 recommendPriorities를 fallback)
+    const priorities = window.incomingRecommendPriorities || window.recommendPriorities || {
+        zones: { 0: [], 1: [], 2: [], 3: [] },
+        dongs: [],
+        poses: [],
+        excludeCombos: []
+    };
+    
+    // 현재 이 code가 이미 배치된 동들 (같은 동 중복 배치 방지용)
+    const currentDongsSet = new Set(
+        originalData
+            .filter(d => d.code === code)
+            .map(d => (d.dong || '').toString().trim())
+    );
+    
+    // 빈칸 추출 (선지정 제외 + 같은 동 제외 + 제외 조합 제외)
+    const excludeCombos = priorities.excludeCombos || [];
+    const emptyLocs = originalData.filter(d => {
+        const hasContent = (d.code && d.code !== d.id && d.code.trim() !== '') 
+                        || (d.name && d.name.trim() !== '');
+        if (hasContent || d.preAssigned) return false;
+        
+        const targetDong = (d.dong || '').toString().trim();
+        if (currentDongsSet.has(targetDong)) return false;
+        
+        if (excludeCombos.length > 0) {
+            const prefix = (d.id || '').charAt(0).toUpperCase();
+            const dong = (d.dong || '').toString().trim();
+            const combo = `${prefix}-${dong}`;
+            if (excludeCombos.includes(combo)) return false;
+        }
+        return true;
+    });
+    
+    if (emptyLocs.length === 0) return null;
+    
+    // Case A 판정: 주문 데이터에서 신뢰 페어 검색
+    const trustedPartners = []; // [{ partner, weight }, ...]
+    try {
+        if (window._cachedOrderPairs && window._cachedOrderStats && window._cachedOrderMeta) {
+            const pairs = window._cachedOrderPairs;
+            const stats = window._cachedOrderStats;
+            const N = window._cachedOrderMeta.totalProcessedOrders || 1;
+            
+            for (const p of pairs) {
+                let partner = null;
+                if (p.codeA === code) partner = p.codeB;
+                else if (p.codeB === code) partner = p.codeA;
+                else continue;
+                
+                const cA = (stats[p.codeA] || {}).count || 0;
+                const cB = (stats[p.codeB] || {}).count || 0;
+                if (cA === 0 || cB === 0) continue;
+                
+                const lift = (p.count * N) / (cA * cB);
+                if (p.count < 5 || lift < 2.0) continue;
+                
+                trustedPartners.push({ partner, weight: lift * p.count });
+            }
+        }
+    } catch (e) {
+        console.warn('[calcIncomingRecommend] 페어 데이터 조회 실패:', e);
+    }
+    
+    // Case A: 신뢰 페어 있음 → 위치 점수로 최고 빈칸 선택
+    if (trustedPartners.length > 0) {
+        // partner들의 현재 위치 캐시 (중복 조회 방지)
+        const partnerLocsCache = {};
+        for (const tp of trustedPartners) {
+            if (!partnerLocsCache[tp.partner]) {
+                partnerLocsCache[tp.partner] = originalData.filter(d => d.code === tp.partner);
+            }
+        }
+        
+        let bestEmpty = null;
+        let bestScore = -1;
+        
+        for (const eLoc of emptyLocs) {
+            const eZone = (eLoc.id || '').charAt(0).toUpperCase();
+            const eDong = (eLoc.dong || '').toString().trim();
+            const ePos = (eLoc.pos || '').toString().trim();
+            
+            let totalScore = 0;
+            for (const tp of trustedPartners) {
+                const partnerLocs = partnerLocsCache[tp.partner] || [];
+                if (partnerLocs.length === 0) continue;
+                
+                let bestCoeff = 0;
+                for (const pLoc of partnerLocs) {
+                    const pZone = (pLoc.id || '').charAt(0).toUpperCase();
+                    const pDong = (pLoc.dong || '').toString().trim();
+                    const pPos = (pLoc.pos || '').toString().trim();
+                    
+                    let coeff = 0;
+                    if (eZone === pZone && eDong === pDong) {
+                        const ePosNum = parseInt(ePos, 10);
+                        const pPosNum = parseInt(pPos, 10);
+                        if (!isNaN(ePosNum) && !isNaN(pPosNum)) {
+                            const diff = Math.abs(ePosNum - pPosNum);
+                            if (diff === 0) coeff = 1.0;
+                            else if (diff === 1) coeff = 0.9;
+                            else if (diff === 2) coeff = 0.8;
+                            else coeff = 0.7;
+                        } else {
+                            coeff = 0.7;
+                        }
+                    }
+                    if (coeff > bestCoeff) bestCoeff = coeff;
+                }
+                totalScore += tp.weight * bestCoeff;
+            }
+            
+            if (totalScore > bestScore) {
+                bestScore = totalScore;
+                bestEmpty = eLoc;
+            }
+        }
+        
+        // 점수가 0보다 크면 Case A 결과 반환
+        // (점수 0인 경우 = 신뢰 페어는 있으나 partner가 시스템에 미배치 → Case B로 폴백)
+        if (bestEmpty && bestScore > 0) {
+            return { case: 'A', loc: bestEmpty, score: bestScore, partnerCount: trustedPartners.length };
+        }
+    }
+    
+    // Case B: 신뢰 페어 없거나 점수 0 → 우선순위 기반 1순위 빈칸 선택
+    const getZoneRank = (locId) => {
+        const prefix = (locId || '').charAt(0).toUpperCase();
+        const zones = priorities.zones || {};
+        for (let i = 0; i <= 3; i++) {
+            if (zones[i] && zones[i].includes(prefix)) return i;
+        }
+        return 99;
+    };
+    const getDongRank = (dong) => {
+        const str = (dong || '').toString().trim();
+        const arr = priorities.dongs || [];
+        const idx = arr.indexOf(str);
+        return idx !== -1 ? idx : 99;
+    };
+    const getPosRank = (pos) => {
+        const str = (pos || '').toString().trim();
+        const arr = priorities.poses || [];
+        const idx = arr.indexOf(str);
+        return idx !== -1 ? idx : 99;
+    };
+    
+    const sortedEmpty = emptyLocs.slice().sort((a, b) => {
+        const zA = getZoneRank(a.id), zB = getZoneRank(b.id);
+        if (zA !== zB) return zA - zB;
+        const dA = getDongRank(a.dong), dB = getDongRank(b.dong);
+        if (dA !== dB) return dA - dB;
+        const pA = getPosRank(a.pos), pB = getPosRank(b.pos);
+        if (pA !== pB) return pA - pB;
+        return (a.id || '').localeCompare(b.id || '');
+    });
+    
+    return { case: 'B', loc: sortedEmpty[0], score: 0, partnerCount: 0 };
+};
+
 window.saveSheetUrl = async () => {
     const urlOrder = document.getElementById('modal-sheet-url-order').value.trim();
     const urlBuy = document.getElementById('modal-sheet-url-buy').value.trim();
