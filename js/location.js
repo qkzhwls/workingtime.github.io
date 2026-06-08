@@ -4476,6 +4476,23 @@ window.renderIncomingQueue = function() {
         let src = item.source || '-';
         let date = src === '제작' ? (item['공장출고예상일'] || item['표시날짜'] || '-') : (item['검수창고도착일'] || item['표시날짜'] || '-');
         let option = item['옵션'] || '';
+        
+        // [4단계] 추천 자리 계산 (실패해도 카드는 그대로 표시)
+        let recHtml = '';
+        try {
+            if (typeof window.calcIncomingRecommend === 'function') {
+                const rec = window.calcIncomingRecommend(code);
+                if (rec && rec.loc && rec.loc.id) {
+                    const caseLabel = rec.case === 'A' 
+                        ? `<span style="font-size:10px; color:#7b1fa2; font-weight:normal;">(페어 ${rec.partnerCount}개)</span>` 
+                        : `<span style="font-size:10px; color:#777; font-weight:normal;">(우선순위)</span>`;
+                    recHtml = `<div style="margin-top:6px; padding-top:5px; border-top:1px dashed #ddd; font-size:11px; color:#1976d2;">📍 추천: <b>${rec.loc.id}</b> ${caseLabel}</div>`;
+                }
+            }
+        } catch (e) {
+            console.warn('[renderIncomingQueue] 추천 계산 실패:', code, e);
+        }
+        
         html += `
             <div class="incoming-item" onclick="activatePreAssignMode('${code}', '${name.replace(/'/g, "\\'")}', '${qty}', '${option.replace(/'/g, "\\'")}')">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -4488,6 +4505,7 @@ window.renderIncomingQueue = function() {
                     <span style="color:#555;">${src==='제작'?'출고일':'도착일'}: <b style="color:#d32f2f;">${date}</b></span>
                     <span style="color:#e65100; font-weight:bold; font-size:12px;">대기: ${qty}개</span>
                 </div>
+                ${recHtml}
             </div>
         `;
     });
