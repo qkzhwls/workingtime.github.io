@@ -1366,12 +1366,48 @@ window.saveHeaderSettings = async () => {
     } catch(e) { console.error(e); alert("저장 실패"); }
 };
 
+// [1단계] 입고대기 설정 모달 내 탭 전환 함수
+window.switchIncomingSettingsTab = function(tab) {
+    const tabBtnSheet = document.getElementById('incoming-tab-btn-sheet');
+    const tabBtnPriority = document.getElementById('incoming-tab-btn-priority');
+    const contentSheet = document.getElementById('incoming-tab-content-sheet');
+    const contentPriority = document.getElementById('incoming-tab-content-priority');
+    if (!tabBtnSheet || !tabBtnPriority || !contentSheet || !contentPriority) return;
+    
+    if (tab === 'sheet') {
+        contentSheet.style.display = 'block';
+        contentPriority.style.display = 'none';
+        tabBtnSheet.style.background = '#607d8b';
+        tabBtnSheet.style.color = 'white';
+        tabBtnPriority.style.background = '#eee';
+        tabBtnPriority.style.color = '#555';
+    } else if (tab === 'priority') {
+        contentSheet.style.display = 'none';
+        contentPriority.style.display = 'block';
+        tabBtnSheet.style.background = '#eee';
+        tabBtnSheet.style.color = '#555';
+        tabBtnPriority.style.background = '#607d8b';
+        tabBtnPriority.style.color = 'white';
+        
+        // 2단계에서 우선순위 UI 렌더링 함수 호출 예정
+    }
+};
+
 window.openSheetModal = (e) => {
-    if(e) e.stopPropagation();
-    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
-    document.getElementById('modal-sheet-url-order').value = window.sheetUrlOrder || '';
-    document.getElementById('modal-sheet-url-buy').value = window.sheetUrlBuy || '';
-    document.getElementById('sheet-modal').style.display = 'flex';
+    if (e) e.stopPropagation();
+    window.closeAllPopups();
+    
+    // 시트 링크 값 설정
+    const urlOrder = document.getElementById('modal-sheet-url-order');
+    const urlBuy = document.getElementById('modal-sheet-url-buy');
+    if (urlOrder) urlOrder.value = appConfig?.sheetUrlOrder || '';
+    if (urlBuy) urlBuy.value = appConfig?.sheetUrlBuy || '';
+
+    // [1단계] 모달 오픈 시 기본 탭 초기화
+    window.switchIncomingSettingsTab('sheet');
+
+    const modal = document.getElementById('sheet-modal');
+    if (modal) modal.style.display = 'flex';
 };
 
 window.saveSheetUrl = async () => {
