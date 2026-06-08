@@ -1395,16 +1395,78 @@ window.switchIncomingSettingsTab = function(tab) {
 
 window.openSheetModal = (e) => {
     if (e) e.stopPropagation();
-    window.closeAllPopups();
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
     
-    // 시트 링크 값 설정
+    // 시트 링크 값 설정 (시스템 전체에서 window.sheetUrlOrder/Buy 사용)
     const urlOrder = document.getElementById('modal-sheet-url-order');
     const urlBuy = document.getElementById('modal-sheet-url-buy');
-    if (urlOrder) urlOrder.value = appConfig?.sheetUrlOrder || '';
-    if (urlBuy) urlBuy.value = appConfig?.sheetUrlBuy || '';
+    if (urlOrder) urlOrder.value = window.sheetUrlOrder || '';
+    if (urlBuy) urlBuy.value = window.sheetUrlBuy || '';
 
     // [1단계] 모달 오픈 시 기본 탭 초기화
-    window.switchIncomingSettingsTab('sheet');
+    if (typeof window.switchIncomingSettingsTab === 'function') {
+        window.switchIncomingSettingsTab('sheet');
+    }
+    
+    // [1단계] 우선순위 탭 UI 데이터 채우기 (기존 recommendPriorities를 기본값으로 사용)
+    // ※ 2단계에서 window.incomingRecommendPriorities로 교체 예정
+    try {
+        const source = window.recommendPriorities || { zones:{0:[],1:[],2:[],3:[]}, dongs:[], poses:[], excludeCombos:[] };
+        
+        // 구역 퍼즐 채우기
+        const allAlphabets = ['★', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
+        const priZones = source.zones || {0:[], 1:[], 2:[], 3:[]};
+        for(let i=0; i<=3; i++) {
+            const el = document.getElementById(`incoming-pz-${i}`);
+            if (el) el.innerHTML = '';
+        }
+        const noneEl = document.getElementById('incoming-pz-none');
+        if (noneEl) noneEl.innerHTML = '';
+        allAlphabets.forEach(alpha => {
+            let placedRank = -1;
+            for(let i=0; i<=3; i++) { 
+                if(priZones[i] && priZones[i].includes(alpha)) { placedRank = i; break; } 
+            }
+            const block = document.createElement('div');
+            block.className = 'puzzle-block';
+            block.innerText = alpha;
+            block.draggable = true;
+            block.ondragstart = window.handleDragStart;
+            block.ondragend = window.handleDragEnd;
+            const target = placedRank !== -1 
+                ? document.getElementById(`incoming-pz-${placedRank}`)
+                : document.getElementById('incoming-pz-none');
+            if (target) target.appendChild(block);
+        });
+        
+        // 동/위치 정렬 블록 채우기
+        const renderIncomingSortBlocks = (containerId, items, defaultItems) => {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            const finalItems = [...new Set([...items, ...defaultItems])];
+            finalItems.forEach(item => {
+                const block = document.createElement('div');
+                block.className = 'puzzle-sort-block';
+                block.innerText = item;
+                block.draggable = true;
+                block.ondragstart = window.handleDragStart;
+                block.ondragend = window.handleDragEnd;
+                container.appendChild(block);
+            });
+        };
+        renderIncomingSortBlocks('incoming-sort-dongs', source.dongs || [], ['★','1','2','3','4','5','6']);
+        renderIncomingSortBlocks('incoming-sort-poses', source.poses || [], ['★','2','3','4','1','5']);
+        
+        // 제외 조합 입력값 채우기
+        const excludeInput = document.getElementById('incoming-exclude-combos-input');
+        if (excludeInput) {
+            const excludeCombos = source.excludeCombos || [];
+            excludeInput.value = excludeCombos.join(', ');
+        }
+    } catch (err) {
+        console.warn('[입고대기 우선순위 탭 초기화 실패]', err);
+    }
 
     const modal = document.getElementById('sheet-modal');
     if (modal) modal.style.display = 'flex';
