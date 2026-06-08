@@ -44,6 +44,9 @@ window.recommendPriorities = {
     poses: ['★', '2', '3', '4', '1', '5']
 };
 
+// [2단계] 입고대기 신규 상품 전용 추천 우선순위 (null이면 openSheetModal에서 recommendPriorities를 fallback으로 사용)
+window.incomingRecommendPriorities = null;
+
 const getZoneDocId = (locId) => {
     if (!locId) return 'ZONE_ETC';
     const clean = locId.toString().trim().toUpperCase();
@@ -194,6 +197,16 @@ function setupRealtimeListenerA() {
                 }
                 if (Array.isArray(window.recommendPriorities.poses) && !window.recommendPriorities.poses.includes('★')) {
                     window.recommendPriorities.poses = ['★', ...window.recommendPriorities.poses];
+                }
+            }
+            // [2단계] 입고대기 신규 상품용 우선순위 로드
+            if (conf.incomingRecommendPriorities) {
+                window.incomingRecommendPriorities = conf.incomingRecommendPriorities;
+                if (Array.isArray(window.incomingRecommendPriorities.dongs) && !window.incomingRecommendPriorities.dongs.includes('★')) {
+                    window.incomingRecommendPriorities.dongs = ['★', ...window.incomingRecommendPriorities.dongs];
+                }
+                if (Array.isArray(window.incomingRecommendPriorities.poses) && !window.incomingRecommendPriorities.poses.includes('★')) {
+                    window.incomingRecommendPriorities.poses = ['★', ...window.incomingRecommendPriorities.poses];
                 }
             }
             // ★ v3.53: 사용자 정의 툴팁 로드
@@ -1408,10 +1421,9 @@ window.openSheetModal = (e) => {
         window.switchIncomingSettingsTab('sheet');
     }
     
-    // [1단계] 우선순위 탭 UI 데이터 채우기 (기존 recommendPriorities를 기본값으로 사용)
-    // ※ 2단계에서 window.incomingRecommendPriorities로 교체 예정
+    // [2단계] 우선순위 탭 UI 데이터 채우기 (incomingRecommendPriorities 우선, 없으면 recommendPriorities를 기본값으로)
     try {
-        const source = window.recommendPriorities || { zones:{0:[],1:[],2:[],3:[]}, dongs:[], poses:[], excludeCombos:[] };
+        const source = window.incomingRecommendPriorities || window.recommendPriorities || { zones:{0:[],1:[],2:[],3:[]}, dongs:[], poses:[], excludeCombos:[] };
         
         // 구역 퍼즐 채우기
         const allAlphabets = ['★', 'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
@@ -1470,6 +1482,59 @@ window.openSheetModal = (e) => {
 
     const modal = document.getElementById('sheet-modal');
     if (modal) modal.style.display = 'flex';
+};
+
+// [2단계] 입고대기 신규 상품용 우선순위 저장
+window.saveIncomingPriorities = async function() {
+    try {
+        // 1) 구역 퍼즐 수집
+        const newZones = {};
+        for(let i=0; i<=3; i++){
+            const pz = document.getElementById(`incoming-pz-${i}`);
+            if (!pz) { 
+                console.warn(`[saveIncomingPriorities] incoming-pz-${i} 엘리먼트 없음`); 
+                return alert("⚠️ 우선순위 UI를 찾을 수 없습니다. 페이지를 새로고침 해주세요.");
+            }
+            const blocks = pz.querySelectorAll('.puzzle-block');
+            newZones[i] = Array.from(blocks).map(b => b.innerText.trim());
+        }
+        
+        // 2) 동/위치 정렬 블록 수집
+        const dongsEl = document.getElementById('incoming-sort-dongs');
+        const posesEl = document.getElementById('incoming-sort-poses');
+        if (!dongsEl || !posesEl) {
+            return alert("⚠️ 동/위치 우선순위 UI를 찾을 수 없습니다. 페이지를 새로고침 해주세요.");
+        }
+        const newDongs = Array.from(dongsEl.querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
+        const newPoses = Array.from(posesEl.querySelectorAll('.puzzle-sort-block')).map(b => b.innerText.trim());
+        
+        // 3) 제외 조합 수집
+        const excludeEl = document.getElementById('incoming-exclude-combos-input');
+        const excludeCombos = excludeEl 
+            ? excludeEl.value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+            : [];
+        
+        // 4) 데이터 객체 구성 (recommendPriorities와 동일한 스키마)
+        const newPriorities = { zones: newZones, dongs: newDongs, poses: newPoses, excludeCombos };
+        
+        // 5) Firestore 저장 + 메모리 동기화
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
+            incomingRecommendPriorities: newPriorities
+        }, { merge: true });
+        
+        window.incomingRecommendPriorities = newPriorities;
+        
+        if (typeof showToast === 'function') {
+            showToast("✅ 입고 추천 우선순위가 저장되었습니다.");
+        } else {
+            alert("✅ 입고 추천 우선순위가 저장되었습니다.");
+        }
+        
+        if (typeof window.closeSheetModal === 'function') window.closeSheetModal();
+    } catch(e) {
+        console.error("[saveIncomingPriorities] 저장 실패:", e);
+        alert("⚠️ 입고 추천 우선순위 저장 중 오류가 발생했습니다.");
+    }
 };
 
 window.saveSheetUrl = async () => {
