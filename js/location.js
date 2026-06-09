@@ -5040,6 +5040,8 @@ let currentCorridorIdx = 0;
 let svCorridorList = [];
 // 도면보기 범례 필터: null | 'empty' | 'content' | 'reserved' | 'preassigned'
 let _mapLegendFilter = null;
+// 범례 ON 시 모든 구역 표시 모드 (true: 모든 구역 순회, false: currentCorridorIdx 한 구역만)
+let _mapShowAllZones = false;
 
 window.updateMapCellSize = function(val) {
     document.getElementById('map-cell-size-label').innerText = val + 'px';
@@ -5050,8 +5052,10 @@ window.updateMapCellSize = function(val) {
 window.setMapLegendFilter = function(filterType) {
     if (_mapLegendFilter === filterType) {
         _mapLegendFilter = null; // 같은 거 다시 클릭 → 해제
+        _mapShowAllZones = false; // 모든 구역 모드도 해제
     } else {
         _mapLegendFilter = filterType;
+        _mapShowAllZones = true; // 범례 켜면 모든 구역 표시 모드 진입
     }
     // 범례 UI 활성 표시 업데이트
     const legendMap = {
@@ -5111,6 +5115,7 @@ window.renderMap = function() {
         btn.innerText = item.label;
         btn.style.cssText = `padding:6px 14px; border-radius:20px; font-size:13px; font-weight:bold; border:1.5px solid #ccc; background:#f5f5f5; color:#333; cursor:pointer; transition:0.2s;`;
         btn.onclick = () => {
+            _mapShowAllZones = false; // 구역 탭 클릭 → 단일 구역 모드로 전환
             currentCorridorIdx = i;
             renderCorridor(i);
             document.querySelectorAll('#map-zone-tabs button').forEach(b => {
@@ -5127,10 +5132,6 @@ window.renderMap = function() {
 
 function renderCorridor(idx) {
     const mapBody = document.getElementById('map-body');
-    const item = svCorridorList[idx];
-    if (!item) return;
-
-    const isStarZone = item.zone === '★';
     const cellSize = document.getElementById('map-cell-size') ? Number(document.getElementById('map-cell-size').value) : 54;
 
     // 셀 공통 함수
@@ -5140,7 +5141,7 @@ function renderCorridor(idx) {
     // 도면 범례 필터 매칭 검사 (cellStyle 우선순위와 동일: preAssigned > reserved > hasContent > empty)
     function matchesLegendFilter(loc) {
         if (!_mapLegendFilter) return true; // 필터 없음 → 모두 매칭
-        if (!loc) return true; // null 셀(격자 placeholder)은 항상 표시
+        if (!loc) return false; // 필터 ON 시 null 셀(격자 placeholder)도 숨김
         if (_mapLegendFilter === 'preassigned') return loc.preAssigned === true;
         if (_mapLegendFilter === 'reserved') return loc.reserved === true && !loc.preAssigned;
         if (_mapLegendFilter === 'content') return hasContent(loc) && !loc.preAssigned && !loc.reserved;
@@ -5154,7 +5155,6 @@ function renderCorridor(idx) {
         else if (loc.reserved) s = 'background:#fff9c4; border:1.5px solid #f9a825;';
         else if (hasContent(loc)) s = 'background:#c8e6c9; border:1.5px solid #66bb6a;';
         else s = 'background:#f0f0f0; border:1px solid #ccc;';
-        if (!matchesLegendFilter(loc)) s += 'opacity:0.25;';
         return s;
     }
     function cellInner(loc) {
@@ -5202,9 +5202,11 @@ function renderCorridor(idx) {
             posNums.forEach(num => {
                 const loc = getCell(locs, pos, num);
                 if (!loc) {
+                    if (_mapLegendFilter) return; // 필터 ON → null 셀(placeholder)도 숨김 (옆이 당겨옴)
                     html += `<div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(null)}border-radius:4px;"></div>`;
                     return;
                 }
+                if (!matchesLegendFilter(loc)) return; // 미매칭 셀은 출력 안 함
                 const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
                 html += `<div style="position:relative;"
                     onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
@@ -5223,10 +5225,20 @@ function renderCorridor(idx) {
 
     let bodyHtml = '';
 
-    if (isStarZone) {
-        const allLocs = originalData.filter(d => d.id.charAt(0) === '★')
-            .sort((a, b) => parseInt((a.id.match(/\d+$/) || [0])[0]) - parseInt((b.id.match(/\d+$/) || [0])[0]));
-        const half = Math.ceil(allLocs.length / 2);
+    // 모든 구역 모드(범례 ON) vs 단일 구역 모드 분기
+    const itemsToRender = (_mapShowAllZones && _mapLegendFilter)
+        ? svCorridorList
+        : (svCorridorList[idx] ? [svCorridorList[idx]] : []);
+
+    itemsToRender.forEach(item => {
+        const isStarZone = item.zone === '★';
+
+        if (isStarZone) {
+            const allLocs = originalData.filter(d => d.id.charAt(0) === '★')
+                .sort((a, b) => parseInt((a.id.match(/\d+$/) || [0])[0]) - parseInt((b.id.match(/\d+$/) || [0])[0]));
+            // 필터 ON 시 ★구역에 매칭 슬롯 0개면 통째로 건너뜀
+            if (_mapLegendFilter && !allLocs.some(l => matchesLegendFilter(l))) return;
+            const half = Math.ceil(allLocs.length / 2);
         const topLocs = allLocs.slice(0, half);
         const botLocs = allLocs.slice(half);
 
@@ -5238,6 +5250,7 @@ function renderCorridor(idx) {
             const maxChars = Math.max(4, Math.floor((cellSize - 6) / (nameFontSize * 0.55)));
             let h = `<div style="padding:8px;display:flex;flex-wrap:wrap;gap:3px;">`;
             locs.forEach(loc => {
+                if (!matchesLegendFilter(loc)) return; // 미매칭 셀은 출력 안 함
                 const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
                 const nameText = hasContent(loc) ? (loc.name || loc.code || '') : '';
                 const nameColor = hasContent(loc) ? '#1b5e20' : '#999';
@@ -5256,7 +5269,7 @@ function renderCorridor(idx) {
             return h;
         }
 
-        bodyHtml = `
+        bodyHtml += `
             <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;">
                 <div style="background:#f4f4f4;padding:6px 16px;font-size:13px;font-weight:bold;color:#3d5afe;border-bottom:1px solid #ddd;">★★ 구역</div>
                 ${starRow(topLocs)}
@@ -5282,6 +5295,8 @@ function renderCorridor(idx) {
                 d.id.charAt(0).toUpperCase() === item.zone &&
                 (d.dong || '').toString().trim() === dong
             );
+            // 필터 ON 시 이 동에 매칭 슬롯 0개면 동 통째로 건너뜀
+            if (_mapLegendFilter && !allLocs.some(l => matchesLegendFilter(l))) return;
 
             const posSet = new Set();
             allLocs.forEach(d => { if (d.pos) posSet.add((d.pos || '').toString().trim()); });
@@ -5327,6 +5342,11 @@ function renderCorridor(idx) {
                     ${buildRackSection(rightLocs, numsByPos, posLabels, 'right', cellSize)}
                 </div>`;
         });
+    }
+    }); // itemsToRender.forEach 닫기
+
+    if (!bodyHtml.trim()) {
+        bodyHtml = '<div style="text-align:center;padding:60px;color:#aaa;font-size:14px;">📭 선택한 필터에 매칭되는 자리가 없습니다.</div>';
     }
 
     mapBody.innerHTML = `
