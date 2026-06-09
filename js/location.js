@@ -5038,9 +5038,42 @@ document.addEventListener('click', function(e) {
 // =============================
 let currentCorridorIdx = 0;
 let svCorridorList = [];
+// 도면보기 범례 필터: null | 'empty' | 'content' | 'reserved' | 'preassigned'
+let _mapLegendFilter = null;
 
 window.updateMapCellSize = function(val) {
     document.getElementById('map-cell-size-label').innerText = val + 'px';
+    renderCorridor(currentCorridorIdx);
+};
+
+// 도면보기 범례 클릭 → 필터 토글
+window.setMapLegendFilter = function(filterType) {
+    if (_mapLegendFilter === filterType) {
+        _mapLegendFilter = null; // 같은 거 다시 클릭 → 해제
+    } else {
+        _mapLegendFilter = filterType;
+    }
+    // 범례 UI 활성 표시 업데이트
+    const legendMap = {
+        'empty': 'map-legend-empty',
+        'content': 'map-legend-content',
+        'reserved': 'map-legend-reserved',
+        'preassigned': 'map-legend-preassigned'
+    };
+    Object.keys(legendMap).forEach(key => {
+        const el = document.getElementById(legendMap[key]);
+        if (!el) return;
+        if (_mapLegendFilter === key) {
+            el.style.outline = '2px solid #3d5afe';
+            el.style.outlineOffset = '2px';
+            el.style.fontWeight = '900';
+        } else {
+            el.style.outline = '';
+            el.style.outlineOffset = '';
+            el.style.fontWeight = '';
+        }
+    });
+    // 도면 재렌더링 (opacity 반영)
     renderCorridor(currentCorridorIdx);
 };
 
@@ -5104,12 +5137,25 @@ function renderCorridor(idx) {
     function hasContent(loc) {
         return loc && ((loc.code && loc.code !== loc.id && loc.code.trim() !== '') || (loc.name && loc.name.trim() !== ''));
     }
+    // 도면 범례 필터 매칭 검사 (cellStyle 우선순위와 동일: preAssigned > reserved > hasContent > empty)
+    function matchesLegendFilter(loc) {
+        if (!_mapLegendFilter) return true; // 필터 없음 → 모두 매칭
+        if (!loc) return true; // null 셀(격자 placeholder)은 항상 표시
+        if (_mapLegendFilter === 'preassigned') return loc.preAssigned === true;
+        if (_mapLegendFilter === 'reserved') return loc.reserved === true && !loc.preAssigned;
+        if (_mapLegendFilter === 'content') return hasContent(loc) && !loc.preAssigned && !loc.reserved;
+        if (_mapLegendFilter === 'empty') return !hasContent(loc) && !loc.preAssigned && !loc.reserved;
+        return true;
+    }
     function cellStyle(loc) {
         if (!loc) return 'background:#f0f0f0; border:1px dashed #ddd;';
-        if (loc.preAssigned) return 'background:#ffe0b2; border:1.5px solid #fb8c00;';
-        if (loc.reserved) return 'background:#fff9c4; border:1.5px solid #f9a825;';
-        if (hasContent(loc)) return 'background:#c8e6c9; border:1.5px solid #66bb6a;';
-        return 'background:#f0f0f0; border:1px solid #ccc;';
+        let s;
+        if (loc.preAssigned) s = 'background:#ffe0b2; border:1.5px solid #fb8c00;';
+        else if (loc.reserved) s = 'background:#fff9c4; border:1.5px solid #f9a825;';
+        else if (hasContent(loc)) s = 'background:#c8e6c9; border:1.5px solid #66bb6a;';
+        else s = 'background:#f0f0f0; border:1px solid #ccc;';
+        if (!matchesLegendFilter(loc)) s += 'opacity:0.25;';
+        return s;
     }
     function cellInner(loc) {
         if (!loc) return '';
@@ -5164,7 +5210,8 @@ function renderCorridor(idx) {
                     onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
                     onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
                     <div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
-                        onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
+                        onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'"
+                        onclick="window.copyLocationToClipboard(event, '${loc.id}')">
                         ${cellInner(loc)}
                     </div>${tooltipHtml(loc)}</div>`;
             });
@@ -5199,7 +5246,8 @@ function renderCorridor(idx) {
                     onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
                     onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
                     <div style="width:${cellSize}px;height:${cellSize+6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
-                        onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'">
+                        onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'"
+                        onclick="window.copyLocationToClipboard(event, '${loc.id}')">
                         <div style="font-size:${idFontSize}px;color:#bbb;line-height:1.1;">${loc.id}</div>
                         <div style="font-size:${nameFontSize}px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cellSize-4}px;text-align:center;line-height:1.3;">${displayName}</div>
                     </div>${tooltipHtml(loc)}</div>`;
