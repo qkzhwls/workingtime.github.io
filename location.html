@@ -444,10 +444,10 @@
             <!-- 범례 -->
             <div style="display:flex; align-items:center; gap:16px; padding:10px 15px; background:#fff; border:1px solid #ddd; border-radius:10px; margin-bottom:10px; flex-wrap:wrap;">
                 <span style="font-weight:bold; font-size:13px; color:#555;">범례:</span>
-                <span class="map-legend" style="background:#f0f0f0; border:1.5px solid #bbb;">빈칸</span>
-                <span class="map-legend" style="background:#c8e6c9; border:1.5px solid #66bb6a; color:#1b5e20;">상품있음</span>
-                <span class="map-legend" style="background:#fff9c4; border:1.5px solid #f9a825; color:#e65100;">예약중</span>
-                <span class="map-legend" style="background:#ffe0b2; border:1.5px solid #fb8c00; color:#bf360c;">선지정</span>
+                <span id="map-legend-empty" class="map-legend" style="background:#f0f0f0; border:1.5px solid #bbb; cursor:pointer;" onclick="window.setMapLegendFilter('empty')" title="클릭: 빈칸만 보기 / 다시 클릭: 해제">빈칸</span>
+                <span id="map-legend-content" class="map-legend" style="background:#c8e6c9; border:1.5px solid #66bb6a; color:#1b5e20; cursor:pointer;" onclick="window.setMapLegendFilter('content')" title="클릭: 상품있음만 보기 / 다시 클릭: 해제">상품있음</span>
+                <span id="map-legend-reserved" class="map-legend" style="background:#fff9c4; border:1.5px solid #f9a825; color:#e65100; cursor:pointer;" onclick="window.setMapLegendFilter('reserved')" title="클릭: 예약중만 보기 / 다시 클릭: 해제">예약중</span>
+                <span id="map-legend-preassigned" class="map-legend" style="background:#ffe0b2; border:1.5px solid #fb8c00; color:#bf360c; cursor:pointer;" onclick="window.setMapLegendFilter('preassigned')" title="클릭: 선지정만 보기 / 다시 클릭: 해제">선지정</span>
                 <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
                     <label style="font-size:12px; color:#555; font-weight:bold;">칸 크기:</label>
                     <input type="range" id="map-cell-size" min="30" max="120" value="54" style="width:80px;" oninput="updateMapCellSize(this.value)">
