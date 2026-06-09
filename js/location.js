@@ -5194,9 +5194,28 @@ function renderCorridor(idx) {
     }
 
     function buildRackSection(locs, numsByPos, posLabels, posKey, cellSize) {
+        // 필터 ON 시: 전체 매칭 슬롯 0개면 섹션 통째로 빈 문자열 반환
+        if (_mapLegendFilter) {
+            const anyMatch = posLabels.some(pos => {
+                const posNums = (numsByPos[pos] && numsByPos[pos][posKey]) || [];
+                return posNums.some(num => {
+                    const loc = getCell(locs, pos, num);
+                    return loc && matchesLegendFilter(loc);
+                });
+            });
+            if (!anyMatch) return '';
+        }
         let html = `<div style="padding:8px 8px;display:flex;flex-direction:column;gap:4px;">`;
         posLabels.forEach(pos => {
             const posNums = (numsByPos[pos] && numsByPos[pos][posKey]) || [];
+            // 필터 ON 시: 이 pos 라인에 매칭 슬롯 0개면 라인 통째로 건너뜀 (pos 라벨도 안 그림)
+            if (_mapLegendFilter) {
+                const hasMatch = posNums.some(num => {
+                    const loc = getCell(locs, pos, num);
+                    return loc && matchesLegendFilter(loc);
+                });
+                if (!hasMatch) return;
+            }
             html += `<div style="display:flex;flex-direction:row;align-items:center;gap:3px;">
                 <div style="font-size:10px;font-weight:bold;color:#bbb;min-width:18px;text-align:center;">${pos}</div>`;
             posNums.forEach(num => {
@@ -5245,6 +5264,8 @@ function renderCorridor(idx) {
         // ★★구역 cellSize는 슬라이더 값 사용
 
         function starRow(locs) {
+            // 필터 ON 시: 매칭 슬롯 0개면 빈 문자열 반환
+            if (_mapLegendFilter && !locs.some(l => matchesLegendFilter(l))) return '';
             const idFontSize = Math.max(7, Math.floor(cellSize / 8));
             const nameFontSize = Math.max(10, Math.floor(cellSize / 5));
             const maxChars = Math.max(4, Math.floor((cellSize - 6) / (nameFontSize * 0.55)));
@@ -5273,11 +5294,11 @@ function renderCorridor(idx) {
             <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;">
                 <div style="background:#f4f4f4;padding:6px 16px;font-size:13px;font-weight:bold;color:#3d5afe;border-bottom:1px solid #ddd;">★★ 구역</div>
                 ${starRow(topLocs)}
-                <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:7px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
+                ${_mapLegendFilter ? '' : `<div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:7px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
                     <div style="font-size:11px;color:#ccc;letter-spacing:4px;">← ← ←</div>
                     <div style="font-size:11px;color:#bbb;font-weight:bold;">★★ 통로</div>
                     <div style="font-size:11px;color:#ccc;letter-spacing:4px;">→ → →</div>
-                </div>
+                </div>`}
                 ${starRow(botLocs)}
             </div>`;
     } else {
@@ -5334,11 +5355,11 @@ function renderCorridor(idx) {
                         <div style="font-size:13px;font-weight:bold;color:#3d5afe;">${item.zone}구역 ${dong}동</div>
                     </div>
                     ${buildRackSection(leftLocs, numsByPos, posLabels, 'left', cellSize)}
-                    <div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:5px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
+                    ${_mapLegendFilter ? '' : `<div style="display:flex;align-items:center;justify-content:center;gap:12px;background:#fafafa;padding:5px 16px;border-top:1px solid #eee;border-bottom:1px solid #eee;">
                         <div style="font-size:11px;color:#ccc;letter-spacing:4px;">← ← ←</div>
                         <div style="font-size:11px;color:#bbb;font-weight:bold;">${dong}동 통로</div>
                         <div style="font-size:11px;color:#ccc;letter-spacing:4px;">→ → →</div>
-                    </div>
+                    </div>`}
                     ${buildRackSection(rightLocs, numsByPos, posLabels, 'right', cellSize)}
                 </div>`;
         });
