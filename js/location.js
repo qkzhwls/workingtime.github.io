@@ -1542,7 +1542,8 @@ window.saveIncomingPriorities = async function() {
 // - Case A: 주문 데이터의 신뢰 페어(count≥5, lift≥2.0) 발견 → 페어 위치 점수 최고 빈칸
 // - Case B: 신뢰 페어 0개(또는 모든 partner가 시스템에 미배치) → incomingRecommendPriorities 기준 1순위 빈칸
 // - 빈칸 없거나 입력 오류 → null
-window.calcIncomingRecommend = function(code) {
+// [5단계] 두 번째 인자 excludeLocIds (Set): 이 자리 ID들은 빈칸 후보에서 제외 (일괄적용 충돌 처리)
+window.calcIncomingRecommend = function(code, excludeLocIds) {
     // 입력/시스템 상태 검증
     if (!code || typeof code !== 'string') return null;
     if (!Array.isArray(originalData) || originalData.length === 0) return null;
@@ -1562,12 +1563,16 @@ window.calcIncomingRecommend = function(code) {
             .map(d => (d.dong || '').toString().trim())
     );
     
-    // 빈칸 추출 (선지정 제외 + 같은 동 제외 + 제외 조합 제외)
+    // 빈칸 추출 (선지정 제외 + 같은 동 제외 + 제외 조합 제외 + 일괄적용 시 이미 사용된 자리 제외)
     const excludeCombos = priorities.excludeCombos || [];
+    const hasExclude = excludeLocIds && typeof excludeLocIds.has === 'function';
     const emptyLocs = originalData.filter(d => {
         const hasContent = (d.code && d.code !== d.id && d.code.trim() !== '') 
                         || (d.name && d.name.trim() !== '');
         if (hasContent || d.preAssigned) return false;
+        
+        // [5단계] 일괄적용 시 이미 다른 카드가 가져간 자리 제외
+        if (hasExclude && excludeLocIds.has(d.id)) return false;
         
         const targetDong = (d.dong || '').toString().trim();
         if (currentDongsSet.has(targetDong)) return false;
@@ -1705,6 +1710,113 @@ window.calcIncomingRecommend = function(code) {
     });
     
     return { case: 'B', loc: sortedEmpty[0], score: 0, partnerCount: 0 };
+};
+
+// [5단계] 입고대기 추천 자리 일괄 적용
+// - 정렬: 출고예상일 빠른 순 → 같으면 미입고수량 많은 순
+// - 충돌 처리: 우선순위 높은 카드가 먼저 자리를 차지, 후순위 카드는 해당 자리를 제외하고 차순위 자리 재계산
+// - Firestore 저장 패턴은 기존 단일 선지정과 동일 (preAssigned, preAssignedCode 등)
+window.applyAllRecommendations = async function() {
+    try {
+        // 1) 현재 입고대기 목록 (renderIncomingQueue와 같은 필터 적용)
+        const filterSource = document.getElementById('filter-source')?.value || 'all';
+        
+        const existingLocMap = {};
+        originalData.forEach(loc => {
+            if (loc.preAssigned && loc.preAssignedCode) existingLocMap[loc.preAssignedCode] = true;
+            if (loc.code && loc.code !== loc.id) existingLocMap[loc.code] = true;
+        });
+        
+        const _today = new Date().toISOString().slice(0, 10);
+        
+        let list = [];
+        for (const code in incomingData) { list.push(incomingData[code]); }
+        
+        list = list.filter(item => {
+            if (filterSource !== 'all' && item.source !== filterSource) return false;
+            if (existingLocMap[item['상품코드']]) return false;
+            if (!item['표시날짜'] || item['표시날짜'].toString().trim() === '') return false;
+            const arrivalDate = (item['도착예상일'] || item['표시날짜'] || '').toString().trim();
+            if (arrivalDate && arrivalDate < _today) return false;
+            return true;
+        });
+        
+        if (list.length === 0) {
+            return alert("일괄 적용할 입고대기 상품이 없습니다.");
+        }
+        
+        // 2) 충돌 처리용 정렬: 출고예상일 빠른 순 → 같으면 미입고수량 많은 순
+        list.sort((a, b) => {
+            const dA = (a['표시날짜'] || '9999-99-99').toString();
+            const dB = (b['표시날짜'] || '9999-99-99').toString();
+            if (dA !== dB) return dA.localeCompare(dB);
+            return Number(b['입고대기수량'] || 0) - Number(a['입고대기수량'] || 0);
+        });
+        
+        // 3) 각 카드의 추천 자리 계산 (이미 사용된 자리는 제외하고 재계산)
+        const usedLocIds = new Set();
+        const assignments = [];
+        const skipped = [];
+        
+        for (const item of list) {
+            const code = item['상품코드'];
+            const rec = window.calcIncomingRecommend(code, usedLocIds);
+            if (rec && rec.loc && rec.loc.id) {
+                usedLocIds.add(rec.loc.id);
+                assignments.push({ item, locId: rec.loc.id, rec });
+            } else {
+                skipped.push(item);
+            }
+        }
+        
+        if (assignments.length === 0) {
+            return alert("추천 가능한 자리가 없습니다. (3층 빈칸이 부족할 수 있습니다.)");
+        }
+        
+        // 4) 사용자 확인
+        const msg = `📍 추천 자리 일괄 적용\n\n` +
+                    `대상: ${assignments.length}개 상품\n` +
+                    (skipped.length > 0 ? `추천 불가로 제외: ${skipped.length}개\n` : '') +
+                    `\n계속 진행하시겠습니까?`;
+        if (!confirm(msg)) return;
+        
+        // 5) zone 별로 묶어서 Firestore 일괄 저장
+        const zoneUpdates = {};
+        const now = Date.now();
+        for (const { item, locId } of assignments) {
+            const zoneDocId = getZoneDocId(locId);
+            if (!zoneUpdates[zoneDocId]) zoneUpdates[zoneDocId] = {};
+            zoneUpdates[zoneDocId][locId] = {
+                preAssigned: true,
+                preAssignedCode: item['상품코드'],
+                preAssignedName: item['상품명'] || '',
+                preAssignedQty: item['입고대기수량'] || 0,
+                preAssignedAt: now,
+                code: item['상품코드'],
+                name: item['상품명'] || '',
+                option: item['옵션'] || '',
+                stock: (item['입고대기수량'] || 0).toString(),
+                reserved: false, reservedBy: '', reservedAt: 0,
+                codeTag: '선지정', codeTagAt: now,
+                updatedAt: new Date()
+            };
+        }
+        
+        const savePromises = [];
+        for (const zoneDocId in zoneUpdates) {
+            savePromises.push(setDoc(doc(db, LOC_COLLECTION, zoneDocId), zoneUpdates[zoneDocId], { merge: true }));
+        }
+        await Promise.all(savePromises);
+        
+        // 6) 사이드바 갱신 (적용된 카드는 자동으로 사라짐)
+        // ※ Firestore 실시간 리스너가 originalData를 갱신하므로 일반적으로 자동 갱신되나, 명시적 호출로 안정성 확보
+        if (typeof window.renderIncomingQueue === 'function') {
+            window.renderIncomingQueue();
+        }
+    } catch (e) {
+        console.error('[applyAllRecommendations] 실패:', e);
+        alert('⚠️ 일괄 적용 중 오류가 발생했습니다: ' + (e && e.message ? e.message : e));
+    }
 };
 
 window.saveSheetUrl = async () => {
