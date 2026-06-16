@@ -163,6 +163,38 @@ async function fetchCSV(url) {
     return result;
 }
 
+// ---------------------------------------------------------
+// [복구] 청크 압축 저장 (방식 A: 기존 데이터 삭제 후 최신본만 저장)
+//  - rows를 200개씩 묶어 'CHUNK_n' 문서의 dataStr 필드에 JSON으로 저장
+//  - loadStockLogFromFirebase()가 동일한 dataStr 구조를 읽어 복원함
+// ---------------------------------------------------------
+async function saveChunkedData(rows, collectionSuffix, onProgress) {
+    const collectionName = CHINA_COLLECTION + '_' + collectionSuffix;
+
+    // 1. 기존 문서 전체 삭제 → '다음 업로드 전까지 최신 1개'만 유지
+    if (onProgress) onProgress('🗑️ 기존 데이터 정리 중...');
+    const existing = await getDocs(collection(db, collectionName));
+    if (existing.size > 0) {
+        const delBatch = writeBatch(db);
+        existing.docs.forEach(d => delBatch.delete(d.ref));
+        await delBatch.commit();
+    }
+
+    // 2. 상품코드 있는 행만 추려 200개씩 청크로 압축 저장
+    const validRows = rows.filter(r => (r['상품코드'] || '').toString().trim());
+    const CHUNK_SIZE = 200;
+    const batch = writeBatch(db);
+    let chunkCount = 0;
+    for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
+        const chunk = validRows.slice(i, i + CHUNK_SIZE);
+        const docRef = doc(db, collectionName, `CHUNK_${chunkCount}`);
+        batch.set(docRef, { dataStr: JSON.stringify(chunk), updatedAt: new Date() });
+        chunkCount++;
+        if (onProgress) onProgress(`💾 저장 중... (${Math.min(i + CHUNK_SIZE, validRows.length)}/${validRows.length})`);
+    }
+    if (chunkCount > 0) await batch.commit();
+}
+
 function handleStockLogUpload(e) {
     const file = e.target.files[0]; 
     if (!file) return;
