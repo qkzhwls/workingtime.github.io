@@ -519,14 +519,24 @@ function setupEventListeners() {
     // 9. #btn-date-clear (초기화)
     document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
 
-    // 10. #btn-excel-download (엑셀 다운로드)
+    // 10. #btn-excel-download (입고용파일다운로드: 상품코드 + 수량)
     document.getElementById('btn-excel-download')?.addEventListener('click', () => {
         if (!filteredData.length) return;
         const headers = ['상품코드','수량']; let html = '<table><tr><th>상품코드</th><th>수량</th></tr>';
         filteredData.forEach(r => html += `<tr><td>${r.code}</td><td>${r.arrivalQty}</td></tr>`);
         html += '</table>';
         const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '미발계산기.xls'; a.click();
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '입고용파일.xls'; a.click();
+    });
+
+    // 10-2. #btn-mibal-download (미발확인파일다운로드: 상품코드만, 수량 헤더 없음)
+    document.getElementById('btn-mibal-download')?.addEventListener('click', () => {
+        if (!filteredData.length) return;
+        let html = '<table><tr><th>상품코드</th></tr>';
+        filteredData.forEach(r => html += `<tr><td>${r.code}</td></tr>`);
+        html += '</table>';
+        const blob = new Blob(['﻿' + html], { type: 'application/vnd.ms-excel' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '미발확인파일.xls'; a.click();
     });
 
     // 11. #search-input (검색)
