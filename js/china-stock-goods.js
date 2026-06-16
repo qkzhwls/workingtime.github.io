@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.4 (이벤트 바인딩 완전체)
+// 중국제작 미발계산기 Ver 2.5 (미발수량 공식 적용 + 비고/직진배송 분리)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -430,12 +430,24 @@ function applyDates() {
     tableData = Object.values(resultMap).map(item => {
         const log = stockLogData[item.code] || {}; const ed = editedCells[item.code] || {};
         const loc = (log['로케이션'] || '').split('/')[0].trim();
+        const totalStock = parseInt(log['정상재고']) || 0;   // 총재고
+        const capacity = getCapacityByLocation(loc);          // 적재량
+        const shortageVal = ed.shortage || '';                // 부족수량(열)
+        const directShipVal = ed.directShip || '';            // 직진배송(열)
+        // 미발수량 공식: =IFERROR(MAX(IFS(총재고=0, 적재량, 부족수량+직진배송수량>총재고, 부족수량+직진배송수량-총재고)), 0)
+        const _short = parseInt(shortageVal) || 0;            // 부족수량
+        const _direct = parseInt(directShipVal) || 0;         // 직진배송수량
+        let mibalQty;
+        if (totalStock === 0) mibalQty = capacity;
+        else if (_short + _direct > totalStock) mibalQty = _short + _direct - totalStock;
+        else mibalQty = 0;
+        if (mibalQty < 0) mibalQty = 0;
         return {
             code: item.code, name: item.name, option: item.option, arrivalQty: item.arrivalQty,
-            mibalQty: parseInt(log['부족수량']) || 0, totalStock: parseInt(log['정상재고']) || 0,
-            location: loc, capacity: getCapacityByLocation(loc),
+            mibalQty, totalStock,
+            location: loc, capacity,
             confirmed: inboundMap[item.code] || ed.confirmed || '', 
-            shortage: ed.shortage || '', directShip: item.bigoY || ed.directShip || '', memo: ed.memo || ''
+            shortage: shortageVal, directShip: directShipVal, memo: item.bigoY || ed.memo || ''
         };
     }).filter(d => d.arrivalQty > 0);
     filteredData = [...tableData]; renderTable(); updateSummary();
