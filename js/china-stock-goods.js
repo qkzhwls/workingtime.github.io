@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.3 (이벤트 바인딩 완전체)
+// 중국제작 미발계산기 Ver 2.4 (이벤트 바인딩 완전체)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
