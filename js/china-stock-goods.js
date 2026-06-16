@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.5 (미발수량 공식 적용 + 비고/직진배송 분리)
+// 중국제작 미발계산기 Ver 2.6 (미발확인파일 진짜 .xls 출력)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -541,14 +541,17 @@ function setupEventListeners() {
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '입고용파일.xls'; a.click();
     });
 
-    // 10-2. #btn-mibal-download (미발확인파일다운로드: 상품코드만, 수량 헤더 없음)
+    // 10-2. #btn-mibal-download (미발확인파일다운로드: 상품코드 1열, 진짜 .xls 바이너리)
+    //  - 이지어드민 업로드용. HTML 위장(.xls)이 아니라 SheetJS로 실제 BIFF8(OLE2) 파일 생성
+    //  - 통합 문서1.xls 와 동일 형식(시트명 worksheet, 헤더 '상품코드')
     document.getElementById('btn-mibal-download')?.addEventListener('click', () => {
         if (!filteredData.length) return;
-        let html = '<table><tr><th>상품코드</th></tr>';
-        filteredData.forEach(r => html += `<tr><td>${r.code}</td></tr>`);
-        html += '</table>';
-        const blob = new Blob(['﻿' + html], { type: 'application/vnd.ms-excel' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '미발확인파일.xls'; a.click();
+        const aoa = [['상품코드']];
+        filteredData.forEach(r => aoa.push([r.code]));
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
+        XLSX.writeFile(wb, '미발확인파일.xls', { bookType: 'biff8' });
     });
 
     // 11. #search-input (검색)
