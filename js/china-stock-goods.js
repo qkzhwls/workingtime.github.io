@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.9 (출고일 선택 즉시 자동 적용)
+// 중국제작 미발계산기 Ver 3.0 (JS 캐시 무력화: html의 ?v= 와 함께 버전 관리)
 
 import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
