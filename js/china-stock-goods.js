@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 3.0 (JS 캐시 무력화: html의 ?v= 와 함께 버전 관리)
+// 중국제작 미발계산기 Ver 3.1 (출고일 팝업: 복수 선택 후 닫힐 때 일괄 적용)
 
 import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -71,7 +71,11 @@ function getCapacityByLocation(locStr) {
 // ---------------------------------------------------------
 function closeAllMenus() {
     const menu = document.getElementById('main-tools-menu'); if (menu) menu.style.display = 'none';
-    const popup = document.getElementById('date-dropdown-popup'); if (popup) popup.style.display = 'none';
+    const popup = document.getElementById('date-dropdown-popup');
+    if (popup && popup.style.display === 'block') {
+        popup.style.display = 'none';
+        onDatePopupClosed(); // [Ver 3.1] 팝업이 닫히는 시점에 변경된 선택을 한 번만 적용
+    }
 }
 
 function openSheetSettingsModal() {
@@ -408,7 +412,8 @@ function extractShipDates() {
         html += `<label class="date-item"><input type="checkbox" class="date-check" value="${date}" ${isChecked}><span>${date} (${info.skus.size}종 / ${info.qty.toLocaleString()}장)</span></label>`;
     });
     checklistContainer.innerHTML = html;
-    checklistContainer.querySelectorAll('.date-check').forEach(ck => { ck.addEventListener('change', () => { updateSavedDatesFromCheckboxes(); renderSelectedTags(); autoApplyDates(); }); });
+    // [Ver 3.1] 팝업 안에서는 선택만 반영(태그 갱신), 적용은 팝업이 닫힐 때
+    checklistContainer.querySelectorAll('.date-check').forEach(ck => { ck.addEventListener('change', () => { updateSavedDatesFromCheckboxes(); renderSelectedTags(); }); });
 }
 
 function updateSavedDatesFromCheckboxes() {
@@ -432,8 +437,23 @@ function renderSelectedTags() {
     }));
 }
 
-// [Ver 2.9] 출고일 선택/해제 시 즉시 적용 (전체 해제 시 표 비우기 포함)
+// [Ver 3.1] 출고일 팝업이 열려있는 동안은 적용을 미루고, 닫힐 때 한 번만 적용
+let dateSelectionSnapshot = null; // 팝업 열 때의 선택 상태 (null = 팝업 닫힘)
+
+function snapshotDateSelection() {
+    dateSelectionSnapshot = JSON.stringify([...savedDates].sort());
+}
+
+function onDatePopupClosed() {
+    const now = JSON.stringify([...savedDates].sort());
+    if (dateSelectionSnapshot !== null && now !== dateSelectionSnapshot) autoApplyDates();
+    dateSelectionSnapshot = null;
+}
+
+// [Ver 2.9] 출고일 선택/해제 시 적용 (전체 해제 시 표 비우기 포함)
 function autoApplyDates() {
+    // 팝업 열림 상태에서 직접 적용된 경우(태그 ✕ 등) 닫힐 때 중복 적용 방지
+    if (dateSelectionSnapshot !== null) snapshotDateSelection();
     if (savedDates.length === 0) {
         tableData = []; filteredData = [];
         renderTable(); updateSummary();
@@ -706,18 +726,26 @@ function setupEventListeners() {
     document.getElementById('btn-clear-inbound')?.addEventListener('click', () => clearInboundHistory());
 
     // 21. 출고일 드롭다운 관련 바인딩
-    document.getElementById('btn-date-dropdown')?.addEventListener('click', (e) => { 
-        e.stopPropagation(); 
-        const p = document.getElementById('date-dropdown-popup'); 
-        p.style.display = p.style.display === 'block' ? 'none' : 'block'; 
+    document.getElementById('btn-date-dropdown')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const p = document.getElementById('date-dropdown-popup');
+        if (p.style.display === 'block') {
+            p.style.display = 'none';
+            onDatePopupClosed(); // [Ver 3.1] 버튼으로 닫아도 적용
+        } else {
+            snapshotDateSelection(); // 열 때의 선택 상태 기억
+            p.style.display = 'block';
+        }
     });
+    // [Ver 3.1] 팝업 내부 클릭이 문서 클릭(메뉴 닫기)으로 전파되지 않게 차단
+    document.getElementById('date-dropdown-popup')?.addEventListener('click', (e) => e.stopPropagation());
     document.getElementById('btn-date-all')?.addEventListener('click', () => {
         document.querySelectorAll('.date-check').forEach(ck => ck.checked = true);
-        updateSavedDatesFromCheckboxes(); renderSelectedTags(); autoApplyDates();
+        updateSavedDatesFromCheckboxes(); renderSelectedTags();
     });
     document.getElementById('btn-date-none')?.addEventListener('click', () => {
         document.querySelectorAll('.date-check').forEach(ck => ck.checked = false);
-        updateSavedDatesFromCheckboxes(); renderSelectedTags(); autoApplyDates();
+        updateSavedDatesFromCheckboxes(); renderSelectedTags();
     });
 
     // 22. 스캐너 앱 연동 (앱으로열기 / QR 출력 / 설치 안내)
