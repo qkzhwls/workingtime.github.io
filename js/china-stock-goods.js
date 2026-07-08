@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 3.1 (출고일 팝업: 복수 선택 후 닫힐 때 일괄 적용)
+// 중국제작 미발계산기 Ver 3.2 (버튼명: 입고앱실행)
 
 import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
