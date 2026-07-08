@@ -1,7 +1,7 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.6 (미발확인파일 진짜 .xls 출력)
+// 중국제작 미발계산기 Ver 2.7 (스캐너 앱 연동: 딥링크 + 서버 QR)
 
-import { initializeFirebase } from './config.js';
+import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
@@ -488,6 +488,67 @@ function sortTable(key) {
 }
 
 // ---------------------------------------------------------
+// 스캐너 앱 연동 (딥링크 / 서버 QR / 설치 안내)
+//  - 서버 정보는 이 페이지가 실제 사용 중인 firebaseConfig에서 동적으로 생성
+//    → 관리자 페이지에서는 config.js만 바꾸면 자동으로 관리자 서버로 연결됨
+// ---------------------------------------------------------
+const APP_PACKAGE = 'com.example.image_picker';
+const INSTALL_PAGE = new URL('app-install.html', location.href).href;
+
+function getServerInfo() {
+    return {
+        type: 'fb-server',
+        label: firebaseConfig.projectId,
+        projectId: firebaseConfig.projectId,
+        apiKey: firebaseConfig.apiKey,
+        appId: firebaseConfig.appId,
+        messagingSenderId: firebaseConfig.messagingSenderId
+    };
+}
+
+function openInScannerApp() {
+    closeAllMenus();
+    const s = getServerInfo();
+    const q = new URLSearchParams({
+        projectId: s.projectId, apiKey: s.apiKey,
+        appId: s.appId, messagingSenderId: s.messagingSenderId, label: s.label
+    }).toString();
+    if (/android/i.test(navigator.userAgent)) {
+        // 앱 설치됨 → 앱 실행 + 서버 자동연결 / 미설치 → 설치 안내 페이지로 이동
+        location.href = `intent://connect?${q}#Intent;scheme=scannerapp;package=${APP_PACKAGE};S.browser_fallback_url=${encodeURIComponent(INSTALL_PAGE)};end`;
+    } else {
+        showToast('📱 안드로이드 폰에서 눌러주세요. PC에서는 [서버 연결 QR 출력]을 이용하세요.');
+    }
+}
+
+function printServerQR() {
+    closeAllMenus();
+    if (typeof QRCode === 'undefined') { showToast('QR 라이브러리 로드 실패 (새로고침 후 재시도)'); return; }
+    const s = getServerInfo();
+    const tmp = document.createElement('div');
+    new QRCode(tmp, { text: JSON.stringify(s), width: 320, height: 320, correctLevel: QRCode.CorrectLevel.M });
+    setTimeout(() => {
+        const img = tmp.querySelector('img');
+        const cv = tmp.querySelector('canvas');
+        const dataUrl = (img && img.src) ? img.src : (cv ? cv.toDataURL() : '');
+        if (!dataUrl) { showToast('QR 생성 실패'); return; }
+        const w = window.open('', '_blank', 'width=480,height=680');
+        if (!w) { showToast('팝업이 차단되었습니다. 팝업 허용 후 재시도하세요.'); return; }
+        w.document.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>서버 연결 QR</title>
+<style>body{font-family:sans-serif;text-align:center;padding:30px;color:#333;}
+.btn{padding:12px 30px;background:#e65100;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;}
+@media print {.btn{display:none;}}</style></head><body>
+<h2>📱 스캐너 앱 서버 연결 QR</h2>
+<div style="font-size:14px;color:#555;">서버: <b>${s.projectId}</b></div>
+<img src="${dataUrl}" style="width:320px;height:320px;margin:20px 0;">
+<div style="font-size:13px;color:#777;">스캐너 앱 카메라로 이 QR을 스캔하면<br>위 서버로 자동 연결됩니다.</div>
+<br><button class="btn" onclick="window.print()">🖨️ 인쇄</button>
+</body></html>`);
+        w.document.close();
+    }, 200);
+}
+
+// ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
 async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; } }
@@ -611,6 +672,11 @@ function setupEventListeners() {
         document.querySelectorAll('.date-check').forEach(ck => ck.checked = false); 
         updateSavedDatesFromCheckboxes(); renderSelectedTags(); 
     });
+
+    // 22. 스캐너 앱 연동 (앱으로열기 / QR 출력 / 설치 안내)
+    document.getElementById('btn-open-app')?.addEventListener('click', openInScannerApp);
+    document.getElementById('btn-print-qr')?.addEventListener('click', printServerQR);
+    document.getElementById('btn-install-guide')?.addEventListener('click', () => { closeAllMenus(); window.open(INSTALL_PAGE, '_blank'); });
 
     // ========= 바인딩 체크리스트 =========
     // 1. #btn-toggle-menu [OK]

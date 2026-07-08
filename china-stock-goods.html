@@ -63,10 +63,11 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 2.6</div>
+            <div class="version-badge">🚀 Ver 2.7</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
+            <button class="btn-download" id="btn-open-app" style="padding: 8px 15px; background: #6a1b9a; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📱 앱으로열기</button>
             <button class="btn-download" id="btn-excel-download" style="padding: 8px 15px; background: #1976d2; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📥 입고용파일다운로드</button>
             <button class="btn-download" id="btn-mibal-download" style="padding: 8px 15px; background: #00897b; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📥 미발확인파일다운로드</button>
             <div class="upload-dropdown" style="position: relative; display: inline-block;">
@@ -75,6 +76,9 @@
                     <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a;">📊 데이터 소스 관리</div>
                     <label style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold;">📂 미발재고로그 업로드<input type="file" id="upload-stock-log" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
                     <div class="menu-item" id="btn-sync-order" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#1976d2;">🔄 오더리스트 시트 동기화</div>
+                    <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a; border-top:1px solid #ddd;">📱 스캐너 앱</div>
+                    <div class="menu-item" id="btn-print-qr" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#6a1b9a;">🖨️ 서버 연결 QR 출력</div>
+                    <div class="menu-item" id="btn-install-guide" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#2e7d32;">⬇️ 앱 설치 안내</div>
                     <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a; border-top:1px solid #ddd;">⚙️ 설정</div>
                     <div class="menu-item" id="btn-open-sheet-settings" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#607d8b;">📎 CSV 시트 링크 설정</div>
                     <div class="menu-item" id="btn-clear-all" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#d32f2f;">🗑️ 전체 데이터 초기화</div>
@@ -157,6 +161,7 @@
 
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script type="module" src="js/china-stock-goods.js"></script>
 </body>
 </html>
