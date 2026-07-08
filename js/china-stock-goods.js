@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.7 (스캐너 앱 연동: 딥링크 + 서버 QR)
+// 중국제작 미발계산기 Ver 2.8 (스캔DB 자동 동기화 + 입고분 차감 업로드)
 
 import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -107,7 +107,7 @@ function loadInboundHistory() {
             const qty = parseInt(data.qty) || 0;
             if (code) inboundMap[code] = (inboundMap[code] || 0) + qty;
         });
-        if (tableData.length > 0) applyDates();
+        if (tableData.length > 0) applyDates({ skipSync: true });
     });
 }
 
@@ -257,33 +257,64 @@ function handleStockLogUpload(e) {
     reader.readAsText(file, 'UTF-8');
 }
 
+// [Ver 2.8] 스캔DB 동기화 공용 코어
+//  - 도착수량은 (도착예정 - 이미 입고된 수량)으로 차감해 업로드
+//    → 자동 동기화가 여러 번 돌아도 앱에서 처리한 입고 차감분이 유지됨
+async function syncScanDBCore() {
+    const SCAN_DB_COLL = 'ChinaStockGoods_ScanDB';
+    const existing = await getDocs(collection(db, SCAN_DB_COLL));
+    if (existing.size > 0) {
+        const delBatch = writeBatch(db);
+        existing.docs.forEach(d => delBatch.delete(d.ref));
+        await delBatch.commit();
+    }
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < tableData.length; i += CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        const chunk = tableData.slice(i, i + CHUNK_SIZE);
+        chunk.forEach(item => {
+            const docRef = doc(db, SCAN_DB_COLL, item.code);
+            batch.set(docRef, {
+                code: item.code, name: item.name, option: item.option,
+                arrivalQty: Math.max(item.arrivalQty - (inboundMap[item.code] || 0), 0),
+                mibalQty: item.mibalQty,
+                totalStock: item.totalStock, location: item.location,
+                capacity: item.capacity, updatedAt: new Date()
+            });
+        });
+        await batch.commit();
+    }
+}
+
+// [Ver 2.8] 자동 동기화 스케줄러 (연속 호출 병합 + 동시 실행 방지)
+let scanDbSyncTimer = null;
+let scanDbSyncing = false;
+let scanDbSyncPending = false;
+
+function scheduleScanDBSync() {
+    if (!tableData || tableData.length === 0) return;
+    clearTimeout(scanDbSyncTimer);
+    scanDbSyncTimer = setTimeout(runScanDBSync, 1500);
+}
+
+async function runScanDBSync() {
+    if (scanDbSyncing) { scanDbSyncPending = true; return; }
+    scanDbSyncing = true;
+    try {
+        await syncScanDBCore();
+        showToast('🔄 앱용 스캔DB 자동 동기화 완료');
+    } catch (e) { console.error('스캔DB 자동 동기화 실패:', e); }
+    scanDbSyncing = false;
+    if (scanDbSyncPending) { scanDbSyncPending = false; scheduleScanDBSync(); }
+}
+
+// 수동 업로드 (비상용 버튼)
 async function uploadScanDB() {
     if (!tableData || tableData.length === 0) { alert('업로드할 데이터가 없습니다.'); return; }
-    if (!confirm(`현재 ${tableData.length}건의 데이터를 앱용 스캔DB로 업로드하시겠습니까?`)) return;
+    if (!confirm(`현재 ${tableData.length}건의 데이터를 앱용 스캔DB로 업로드하시겠습니까?\n(평소에는 출고일 적용 시 자동 동기화됩니다)`)) return;
     showLoading('🚀 앱용 스캔DB 업로드 중...');
-    const SCAN_DB_COLL = 'ChinaStockGoods_ScanDB';
     try {
-        const existing = await getDocs(collection(db, SCAN_DB_COLL));
-        if (existing.size > 0) {
-            const delBatch = writeBatch(db);
-            existing.docs.forEach(d => delBatch.delete(d.ref));
-            await delBatch.commit();
-        }
-        const CHUNK_SIZE = 500;
-        for (let i = 0; i < tableData.length; i += CHUNK_SIZE) {
-            const batch = writeBatch(db);
-            const chunk = tableData.slice(i, i + CHUNK_SIZE);
-            chunk.forEach(item => {
-                const docRef = doc(db, SCAN_DB_COLL, item.code);
-                batch.set(docRef, {
-                    code: item.code, name: item.name, option: item.option,
-                    arrivalQty: item.arrivalQty, mibalQty: item.mibalQty,
-                    totalStock: item.totalStock, location: item.location,
-                    capacity: item.capacity, updatedAt: new Date()
-                });
-            });
-            await batch.commit();
-        }
+        await syncScanDBCore();
         hideLoading(); showToast(`✅ 스캔DB 업로드 완료 (${tableData.length}건)`);
     } catch (e) { hideLoading(); alert('업로드 실패: ' + e.message); }
 }
@@ -401,7 +432,7 @@ function renderSelectedTags() {
     }));
 }
 
-function applyDates() {
+function applyDates(opts) {
     if (savedDates.length === 0) return;
     saveConfig();
     const dCols = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
@@ -451,6 +482,9 @@ function applyDates() {
         };
     }).filter(d => d.arrivalQty > 0);
     filteredData = [...tableData]; renderTable(); updateSummary();
+    // [Ver 2.8] 표 갱신 시 앱용 스캔DB 자동 동기화
+    // (앱 입고 이벤트로 인한 갱신은 앱이 이미 차감했으므로 skipSync로 생략)
+    if (!(opts && opts.skipSync)) scheduleScanDBSync();
 }
 
 function renderTable() {
