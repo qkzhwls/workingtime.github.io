@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 2.8 (스캔DB 자동 동기화 + 입고분 차감 업로드)
+// 중국제작 미발계산기 Ver 2.9 (출고일 선택 즉시 자동 적용)
 
 import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -408,7 +408,7 @@ function extractShipDates() {
         html += `<label class="date-item"><input type="checkbox" class="date-check" value="${date}" ${isChecked}><span>${date} (${info.skus.size}종 / ${info.qty.toLocaleString()}장)</span></label>`;
     });
     checklistContainer.innerHTML = html;
-    checklistContainer.querySelectorAll('.date-check').forEach(ck => { ck.addEventListener('change', () => { updateSavedDatesFromCheckboxes(); renderSelectedTags(); }); });
+    checklistContainer.querySelectorAll('.date-check').forEach(ck => { ck.addEventListener('change', () => { updateSavedDatesFromCheckboxes(); renderSelectedTags(); autoApplyDates(); }); });
 }
 
 function updateSavedDatesFromCheckboxes() {
@@ -428,8 +428,19 @@ function renderSelectedTags() {
     container.querySelectorAll('.remove-btn').forEach(b => b.addEventListener('click', () => {
         const d = b.dataset.date; savedDates = savedDates.filter(x => x !== d);
         const ck = document.querySelector(`.date-check[value="${d}"]`); if(ck) ck.checked = false;
-        updateSavedDatesFromCheckboxes(); renderSelectedTags();
+        updateSavedDatesFromCheckboxes(); renderSelectedTags(); autoApplyDates();
     }));
+}
+
+// [Ver 2.9] 출고일 선택/해제 시 즉시 적용 (전체 해제 시 표 비우기 포함)
+function autoApplyDates() {
+    if (savedDates.length === 0) {
+        tableData = []; filteredData = [];
+        renderTable(); updateSummary();
+        saveConfig();
+        return;
+    }
+    applyDates();
 }
 
 function applyDates(opts) {
@@ -502,6 +513,8 @@ function renderTable() {
 function updateSummary() {
     document.getElementById('sum-sku').textContent = filteredData.length;
     document.getElementById('sum-arrival').textContent = filteredData.reduce((s,d)=>s+d.arrivalQty,0);
+    // [Ver 2.9] 총 미발수량 카드가 갱신되지 않던 버그 수정
+    document.getElementById('sum-mibal').textContent = filteredData.reduce((s,d)=>s+(d.mibalQty||0),0);
 }
 
 function applySearch() {
@@ -698,13 +711,13 @@ function setupEventListeners() {
         const p = document.getElementById('date-dropdown-popup'); 
         p.style.display = p.style.display === 'block' ? 'none' : 'block'; 
     });
-    document.getElementById('btn-date-all')?.addEventListener('click', () => { 
-        document.querySelectorAll('.date-check').forEach(ck => ck.checked = true); 
-        updateSavedDatesFromCheckboxes(); renderSelectedTags(); 
+    document.getElementById('btn-date-all')?.addEventListener('click', () => {
+        document.querySelectorAll('.date-check').forEach(ck => ck.checked = true);
+        updateSavedDatesFromCheckboxes(); renderSelectedTags(); autoApplyDates();
     });
-    document.getElementById('btn-date-none')?.addEventListener('click', () => { 
-        document.querySelectorAll('.date-check').forEach(ck => ck.checked = false); 
-        updateSavedDatesFromCheckboxes(); renderSelectedTags(); 
+    document.getElementById('btn-date-none')?.addEventListener('click', () => {
+        document.querySelectorAll('.date-check').forEach(ck => ck.checked = false);
+        updateSavedDatesFromCheckboxes(); renderSelectedTags(); autoApplyDates();
     });
 
     // 22. 스캐너 앱 연동 (앱으로열기 / QR 출력 / 설치 안내)
