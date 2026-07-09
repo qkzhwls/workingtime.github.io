@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 3.4 (웹 스캐너 scan.html 연동: 입고앱실행 → 웹 실행)
+// 중국제작 미발계산기 Ver 3.5 (웹 스캐너 카메라 인식 성능 개선)
 
 import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -613,7 +613,7 @@ function printServerQR() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '3.4';
+const WEB_VERSION = '3.5';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {

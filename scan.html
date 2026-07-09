@@ -19,6 +19,9 @@
         #reader { width: 100%; }
         #reader video { width: 100% !important; }
         .btn-start { position: absolute; inset: 0; margin: auto; width: 220px; height: 64px; background: #1976d2; color: #fff; border: none; border-radius: 12px; font-size: 19px; font-weight: 800; cursor: pointer; z-index: 5; }
+        .cam-controls { display: none; position: absolute; right: 8px; bottom: 8px; z-index: 6; gap: 6px; align-items: center; background: rgba(0,0,0,0.45); border-radius: 24px; padding: 5px 10px; }
+        .cam-controls button { background: none; border: none; font-size: 22px; color: #fff; cursor: pointer; padding: 2px 6px; opacity: 0.85; }
+        .cam-controls #zoom-label { color: #fff; font-size: 13px; font-weight: bold; min-width: 36px; text-align: center; }
 
         .loc-banner { padding: 12px 15px; font-size: 17px; font-weight: 800; background: #fff3e0; color: #6d4c41; display: none; }
         .loc-banner.fixed { background: #e8f5e9; color: #1b5e20; }
@@ -71,6 +74,12 @@
     <div class="scan-wrap">
         <div id="reader"></div>
         <button class="btn-start" id="btn-start">📷 스캔 시작</button>
+        <div class="cam-controls" id="cam-controls">
+            <button id="btn-torch">🔦</button>
+            <button id="btn-zoom-out">➖</button>
+            <span id="zoom-label">1.0x</span>
+            <button id="btn-zoom-in">➕</button>
+        </div>
     </div>
 
     <div class="loc-banner" id="loc-banner">위치를 먼저 스캔하세요</div>
@@ -117,13 +126,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=3.4"></script>
+    <script src="js/location-map.js?v=3.5"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '3.4'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '3.5'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -165,12 +174,55 @@
             if (scanning) return;
             try {
                 const formats = [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.EAN_13];
-                scanner = new Html5Qrcode('reader', { formatsToSupport: formats, verbose: false });
-                await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 270, height: 150 } }, onScan, () => {});
+                scanner = new Html5Qrcode('reader', {
+                    formatsToSupport: formats,
+                    verbose: false,
+                    // [Ver 3.5] 지원 기기(안드로이드 크롬 등)에서 하드웨어 가속 바코드 감지기 사용 → 네이티브급 인식
+                    experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+                });
+                await scanner.start(
+                    { facingMode: 'environment' },
+                    {
+                        fps: 15,
+                        // [Ver 3.5] 인식 영역 확대: 화면의 90% x 45%
+                        qrbox: (vw, vh) => ({ width: Math.floor(vw * 0.9), height: Math.floor(vh * 0.45) }),
+                        disableFlip: true, // 후면 카메라라 반전 스캔 불필요 (속도 향상)
+                        // [Ver 3.5] 고해상도 요청 (작은 바코드 인식률 향상)
+                        videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+                    },
+                    onScan, () => {});
                 scanning = true;
                 $('btn-start').style.display = 'none';
                 speak(''); // iOS 음성 잠금 해제
+                setupCamControls(); // [Ver 3.5] 초점/손전등/줌
             } catch (e) { showAlert('카메라를 시작할 수 없습니다.\n(카메라 권한을 허용해주세요)\n' + e); }
+        }
+
+        // [Ver 3.5] 카메라 제어: 연속 자동초점 + 손전등/줌 버튼 (지원 기기에서만 표시)
+        let camTrack = null, torchOn = false, hasTorch = false, zoomCaps = null, zoomLevel = 1;
+        async function setupCamControls() {
+            try {
+                const video = document.querySelector('#reader video');
+                camTrack = (video && video.srcObject) ? video.srcObject.getVideoTracks()[0] : null;
+                if (!camTrack || !camTrack.getCapabilities) return;
+                const caps = camTrack.getCapabilities();
+                if (caps.focusMode && caps.focusMode.includes('continuous')) {
+                    try { await camTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
+                }
+                hasTorch = !!caps.torch;
+                zoomCaps = caps.zoom || null;
+                if (zoomCaps) zoomLevel = Math.max(1, zoomCaps.min || 1);
+                $('btn-torch').style.display = hasTorch ? '' : 'none';
+                $('btn-zoom-out').style.display = $('btn-zoom-in').style.display = $('zoom-label').style.display = zoomCaps ? '' : 'none';
+                if (hasTorch || zoomCaps) $('cam-controls').style.display = 'flex';
+            } catch (e) {}
+        }
+        async function applyCam() {
+            if (!camTrack) return;
+            const adv = [];
+            if (zoomCaps) adv.push({ zoom: zoomLevel });
+            if (hasTorch) adv.push({ torch: torchOn });
+            if (adv.length) { try { await camTrack.applyConstraints({ advanced: adv }); } catch (e) {} }
         }
         function pauseScan() { try { scanner.pause(true); } catch (e) {} }
         function resumeScan(delay = 700) { setTimeout(() => { try { scanner.resume(); } catch (e) {} processing = false; }, delay); }
@@ -379,6 +431,18 @@
 
         // ---------------- 이벤트 바인딩 ----------------
         $('btn-start').onclick = startScan;
+        // [Ver 3.5] 손전등/줌
+        $('btn-torch').onclick = () => { torchOn = !torchOn; $('btn-torch').style.opacity = torchOn ? '1' : '0.5'; applyCam(); };
+        $('btn-zoom-in').onclick = () => {
+            if (!zoomCaps) return;
+            zoomLevel = Math.min((zoomCaps.max || 4), +(zoomLevel + (zoomCaps.step || 0.5)).toFixed(1));
+            $('zoom-label').textContent = zoomLevel.toFixed(1) + 'x'; applyCam();
+        };
+        $('btn-zoom-out').onclick = () => {
+            if (!zoomCaps) return;
+            zoomLevel = Math.max((zoomCaps.min || 1), +(zoomLevel - (zoomCaps.step || 0.5)).toFixed(1));
+            $('zoom-label').textContent = zoomLevel.toFixed(1) + 'x'; applyCam();
+        };
         $('tab-in').onclick = () => setMode('in');
         $('tab-loc').onclick = () => setMode('loc');
         $('btn-send').onclick = () => mode === 'in' ? sendInbound() : sendLocation();
