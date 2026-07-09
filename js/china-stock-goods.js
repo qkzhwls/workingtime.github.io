@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 3.2 (버튼명: 입고앱실행)
+// 중국제작 미발계산기 Ver 3.3 (버전 체크: 구버전 탭 새로고침 유도 + 앱 최신버전 게시)
 
 import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -616,6 +616,54 @@ function printServerQR() {
 }
 
 // ---------------------------------------------------------
+// [Ver 3.3] 버전 체크
+//  - version.json이 배포의 기준 버전 (web: 페이지, app: 스캐너 앱)
+//  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
+//  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
+// ---------------------------------------------------------
+const WEB_VERSION = '3.3';
+let lastVersionCheck = 0;
+
+async function fetchVersionInfo() {
+    try {
+        const res = await fetch(new URL('version.json', location.href).href, { cache: 'no-store' });
+        return await res.json();
+    } catch (e) { return null; }
+}
+
+function showUpdateBanner(newVer) {
+    if (document.getElementById('update-banner')) return;
+    const div = document.createElement('div');
+    div.id = 'update-banner';
+    div.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:#e65100;color:#fff;z-index:999998;padding:12px;text-align:center;font-weight:bold;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+    div.textContent = `🔄 새 버전(Ver ${newVer})이 배포되었습니다. `;
+    const btn = document.createElement('button');
+    btn.textContent = '지금 새로고침';
+    btn.style.cssText = 'margin-left:10px;padding:6px 16px;border:none;border-radius:5px;background:#fff;color:#e65100;font-weight:bold;cursor:pointer;';
+    btn.onclick = () => location.reload();
+    div.appendChild(btn);
+    document.body.appendChild(div);
+}
+
+async function checkVersion(publishAppMeta = false) {
+    const now = Date.now();
+    if (now - lastVersionCheck < 60000) return; // 최소 1분 간격
+    lastVersionCheck = now;
+    const info = await fetchVersionInfo();
+    if (!info) return;
+    if (info.web && info.web !== WEB_VERSION) showUpdateBanner(info.web);
+    if (publishAppMeta && info.app) {
+        try {
+            await setDoc(doc(db, CHINA_COLLECTION, 'APP_META'), {
+                latestVersion: info.app,
+                installUrl: INSTALL_PAGE,
+                updatedAt: new Date()
+            }, { merge: true });
+        } catch (e) { console.error('APP_META 게시 실패:', e); }
+    }
+}
+
+// ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
 async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; } }
@@ -781,6 +829,10 @@ function setupEventListeners() {
 async function init() {
     setupEventListeners();
     loadInboundHistory();
+    // [Ver 3.3] 버전 체크: 로드 시 1회(앱 최신버전 게시 포함) + 10분 간격 + 창 복귀 시
+    checkVersion(true);
+    setInterval(() => checkVersion(false), 10 * 60 * 1000);
+    window.addEventListener('focus', () => checkVersion(false));
     try {
         await loadConfig();
         await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true)]);
