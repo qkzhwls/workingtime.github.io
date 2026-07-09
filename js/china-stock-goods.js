@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 3.3 (버전 체크: 구버전 탭 새로고침 유도 + 앱 최신버전 게시)
+// 중국제작 미발계산기 Ver 3.4 (웹 스캐너 scan.html 연동: 입고앱실행 → 웹 실행)
 
 import { initializeFirebase, firebaseConfig } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -573,19 +573,11 @@ function getServerInfo() {
     };
 }
 
+// [Ver 3.4] 입고앱실행 = 웹 스캐너 페이지 열기 (아이폰/안드로이드 공용, 설치 불필요)
+//  - scan.html은 같은 저장소의 config.js를 쓰므로 서버가 자동으로 일치함
 function openInScannerApp() {
     closeAllMenus();
-    const s = getServerInfo();
-    const q = new URLSearchParams({
-        projectId: s.projectId, apiKey: s.apiKey,
-        appId: s.appId, messagingSenderId: s.messagingSenderId, label: s.label
-    }).toString();
-    if (/android/i.test(navigator.userAgent)) {
-        // 앱 설치됨 → 앱 실행 + 서버 자동연결 / 미설치 → 설치 안내 페이지로 이동
-        location.href = `intent://connect?${q}#Intent;scheme=scannerapp;package=${APP_PACKAGE};S.browser_fallback_url=${encodeURIComponent(INSTALL_PAGE)};end`;
-    } else {
-        showToast('📱 안드로이드 폰에서 눌러주세요. PC에서는 [서버 연결 QR 출력]을 이용하세요.');
-    }
+    window.open(new URL('scan.html', location.href).href, '_blank');
 }
 
 function printServerQR() {
@@ -621,7 +613,7 @@ function printServerQR() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '3.3';
+const WEB_VERSION = '3.4';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
