@@ -127,13 +127,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=3.7"></script>
+    <script src="js/location-map.js?v=3.8"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '3.7'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '3.8'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -185,8 +185,7 @@
                     { facingMode: 'environment' },
                     {
                         fps: 15,
-                        // [Ver 3.5] 인식 영역 확대: 화면의 90% x 45%
-                        qrbox: (vw, vh) => ({ width: Math.floor(vw * 0.9), height: Math.floor(vh * 0.45) }),
+                        // [Ver 3.8] qrbox 제거 → 카메라 화면 전체가 인식 영역 (구역 조준 불필요)
                         disableFlip: true, // 후면 카메라라 반전 스캔 불필요 (속도 향상)
                         // [Ver 3.5] 고해상도 요청 (작은 바코드 인식률 향상)
                         videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
