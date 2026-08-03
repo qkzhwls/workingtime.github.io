@@ -135,13 +135,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=3.9"></script>
+    <script src="js/location-map.js?v=4.0"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '3.9'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '4.0'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -373,7 +373,7 @@
         }
 
         // ---------------- 위치 모드 ----------------
-        function processLocation(code) {
+        async function processLocation(code) {
             const key = code.toUpperCase();
             if (barcodeMap[key]) {
                 fixedLocation = barcodeMap[key];
@@ -381,7 +381,14 @@
             }
             if (!fixedLocation) { speak('위치를 먼저 찍으세요'); toast('위치 바코드를 먼저 스캔하세요'); resumeScan(); return; }
             if (!/^S\d{6}$/.test(key)) { showAlert('형식 오류\n(올바른 상품 바코드가 아닙니다)'); return; }
-            locationQueue.unshift({ barcode: key, location: fixedLocation, time: new Date().toTimeString().slice(0, 8) });
+            // [Ver 4.0] ScanDB 조회: 당일 입고 상품이면 상품명 표시(확인용),
+            //   없으면 '기존 재고 위치변경'으로 보고 거부하지 않고 그대로 진행
+            let name = '';
+            try {
+                const snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key));
+                if (snap.exists()) name = snap.data().name || '';
+            } catch (e) {}
+            locationQueue.unshift({ barcode: key, location: fixedLocation, name, time: new Date().toTimeString().slice(0, 8) });
             saveQueues(); renderQueue(); speak('스캔'); resumeScan();
         }
 
@@ -436,15 +443,19 @@
             const q = currentQueue(); const el = $('queue');
             if (!q.length) { el.style.display = 'none'; el.innerHTML = ''; updateSendBtn(); return; }
             el.style.display = 'block';
-            el.innerHTML = q.map((it, i) => `
+            el.innerHTML = q.map((it, i) => {
+                // [Ver 4.0] 위치 모드: 당일 입고분은 상품명, ScanDB에 없으면 '기존재고' 표시
+                const label = it.name ? it.name : (mode === 'loc' ? '기존재고' : '');
+                return `
                 <div class="qitem">
                     <div class="qinfo">
                         <div class="qcode">${it.barcode}</div>
-                        <div class="qsub">${it.name ? it.name + ' - ' : ''}${it.location} · ${it.time}</div>
+                        <div class="qsub">${label ? label + ' · ' : ''}${it.location} · ${it.time}</div>
                     </div>
                     ${mode === 'in' ? `<div class="qqty">${it.qty}개</div>` : ''}
                     <button class="qdel" data-i="${i}">🗑</button>
-                </div>`).join('');
+                </div>`;
+            }).join('');
             el.querySelectorAll('.qdel').forEach(b => b.onclick = () => {
                 currentQueue().splice(parseInt(b.dataset.i), 1); saveQueues(); renderQueue();
             });
