@@ -27,6 +27,11 @@
         .loc-banner { padding: 12px 15px; font-size: 17px; font-weight: 800; background: #fff3e0; color: #6d4c41; display: none; }
         .loc-banner.fixed { background: #e8f5e9; color: #1b5e20; }
 
+        /* [Ver 4.1] 위치 모드 세부 작업 선택 (당일 입고분 / 기존재고) */
+        .loc-submode { display: none; gap: 6px; padding: 8px 10px 0; background: #f4f6f8; }
+        .loc-submode button { flex: 1; padding: 9px 0; border: 2px solid #cfd8dc; border-radius: 8px; background: #fff; color: #607d8b; font-size: 14px; font-weight: 800; cursor: pointer; }
+        .loc-submode button.active { border-color: #2e7d32; background: #2e7d32; color: #fff; }
+
         /* [Ver 3.9] 탭-투-포커스 표시 링 + 수동 촬영 버튼 */
         .focus-ring { position: fixed; width: 74px; height: 74px; margin: -37px 0 0 -37px; border: 3px solid #fff; border-radius: 10px; z-index: 9; pointer-events: none; box-shadow: 0 0 8px rgba(0,0,0,0.5); animation: focuspulse 0.7s ease-out forwards; }
         @keyframes focuspulse { 0% { transform: scale(1.5); opacity: 0; } 25% { opacity: 1; } 100% { transform: scale(1); opacity: 0; } }
@@ -79,6 +84,10 @@
     </div>
     <div class="status-line" id="status-line">-</div>
 
+    <div class="loc-submode" id="loc-submode">
+        <button data-sub="today" class="active">📥 당일 입고분</button>
+        <button data-sub="existing">🔄 기존재고</button>
+    </div>
     <div class="loc-banner" id="loc-banner">위치를 먼저 스캔하세요</div>
 
     <div class="scan-wrap">
@@ -135,13 +144,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=4.0"></script>
+    <script src="js/location-map.js?v=4.1"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '4.0'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '4.1'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -165,6 +174,7 @@
 
         // ---------------- 상태 ----------------
         let mode = localStorage.getItem('scanMode') || 'in';
+        let locSubMode = localStorage.getItem('scanLocSub') || 'today'; // [Ver 4.1] 'today'(당일입고분) | 'existing'(기존재고)
         let inboundQueue = JSON.parse(localStorage.getItem('scanInQueue') || '[]');
         let locationQueue = JSON.parse(localStorage.getItem('scanLocQueue') || '[]');
         let fixedLocation = null;
@@ -381,14 +391,18 @@
             }
             if (!fixedLocation) { speak('위치를 먼저 찍으세요'); toast('위치 바코드를 먼저 스캔하세요'); resumeScan(); return; }
             if (!/^S\d{6}$/.test(key)) { showAlert('형식 오류\n(올바른 상품 바코드가 아닙니다)'); return; }
-            // [Ver 4.0] ScanDB 조회: 당일 입고 상품이면 상품명 표시(확인용),
-            //   없으면 '기존 재고 위치변경'으로 보고 거부하지 않고 그대로 진행
-            let name = '';
+            // [Ver 4.1] ScanDB 조회
+            let name = '', exists = false, dbError = false;
             try {
                 const snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key));
-                if (snap.exists()) name = snap.data().name || '';
-            } catch (e) {}
-            locationQueue.unshift({ barcode: key, location: fixedLocation, name, time: new Date().toTimeString().slice(0, 8) });
+                if (snap.exists()) { exists = true; name = snap.data().name || ''; }
+            } catch (e) { dbError = true; }
+            // 당일 입고분 모드: 목록에 없으면 오스캔으로 보고 거부 (S123456→S123457 오독 차단)
+            if (locSubMode === 'today') {
+                if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
+                if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n(오스캔 여부 확인)\n' + key); return; }
+            }
+            locationQueue.unshift({ barcode: key, location: fixedLocation, name, sub: locSubMode, time: new Date().toTimeString().slice(0, 8) });
             saveQueues(); renderQueue(); speak('스캔'); resumeScan();
         }
 
@@ -471,14 +485,22 @@
         function renderLocBanner() {
             const b = $('loc-banner');
             b.style.display = mode === 'loc' ? 'block' : 'none';
-            if (fixedLocation) { b.textContent = '작업 위치: ' + fixedLocation; b.classList.add('fixed'); }
-            else { b.textContent = '위치를 먼저 스캔하세요'; b.classList.remove('fixed'); }
+            const subTxt = locSubMode === 'today' ? '당일 입고분' : '기존재고';
+            if (fixedLocation) { b.textContent = `작업 위치: ${fixedLocation}  (${subTxt})`; b.classList.add('fixed'); }
+            else { b.textContent = `위치를 먼저 스캔하세요  (${subTxt})`; b.classList.remove('fixed'); }
+        }
+
+        function setLocSubMode(s) { // [Ver 4.1]
+            locSubMode = s; localStorage.setItem('scanLocSub', s);
+            document.querySelectorAll('#loc-submode button').forEach(btn => btn.classList.toggle('active', btn.dataset.sub === s));
+            renderLocBanner();
         }
 
         function setMode(m) {
             mode = m; localStorage.setItem('scanMode', m);
             $('tab-in').classList.toggle('active', m === 'in');
             $('tab-loc').classList.toggle('active', m === 'loc');
+            $('loc-submode').style.display = m === 'loc' ? 'flex' : 'none'; // [Ver 4.1]
             const theme = m === 'in' ? '#1976d2' : '#2e7d32';
             document.querySelector('.tabs').style.background = theme;
             $('btn-send').style.background = '';
@@ -535,6 +557,8 @@
         });
         $('tab-in').onclick = () => setMode('in');
         $('tab-loc').onclick = () => setMode('loc');
+        // [Ver 4.1] 위치 세부 작업 선택
+        document.querySelectorAll('#loc-submode button').forEach(btn => btn.onclick = () => setLocSubMode(btn.dataset.sub));
         $('btn-send').onclick = () => mode === 'in' ? sendInbound() : sendLocation();
 
         $('sel-qty-btn').onclick = () => { closeSelect(); addInbound(currentItem, currentItem.arrivalQty, '도착예정분'); resumeScan(); };
@@ -570,6 +594,7 @@
         // ---------------- 초기화 ----------------
         buildNumpad();
         $('status-line').textContent = `v${SCAN_VERSION} · 서버: ${serverLabel}`;
+        setLocSubMode(locSubMode); // [Ver 4.1] 저장된 세부 작업 복원
         setMode(mode);
         checkVersion();
         window.addEventListener('focus', checkVersion);
