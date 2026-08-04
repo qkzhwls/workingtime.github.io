@@ -1,7 +1,7 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.1 (위치 모드 당일입고분/기존재고 작업 분리 + 오스캔 차단)
+// 중국제작 미발계산기 Ver 4.2 (서버 연결 QR 출력 제거 - 입고앱실행으로 대체됨)
 
-import { initializeFirebase, firebaseConfig } from './config.js';
+import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
@@ -555,56 +555,16 @@ function sortTable(key) {
 }
 
 // ---------------------------------------------------------
-// 스캐너 앱 연동 (딥링크 / 서버 QR / 설치 안내)
-//  - 서버 정보는 이 페이지가 실제 사용 중인 firebaseConfig에서 동적으로 생성
+// 스캐너 앱 연동 (입고앱실행 / 설치 안내)
+//  - scan.html은 같은 저장소의 config.js를 쓰므로 서버가 자동으로 일치함
 //    → 관리자 페이지에서는 config.js만 바꾸면 자동으로 관리자 서버로 연결됨
 // ---------------------------------------------------------
-const APP_PACKAGE = 'com.example.image_picker';
 const INSTALL_PAGE = new URL('app-install.html', location.href).href;
 
-function getServerInfo() {
-    return {
-        type: 'fb-server',
-        label: firebaseConfig.projectId,
-        projectId: firebaseConfig.projectId,
-        apiKey: firebaseConfig.apiKey,
-        appId: firebaseConfig.appId,
-        messagingSenderId: firebaseConfig.messagingSenderId
-    };
-}
-
 // [Ver 3.4] 입고앱실행 = 웹 스캐너 페이지 열기 (아이폰/안드로이드 공용, 설치 불필요)
-//  - scan.html은 같은 저장소의 config.js를 쓰므로 서버가 자동으로 일치함
 function openInScannerApp() {
     closeAllMenus();
     window.open(new URL('scan.html', location.href).href, '_blank');
-}
-
-function printServerQR() {
-    closeAllMenus();
-    if (typeof QRCode === 'undefined') { showToast('QR 라이브러리 로드 실패 (새로고침 후 재시도)'); return; }
-    const s = getServerInfo();
-    const tmp = document.createElement('div');
-    new QRCode(tmp, { text: JSON.stringify(s), width: 320, height: 320, correctLevel: QRCode.CorrectLevel.M });
-    setTimeout(() => {
-        const img = tmp.querySelector('img');
-        const cv = tmp.querySelector('canvas');
-        const dataUrl = (img && img.src) ? img.src : (cv ? cv.toDataURL() : '');
-        if (!dataUrl) { showToast('QR 생성 실패'); return; }
-        const w = window.open('', '_blank', 'width=480,height=680');
-        if (!w) { showToast('팝업이 차단되었습니다. 팝업 허용 후 재시도하세요.'); return; }
-        w.document.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>서버 연결 QR</title>
-<style>body{font-family:sans-serif;text-align:center;padding:30px;color:#333;}
-.btn{padding:12px 30px;background:#e65100;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;}
-@media print {.btn{display:none;}}</style></head><body>
-<h2>📱 스캐너 앱 서버 연결 QR</h2>
-<div style="font-size:14px;color:#555;">서버: <b>${s.projectId}</b></div>
-<img src="${dataUrl}" style="width:320px;height:320px;margin:20px 0;">
-<div style="font-size:13px;color:#777;">스캐너 앱 카메라로 이 QR을 스캔하면<br>위 서버로 자동 연결됩니다.</div>
-<br><button class="btn" onclick="window.print()">🖨️ 인쇄</button>
-</body></html>`);
-        w.document.close();
-    }, 200);
 }
 
 // ---------------------------------------------------------
@@ -613,7 +573,7 @@ function printServerQR() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.1';
+const WEB_VERSION = '4.2';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -788,9 +748,8 @@ function setupEventListeners() {
         updateSavedDatesFromCheckboxes(); renderSelectedTags();
     });
 
-    // 22. 스캐너 앱 연동 (앱으로열기 / QR 출력 / 설치 안내)
+    // 22. 스캐너 앱 연동 (입고앱실행 / 설치 안내)
     document.getElementById('btn-open-app')?.addEventListener('click', openInScannerApp);
-    document.getElementById('btn-print-qr')?.addEventListener('click', printServerQR);
     document.getElementById('btn-install-guide')?.addEventListener('click', () => { closeAllMenus(); window.open(INSTALL_PAGE, '_blank'); });
 
     // ========= 바인딩 체크리스트 =========
