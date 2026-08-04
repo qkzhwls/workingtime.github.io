@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.4 (초기화 버튼 통합: 전체 초기화 하나로)
+// 중국제작 미발계산기 Ver 4.5 (적용 버튼 제거 - 출고일 선택 시 자동 적용)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -547,7 +547,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.4';
+const WEB_VERSION = '4.5';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -622,8 +622,6 @@ function setupEventListeners() {
     // 7. #upload-stock-log (미발재고로그 업로드)
     document.getElementById('upload-stock-log')?.addEventListener('change', (e) => handleStockLogUpload(e));
 
-    // 8. #btn-date-apply (적용)
-    document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
 
     // 9. #btn-date-clear (전체 초기화 - 입고이력/전체데이터 초기화 통합, Ver 4.4)
     document.getElementById('btn-date-clear')?.addEventListener('click', clearAllData);
@@ -725,7 +723,6 @@ function setupEventListeners() {
     // 3. document click [OK]
     // 5. #btn-open-sheet-settings [OK]
     // 7. #upload-stock-log [OK]
-    // 8. #btn-date-apply [OK]
     // 9. #btn-date-clear [OK] → 전체 초기화(clearAllData)로 통합
     // 10. #btn-excel-download [OK]
     // 11. #search-input [OK]
