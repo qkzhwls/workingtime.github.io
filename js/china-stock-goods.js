@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.5 (적용 버튼 제거 - 출고일 선택 시 자동 적용)
+// 중국제작 미발계산기 Ver 4.6 (앱용 스캔DB 수동 업로드 버튼 제거 - 자동 동기화로 대체)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -297,17 +297,6 @@ async function runScanDBSync() {
     if (scanDbSyncPending) { scanDbSyncPending = false; scheduleScanDBSync(); }
 }
 
-// 수동 업로드 (비상용 버튼)
-async function uploadScanDB() {
-    if (!tableData || tableData.length === 0) { alert('업로드할 데이터가 없습니다.'); return; }
-    if (!confirm(`현재 ${tableData.length}건의 데이터를 앱용 스캔DB로 업로드하시겠습니까?\n(평소에는 출고일 적용 시 자동 동기화됩니다)`)) return;
-    showLoading('🚀 앱용 스캔DB 업로드 중...');
-    try {
-        await syncScanDBCore();
-        hideLoading(); showToast(`✅ 스캔DB 업로드 완료 (${tableData.length}건)`);
-    } catch (e) { hideLoading(); alert('업로드 실패: ' + e.message); }
-}
-
 async function clearAllData() {
     if (!confirm("모든 데이터를 초기화하시겠습니까?\n(수동편집, 미발재고로그, 앱 입고이력이 모두 삭제됩니다.)")) return;
     showLoading('🗑️ 전체 데이터 초기화 중...');
@@ -547,7 +536,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.5';
+const WEB_VERSION = '4.6';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -686,8 +675,6 @@ function setupEventListeners() {
     // 18. #sheet-settings-modal .modal-content (전파 방지)
     document.querySelector('#sheet-settings-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
-    // 19. #btn-upload-scandb (스캔DB 업로드)
-    document.getElementById('btn-upload-scandb')?.addEventListener('click', () => uploadScanDB());
 
 
     // 21. 출고일 드롭다운 관련 바인딩
@@ -733,7 +720,6 @@ function setupEventListeners() {
     // 16. #btn-sheet-save [OK]
     // 17. #sheet-settings-modal [OK]
     // 18. #sheet-settings-modal .modal-content [OK]
-    // 19. #btn-upload-scandb [OK]
     // 21. 출고일 드롭다운 관련 [OK]
     // =====================================
 }
