@@ -31,8 +31,6 @@
         .summary-actions { display: flex; gap: 8px; margin-left: auto; align-self: center; }
         .btn-upload-scandb { padding: 8px 18px; background: #2e7d32; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .btn-upload-scandb:hover { background: #1b5e20; }
-        .btn-clear-inbound { padding: 8px 18px; background: #757575; color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .btn-clear-inbound:hover { background: #d32f2f; }
 
         .list-container { overflow: auto; background: white; margin: 0 20px 10px 20px; border-radius: 12px; border: 1px solid #ccc; height: calc(100vh - 230px); }
         .list-table { width: 100%; border-collapse: collapse; min-width: 1400px; }
@@ -63,7 +61,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 4.3</div>
+            <div class="version-badge">🚀 Ver 4.4</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -79,7 +77,6 @@
                     <div class="menu-item" id="btn-install-guide" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#2e7d32;">⬇️ 앱 설치 안내</div>
                     <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a; border-top:1px solid #ddd;">⚙️ 설정</div>
                     <div class="menu-item" id="btn-open-sheet-settings" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#607d8b;">📎 CSV 시트 링크 설정</div>
-                    <div class="menu-item" id="btn-clear-all" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#d32f2f;">🗑️ 전체 데이터 초기화</div>
                 </div>
             </div>
         </div>
@@ -102,7 +99,7 @@
         </div>
         <div class="date-actions">
             <button id="btn-date-apply" style="padding: 5px 12px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">적용</button>
-            <button id="btn-date-clear" style="padding: 5px 12px; background: #999; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">초기화</button>
+            <button id="btn-date-clear" style="padding: 5px 12px; background: #d32f2f; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">🗑️ 전체 초기화</button>
         </div>
     </div>
 
@@ -111,7 +108,6 @@
         <div class="summary-card highlight"><span class="label">총 도착수량</span><span class="value" id="sum-arrival">0</span></div>
         <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span></div>
         <div class="summary-actions">
-            <button id="btn-clear-inbound" class="btn-clear-inbound">📋 입고 이력 초기화</button>
             <button id="btn-upload-scandb" class="btn-upload-scandb">🚀 앱용 스캔DB 수동 업로드</button>
         </div>
     </div>
@@ -160,6 +156,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=4.3"></script>
+    <script type="module" src="js/china-stock-goods.js?v=4.4"></script>
 </body>
 </html>

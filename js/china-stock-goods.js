@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.3 (오더리스트 시트 동기화 버튼 제거 - 자동 동기화로 대체)
+// 중국제작 미발계산기 Ver 4.4 (초기화 버튼 통합: 전체 초기화 하나로)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -113,21 +113,6 @@ function loadInboundHistory() {
         });
         if (tableData.length > 0) applyDates({ skipSync: true });
     });
-}
-
-async function clearInboundHistory() {
-    if (!confirm("입고 이력을 초기화하시겠습니까?\n(앱에서 전송된 모든 입고 기록이 삭제됩니다.)")) return;
-    showLoading('🗑️ 입고 이력 삭제 중...');
-    try {
-        const snap = await getDocs(collection(db, 'ChinaStockGoods_InboundHistory'));
-        const batch = writeBatch(db);
-        snap.forEach(d => batch.delete(d.ref));
-        await batch.commit();
-        inboundMap = {};
-        applyDates();
-        hideLoading();
-        showToast('✅ 입고 이력 초기화 완료');
-    } catch (e) { hideLoading(); alert('삭제 실패'); }
 }
 
 async function syncOrderData(silent = false) {
@@ -357,26 +342,15 @@ async function clearAllData() {
         renderTable();
         updateSummary();
         document.getElementById('date-checklist-container').innerHTML = '';
-        
+        await saveConfig(); // 선택 출고일 비운 상태 저장
+        await syncOrderData(true); // [Ver 4.4] 초기화 후 출고일 목록 다시 로드 (빈 화면 방지)
+
         hideLoading();
         showToast('✅ 전체 초기화 완료');
     } catch (e) {
         hideLoading();
         alert('초기화 실패: ' + e.message);
     }
-}
-
-function clearDates() {
-    savedDates = []; 
-    document.querySelectorAll('.date-check').forEach(btn => btn.checked = false);
-    updateSavedDatesFromCheckboxes(); 
-    renderSelectedTags();
-    tableData = []; 
-    filteredData = []; 
-    renderTable(); 
-    updateSummary(); 
-    saveConfig(); 
-    showToast('🔄 초기화 완료');
 }
 
 // ---------------------------------------------------------
@@ -573,7 +547,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.3';
+const WEB_VERSION = '4.4';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -644,8 +618,6 @@ function setupEventListeners() {
     // 5. #btn-open-sheet-settings (CSV 링크 설정 모달 열기)
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => openSheetSettingsModal());
 
-    // 6. #btn-clear-all (전체 초기화)
-    document.getElementById('btn-clear-all')?.addEventListener('click', () => { closeAllMenus(); clearAllData(); });
 
     // 7. #upload-stock-log (미발재고로그 업로드)
     document.getElementById('upload-stock-log')?.addEventListener('change', (e) => handleStockLogUpload(e));
@@ -653,8 +625,8 @@ function setupEventListeners() {
     // 8. #btn-date-apply (적용)
     document.getElementById('btn-date-apply')?.addEventListener('click', applyDates);
 
-    // 9. #btn-date-clear (초기화)
-    document.getElementById('btn-date-clear')?.addEventListener('click', clearDates);
+    // 9. #btn-date-clear (전체 초기화 - 입고이력/전체데이터 초기화 통합, Ver 4.4)
+    document.getElementById('btn-date-clear')?.addEventListener('click', clearAllData);
 
     // 10. #btn-excel-download (입고용파일다운로드: 상품코드 + 수량)
     document.getElementById('btn-excel-download')?.addEventListener('click', () => {
@@ -719,8 +691,6 @@ function setupEventListeners() {
     // 19. #btn-upload-scandb (스캔DB 업로드)
     document.getElementById('btn-upload-scandb')?.addEventListener('click', () => uploadScanDB());
 
-    // 20. #btn-clear-inbound (입고 이력 초기화)
-    document.getElementById('btn-clear-inbound')?.addEventListener('click', () => clearInboundHistory());
 
     // 21. 출고일 드롭다운 관련 바인딩
     document.getElementById('btn-date-dropdown')?.addEventListener('click', (e) => {
@@ -754,10 +724,9 @@ function setupEventListeners() {
     // 2. #main-tools-menu [OK]
     // 3. document click [OK]
     // 5. #btn-open-sheet-settings [OK]
-    // 6. #btn-clear-all [OK] 
-    // 7. #upload-stock-log [OK] 
+    // 7. #upload-stock-log [OK]
     // 8. #btn-date-apply [OK]
-    // 9. #btn-date-clear [OK] 
+    // 9. #btn-date-clear [OK] → 전체 초기화(clearAllData)로 통합
     // 10. #btn-excel-download [OK]
     // 11. #search-input [OK]
     // 12. .th-sortable [OK]
@@ -767,8 +736,7 @@ function setupEventListeners() {
     // 16. #btn-sheet-save [OK]
     // 17. #sheet-settings-modal [OK]
     // 18. #sheet-settings-modal .modal-content [OK]
-    // 19. #btn-upload-scandb [OK] 
-    // 20. #btn-clear-inbound [OK]
+    // 19. #btn-upload-scandb [OK]
     // 21. 출고일 드롭다운 관련 [OK]
     // =====================================
 }
