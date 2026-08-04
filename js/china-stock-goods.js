@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.2 (서버 연결 QR 출력 제거 - 입고앱실행으로 대체됨)
+// 중국제작 미발계산기 Ver 4.3 (오더리스트 시트 동기화 버튼 제거 - 자동 동기화로 대체)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -573,7 +573,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.2';
+const WEB_VERSION = '4.3';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -640,9 +640,6 @@ function setupEventListeners() {
 
     // 3. document click (메뉴 닫기)
     document.addEventListener('click', () => closeAllMenus());
-
-    // 4. #btn-sync-order (오더리스트 동기화)
-    document.getElementById('btn-sync-order')?.addEventListener('click', () => { closeAllMenus(); syncOrderData(); });
 
     // 5. #btn-open-sheet-settings (CSV 링크 설정 모달 열기)
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => openSheetSettingsModal());
@@ -756,7 +753,6 @@ function setupEventListeners() {
     // 1. #btn-toggle-menu [OK]
     // 2. #main-tools-menu [OK]
     // 3. document click [OK]
-    // 4. #btn-sync-order [OK]
     // 5. #btn-open-sheet-settings [OK]
     // 6. #btn-clear-all [OK] 
     // 7. #upload-stock-log [OK] 
