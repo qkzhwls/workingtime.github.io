@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.6 (앱용 스캔DB 수동 업로드 버튼 제거 - 자동 동기화로 대체)
+// 중국제작 미발계산기 Ver 4.7 (미발수량 공식 설정에서 편집 가능)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -67,6 +67,39 @@ function getCapacityByLocation(locStr) {
 }
 
 // ---------------------------------------------------------
+// [Ver 4.7] 미발수량 공식 (설정에서 편집 가능, Firebase 저장)
+//  - 변수: 총재고, 적재량, 부족수량, 직진배송
+//  - 잘못된 수식이면 기본 공식으로 폴백 (앱이 깨지지 않음)
+// ---------------------------------------------------------
+const DEFAULT_MIBAL_FORMULA = '총재고===0 ? 적재량 : (부족수량+직진배송 > 총재고 ? 부족수량+직진배송-총재고 : 0)';
+let mibalFormula = DEFAULT_MIBAL_FORMULA;
+let mibalFn = null;
+
+function defaultMibal(총재고, 적재량, 부족수량, 직진배송) {
+    return (총재고 === 0) ? 적재량 : ((부족수량 + 직진배송 > 총재고) ? (부족수량 + 직진배송 - 총재고) : 0);
+}
+
+// 수식 문자열을 함수로 컴파일 (실패 시 null). 테스트 실행으로 숫자 반환 여부 확인.
+function compileMibalFormula(expr) {
+    try {
+        const fn = new Function('총재고', '적재량', '부족수량', '직진배송', 'return (' + expr + ');');
+        const t = fn(0, 20, 0, 0);
+        if (typeof t !== 'number' || isNaN(t)) return null;
+        return fn;
+    } catch (e) { return null; }
+}
+
+// 실제 계산 (오류 시 기본 공식 폴백 + 0 이상 정수로 보정)
+function evalMibal(총재고, 적재량, 부족수량, 직진배송) {
+    let v;
+    try { if (mibalFn) v = mibalFn(총재고, 적재량, 부족수량, 직진배송); } catch (e) { v = undefined; }
+    if (typeof v !== 'number' || isNaN(v)) v = defaultMibal(총재고, 적재량, 부족수량, 직진배송);
+    v = Math.round(v);
+    return v < 0 ? 0 : v;
+}
+mibalFn = compileMibalFormula(mibalFormula);
+
+// ---------------------------------------------------------
 // UI 제어 함수 (모달 및 메뉴)
 // ---------------------------------------------------------
 function closeAllMenus() {
@@ -87,6 +120,51 @@ function openSheetSettingsModal() {
 
 function closeSheetSettingsModal() {
     document.getElementById('sheet-settings-modal').style.display = 'none';
+}
+
+// ---------------------------------------------------------
+// [Ver 4.7] 미발수량 공식 설정 모달
+// ---------------------------------------------------------
+function openMibalFormulaModal() {
+    closeAllMenus();
+    document.getElementById('mibal-formula-input').value = mibalFormula;
+    updateMibalPreview();
+    document.getElementById('mibal-formula-modal').style.display = 'flex';
+}
+function closeMibalFormulaModal() {
+    document.getElementById('mibal-formula-modal').style.display = 'none';
+}
+function updateMibalPreview() {
+    const expr = document.getElementById('mibal-formula-input').value.trim();
+    const st = parseInt(document.getElementById('pv-stock').value) || 0;
+    const cp = parseInt(document.getElementById('pv-cap').value) || 0;
+    const sh = parseInt(document.getElementById('pv-short').value) || 0;
+    const di = parseInt(document.getElementById('pv-direct').value) || 0;
+    const el = document.getElementById('pv-result');
+    const fn = compileMibalFormula(expr);
+    if (!fn) { el.textContent = '⚠️ 수식 오류'; el.style.color = '#d32f2f'; return; }
+    try {
+        let v = fn(st, cp, sh, di);
+        v = Math.round(v); if (v < 0) v = 0;
+        el.textContent = v; el.style.color = '#e65100';
+    } catch (e) { el.textContent = '⚠️ 계산 오류'; el.style.color = '#d32f2f'; }
+}
+async function saveMibalFormula() {
+    const expr = document.getElementById('mibal-formula-input').value.trim();
+    if (!expr) { alert('수식을 입력하세요.'); return; }
+    if (!compileMibalFormula(expr)) { alert('수식에 오류가 있습니다.\n미리보기에서 정상 결과가 나오는지 확인하세요.'); return; }
+    mibalFormula = expr;
+    mibalFn = compileMibalFormula(expr);
+    try {
+        await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { mibalFormula, updatedAt: new Date() }, { merge: true });
+        closeMibalFormulaModal();
+        showToast('✅ 미발수량 공식 저장됨');
+        if (savedDates.length > 0) applyDates(); // 표 즉시 재계산
+    } catch (e) { alert('저장 실패: ' + e.message); }
+}
+function resetMibalFormulaInput() {
+    document.getElementById('mibal-formula-input').value = DEFAULT_MIBAL_FORMULA;
+    updateMibalPreview();
 }
 
 async function saveSheetSettings() {
@@ -459,14 +537,10 @@ function applyDates(opts) {
         const capacity = getCapacityByLocation(loc);          // 적재량
         const shortageVal = ed.shortage || '';                // 부족수량(열)
         const directShipVal = ed.directShip || '';            // 직진배송(열)
-        // 미발수량 공식: =IFERROR(MAX(IFS(총재고=0, 적재량, 부족수량+직진배송수량>총재고, 부족수량+직진배송수량-총재고)), 0)
+        // [Ver 4.7] 미발수량 = 설정된 공식으로 계산 (변수: 총재고/적재량/부족수량/직진배송)
         const _short = parseInt(shortageVal) || 0;            // 부족수량
         const _direct = parseInt(directShipVal) || 0;         // 직진배송수량
-        let mibalQty;
-        if (totalStock === 0) mibalQty = capacity;
-        else if (_short + _direct > totalStock) mibalQty = _short + _direct - totalStock;
-        else mibalQty = 0;
-        if (mibalQty < 0) mibalQty = 0;
+        const mibalQty = evalMibal(totalStock, capacity, _short, _direct);
         return {
             code: item.code, name: item.name, option: item.option, arrivalQty: item.arrivalQty,
             mibalQty, totalStock,
@@ -536,7 +610,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.6';
+const WEB_VERSION = '4.7';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -581,7 +655,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); } }
 async function saveConfig() { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -674,6 +748,16 @@ function setupEventListeners() {
 
     // 18. #sheet-settings-modal .modal-content (전파 방지)
     document.querySelector('#sheet-settings-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+
+    // [Ver 4.7] 미발수량 공식 설정 모달
+    document.getElementById('btn-open-mibal-formula')?.addEventListener('click', () => openMibalFormulaModal());
+    document.getElementById('btn-mibal-cancel')?.addEventListener('click', () => closeMibalFormulaModal());
+    document.getElementById('btn-mibal-save')?.addEventListener('click', () => saveMibalFormula());
+    document.getElementById('btn-mibal-reset')?.addEventListener('click', () => resetMibalFormulaInput());
+    document.getElementById('mibal-formula-input')?.addEventListener('input', updateMibalPreview);
+    ['pv-stock','pv-cap','pv-short','pv-direct'].forEach(id => document.getElementById(id)?.addEventListener('input', updateMibalPreview));
+    document.getElementById('mibal-formula-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mibal-formula-modal') closeMibalFormulaModal(); });
+    document.querySelector('#mibal-formula-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
 
 

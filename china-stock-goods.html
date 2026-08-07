@@ -58,7 +58,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 4.6</div>
+            <div class="version-badge">🚀 Ver 4.7</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -74,6 +74,7 @@
                     <div class="menu-item" id="btn-install-guide" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#2e7d32;">⬇️ 앱 설치 안내</div>
                     <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a; border-top:1px solid #ddd;">⚙️ 설정</div>
                     <div class="menu-item" id="btn-open-sheet-settings" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#607d8b;">📎 CSV 시트 링크 설정</div>
+                    <div class="menu-item" id="btn-open-mibal-formula" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#e65100;">🧮 미발수량 공식 설정</div>
                 </div>
             </div>
         </div>
@@ -146,9 +147,38 @@
         </div>
     </div>
 
+    <div id="mibal-formula-modal" class="modal-overlay">
+        <div class="modal-content" style="width:480px;">
+            <h3 style="margin-top:0;">🧮 미발수량 공식 설정</h3>
+            <div style="font-size:12px; color:#666; line-height:1.7; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; padding:8px 10px;">
+                사용 가능한 변수: <b>총재고 · 적재량 · 부족수량 · 직진배송</b><br>
+                조건은 <b>조건 ? 참값 : 거짓값</b> 형식 (엑셀 IF와 동일)<br>
+                예: <code>총재고===0 ? 적재량 : 0</code>
+            </div>
+            <textarea id="mibal-formula-input" rows="4" spellcheck="false" style="width:100%; margin-top:10px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:monospace; font-size:13px; box-sizing:border-box; resize:vertical;"></textarea>
+            <div style="margin-top:12px; background:#f5f5f5; border-radius:6px; padding:10px;">
+                <div style="font-size:12px; font-weight:bold; margin-bottom:8px;">🔍 미리보기 (값을 넣어 결과 확인)</div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; font-size:12px; align-items:center;">
+                    <label>총재고 <input type="number" id="pv-stock" value="0" style="width:56px; padding:4px;"></label>
+                    <label>적재량 <input type="number" id="pv-cap" value="20" style="width:56px; padding:4px;"></label>
+                    <label>부족수량 <input type="number" id="pv-short" value="0" style="width:56px; padding:4px;"></label>
+                    <label>직진배송 <input type="number" id="pv-direct" value="0" style="width:56px; padding:4px;"></label>
+                </div>
+                <div style="margin-top:10px; font-size:14px;">→ 미발수량 = <b id="pv-result" style="color:#e65100; font-size:20px;">-</b></div>
+            </div>
+            <div style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;">
+                <button id="btn-mibal-reset" style="padding:8px 14px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">기본값 복원</button>
+                <div style="display:flex; gap:8px;">
+                    <button id="btn-mibal-cancel" style="padding:8px 15px; border:none; border-radius:4px; cursor:pointer;">취소</button>
+                    <button id="btn-mibal-save" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=4.6"></script>
+    <script type="module" src="js/china-stock-goods.js?v=4.7"></script>
 </body>
 </html>
