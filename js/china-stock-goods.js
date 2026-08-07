@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.7 (미발수량 공식 설정에서 편집 가능)
+// 중국제작 미발계산기 Ver 4.8 (미발수량 공식 - 예시 입력 틀 추가)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -128,6 +128,7 @@ function closeSheetSettingsModal() {
 function openMibalFormulaModal() {
     closeAllMenus();
     document.getElementById('mibal-formula-input').value = mibalFormula;
+    buildExampleRows();      // [Ver 4.8] 예시 표 렌더
     updateMibalPreview();
     document.getElementById('mibal-formula-modal').style.display = 'flex';
 }
@@ -148,6 +149,7 @@ function updateMibalPreview() {
         v = Math.round(v); if (v < 0) v = 0;
         el.textContent = v; el.style.color = '#e65100';
     } catch (e) { el.textContent = '⚠️ 계산 오류'; el.style.color = '#d32f2f'; }
+    updateExampleCurrent(); // [Ver 4.8] 수식 바뀌면 예시 표 '현재수식' 열도 갱신
 }
 async function saveMibalFormula() {
     const expr = document.getElementById('mibal-formula-input').value.trim();
@@ -165,6 +167,46 @@ async function saveMibalFormula() {
 function resetMibalFormulaInput() {
     document.getElementById('mibal-formula-input').value = DEFAULT_MIBAL_FORMULA;
     updateMibalPreview();
+}
+
+// [Ver 4.8] 예시 만들기 표 (원하는 미발수량 입력 → 복사해서 수식 요청용)
+let exampleRows = [
+    { s:0, c:20, sh:0, d:0, want:'' },
+    { s:5, c:20, sh:0, d:0, want:'' },
+    { s:10, c:20, sh:8, d:5, want:'' }
+];
+function buildExampleRows() {
+    const tb = document.getElementById('ex-tbody');
+    if (!tb) return;
+    const cell = (i,k,v) => `<td><input type="number" class="exi" data-i="${i}" data-k="${k}" value="${v}" style="width:46px; padding:3px;"></td>`;
+    tb.innerHTML = exampleRows.map((r,i) => `<tr>
+        ${cell(i,'s',r.s)}${cell(i,'c',r.c)}${cell(i,'sh',r.sh)}${cell(i,'d',r.d)}
+        <td><input type="number" class="exi" data-i="${i}" data-k="want" value="${r.want}" placeholder="?" style="width:56px; padding:3px; background:#fff3e0; font-weight:bold;"></td>
+        <td id="ex-cur-${i}" style="color:#888; font-weight:bold;">-</td>
+        <td><button class="exdel" data-i="${i}" style="border:none; background:none; color:#d32f2f; cursor:pointer; font-size:14px;">✕</button></td>
+    </tr>`).join('');
+    tb.querySelectorAll('input.exi').forEach(inp => inp.oninput = () => {
+        const i = +inp.dataset.i, k = inp.dataset.k;
+        exampleRows[i][k] = (k === 'want') ? inp.value : (parseInt(inp.value) || 0);
+        if (k !== 'want') updateExampleCurrent();
+    });
+    tb.querySelectorAll('button.exdel').forEach(b => b.onclick = () => { exampleRows.splice(+b.dataset.i, 1); buildExampleRows(); });
+    updateExampleCurrent();
+}
+function updateExampleCurrent() {
+    const fn = compileMibalFormula((document.getElementById('mibal-formula-input')?.value || '').trim());
+    exampleRows.forEach((r,i) => {
+        const td = document.getElementById('ex-cur-' + i);
+        if (!td) return;
+        if (!fn) { td.textContent = '-'; return; }
+        try { let v = Math.round(fn(r.s, r.c, r.sh, r.d)); if (v < 0) v = 0; td.textContent = v; }
+        catch (e) { td.textContent = '오류'; }
+    });
+}
+function copyExamples() {
+    const lines = exampleRows.map(r => `총재고 ${r.s}, 적재량 ${r.c}, 부족 ${r.sh}, 직진 ${r.d} → 미발수량 ${r.want || '?'}`);
+    const text = '[미발수량 예시]\n' + lines.join('\n');
+    navigator.clipboard.writeText(text).then(() => showToast('📋 예시 복사됨 (Claude에게 붙여넣으세요)'), () => showToast('복사 실패'));
 }
 
 async function saveSheetSettings() {
@@ -610,7 +652,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.7';
+const WEB_VERSION = '4.8';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -756,6 +798,8 @@ function setupEventListeners() {
     document.getElementById('btn-mibal-reset')?.addEventListener('click', () => resetMibalFormulaInput());
     document.getElementById('mibal-formula-input')?.addEventListener('input', updateMibalPreview);
     ['pv-stock','pv-cap','pv-short','pv-direct'].forEach(id => document.getElementById(id)?.addEventListener('input', updateMibalPreview));
+    document.getElementById('btn-ex-add')?.addEventListener('click', () => { exampleRows.push({ s:0, c:20, sh:0, d:0, want:'' }); buildExampleRows(); });
+    document.getElementById('btn-ex-copy')?.addEventListener('click', () => copyExamples());
     document.getElementById('mibal-formula-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mibal-formula-modal') closeMibalFormulaModal(); });
     document.querySelector('#mibal-formula-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
