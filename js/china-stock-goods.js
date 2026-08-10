@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.9 (미발수량 공식 - 예시로 자동 생성)
+// 중국제작 미발계산기 Ver 5.0 (공식 설정 모달 정리 - 미리보기 제거, 예시 표로 일원화)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -128,33 +128,16 @@ function closeSheetSettingsModal() {
 function openMibalFormulaModal() {
     closeAllMenus();
     document.getElementById('mibal-formula-input').value = mibalFormula;
-    buildExampleRows();      // [Ver 4.8] 예시 표 렌더
-    updateMibalPreview();
+    buildExampleRows();      // 예시 표 렌더 (내부에서 '현재수식' 열 계산)
     document.getElementById('mibal-formula-modal').style.display = 'flex';
 }
 function closeMibalFormulaModal() {
     document.getElementById('mibal-formula-modal').style.display = 'none';
 }
-function updateMibalPreview() {
-    const expr = document.getElementById('mibal-formula-input').value.trim();
-    const st = parseInt(document.getElementById('pv-stock').value) || 0;
-    const cp = parseInt(document.getElementById('pv-cap').value) || 0;
-    const sh = parseInt(document.getElementById('pv-short').value) || 0;
-    const di = parseInt(document.getElementById('pv-direct').value) || 0;
-    const el = document.getElementById('pv-result');
-    const fn = compileMibalFormula(expr);
-    if (!fn) { el.textContent = '⚠️ 수식 오류'; el.style.color = '#d32f2f'; return; }
-    try {
-        let v = fn(st, cp, sh, di);
-        v = Math.round(v); if (v < 0) v = 0;
-        el.textContent = v; el.style.color = '#e65100';
-    } catch (e) { el.textContent = '⚠️ 계산 오류'; el.style.color = '#d32f2f'; }
-    updateExampleCurrent(); // [Ver 4.8] 수식 바뀌면 예시 표 '현재수식' 열도 갱신
-}
 async function saveMibalFormula() {
     const expr = document.getElementById('mibal-formula-input').value.trim();
     if (!expr) { alert('수식을 입력하세요.'); return; }
-    if (!compileMibalFormula(expr)) { alert('수식에 오류가 있습니다.\n미리보기에서 정상 결과가 나오는지 확인하세요.'); return; }
+    if (!compileMibalFormula(expr)) { alert('수식에 오류가 있습니다.\n예시 표의 \'현재수식\' 열에 정상 결과가 나오는지 확인하세요.'); return; }
     mibalFormula = expr;
     mibalFn = compileMibalFormula(expr);
     try {
@@ -166,7 +149,7 @@ async function saveMibalFormula() {
 }
 function resetMibalFormulaInput() {
     document.getElementById('mibal-formula-input').value = DEFAULT_MIBAL_FORMULA;
-    updateMibalPreview();
+    updateExampleCurrent();
 }
 
 // [Ver 4.8] 예시 만들기 표 (원하는 미발수량 입력 → 복사해서 수식 요청용)
@@ -245,7 +228,7 @@ function autoGenerateFormula() {
         return;
     }
     document.getElementById('mibal-formula-input').value = f;
-    updateMibalPreview();
+    updateExampleCurrent();
     const coversBoth = pts.some(p => p.s === 0) && pts.some(p => p.s !== 0);
     showToast('✨ 예시에 맞는 수식 생성됨' + (coversBoth ? '' : ' (일부 상황 예시 부족 — 확인 필요)') + ' · 저장 전 확인하세요');
 }
@@ -693,7 +676,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.9';
+const WEB_VERSION = '5.0';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -837,8 +820,7 @@ function setupEventListeners() {
     document.getElementById('btn-mibal-cancel')?.addEventListener('click', () => closeMibalFormulaModal());
     document.getElementById('btn-mibal-save')?.addEventListener('click', () => saveMibalFormula());
     document.getElementById('btn-mibal-reset')?.addEventListener('click', () => resetMibalFormulaInput());
-    document.getElementById('mibal-formula-input')?.addEventListener('input', updateMibalPreview);
-    ['pv-stock','pv-cap','pv-short','pv-direct'].forEach(id => document.getElementById(id)?.addEventListener('input', updateMibalPreview));
+    document.getElementById('mibal-formula-input')?.addEventListener('input', updateExampleCurrent);
     document.getElementById('btn-ex-add')?.addEventListener('click', () => { exampleRows.push({ s:0, c:20, sh:0, d:0, want:'' }); buildExampleRows(); });
     document.getElementById('btn-ex-generate')?.addEventListener('click', () => autoGenerateFormula());
     document.getElementById('btn-ex-copy')?.addEventListener('click', () => copyExamples());
