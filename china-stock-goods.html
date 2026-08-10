@@ -58,7 +58,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 4.8</div>
+            <div class="version-badge">🚀 Ver 4.9</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -179,8 +179,9 @@
                         <tbody id="ex-tbody"></tbody>
                     </table>
                 </div>
-                <div style="margin-top:8px; display:flex; gap:8px;">
+                <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
                     <button id="btn-ex-add" style="padding:6px 12px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">+ 행 추가</button>
+                    <button id="btn-ex-generate" style="padding:6px 14px; border:none; background:#6a1b9a; color:#fff; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">✨ 자동 생성</button>
                     <button id="btn-ex-copy" style="padding:6px 12px; border:none; background:#455a64; color:#fff; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">📋 예시 복사</button>
                 </div>
             </div>
@@ -198,6 +199,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=4.8"></script>
+    <script type="module" src="js/china-stock-goods.js?v=4.9"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 4.8 (미발수량 공식 - 예시 입력 틀 추가)
+// 중국제작 미발계산기 Ver 4.9 (미발수량 공식 - 예시로 자동 생성)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -207,6 +207,47 @@ function copyExamples() {
     const lines = exampleRows.map(r => `총재고 ${r.s}, 적재량 ${r.c}, 부족 ${r.sh}, 직진 ${r.d} → 미발수량 ${r.want || '?'}`);
     const text = '[미발수량 예시]\n' + lines.join('\n');
     navigator.clipboard.writeText(text).then(() => showToast('📋 예시 복사됨 (Claude에게 붙여넣으세요)'), () => showToast('복사 실패'));
+}
+
+// [Ver 4.9] 예시로 수식 자동 생성 (입력한 예시에 '정확히 다 맞는' 수식만 채택)
+const MIBAL_SUBEXPRS = [
+    '0', '적재량', '총재고', '부족수량', '직진배송',
+    '부족수량+직진배송', '적재량+부족수량', '적재량+직진배송',
+    '적재량-총재고', '부족수량-총재고', '직진배송-총재고', '부족수량+직진배송-총재고',
+    'Math.max(적재량-총재고,0)', 'Math.max(부족수량+직진배송-총재고,0)', 'Math.max(부족수량-총재고,0)', 'Math.max(적재량-부족수량,0)'
+];
+function matchExprAll(expr, pts) {
+    const fn = compileMibalFormula(expr);
+    if (!fn) return false;
+    return pts.every(p => { let v = Math.round(fn(p.s, p.c, p.sh, p.d)); if (v < 0) v = 0; return v === p.y; });
+}
+function synthMibalFormula(pts) {
+    // 1) 단일 식으로 전부 설명되면 채택
+    for (const e of MIBAL_SUBEXPRS) if (matchExprAll(e, pts)) return e;
+    // 2) 총재고===0 기준으로 두 갈래로 나눠 각각 맞는 식 찾기
+    const g0 = pts.filter(p => p.s === 0), g1 = pts.filter(p => p.s !== 0);
+    if (g0.length && g1.length) {
+        let A = null, B = null;
+        for (const e of MIBAL_SUBEXPRS) if (matchExprAll(e, g0)) { A = e; break; }
+        for (const e of MIBAL_SUBEXPRS) if (matchExprAll(e, g1)) { B = e; break; }
+        if (A && B) { const f = `총재고===0 ? (${A}) : (${B})`; if (matchExprAll(f, pts)) return f; }
+    }
+    return null;
+}
+function autoGenerateFormula() {
+    const pts = exampleRows
+        .filter(r => r.want !== '' && r.want !== null && r.want !== undefined && !isNaN(parseInt(r.want)))
+        .map(r => ({ s: r.s, c: r.c, sh: r.sh, d: r.d, y: parseInt(r.want) }));
+    if (pts.length < 1) { alert('먼저 예시의 [원하는 미발수량] 칸을 채워주세요.'); return; }
+    const f = synthMibalFormula(pts);
+    if (!f) {
+        alert('입력한 예시만으로는 수식을 자동으로 만들지 못했어요.\n\n· 상황이 다른 예시를 더 넣어보세요\n  (재고 0일 때 / 있을 때, 부족수량이 있을 때 등)\n· 그래도 안 되면 [예시 복사] 후 Claude에게 요청하시면 만들어 드립니다.');
+        return;
+    }
+    document.getElementById('mibal-formula-input').value = f;
+    updateMibalPreview();
+    const coversBoth = pts.some(p => p.s === 0) && pts.some(p => p.s !== 0);
+    showToast('✨ 예시에 맞는 수식 생성됨' + (coversBoth ? '' : ' (일부 상황 예시 부족 — 확인 필요)') + ' · 저장 전 확인하세요');
 }
 
 async function saveSheetSettings() {
@@ -652,7 +693,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '4.8';
+const WEB_VERSION = '4.9';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -799,6 +840,7 @@ function setupEventListeners() {
     document.getElementById('mibal-formula-input')?.addEventListener('input', updateMibalPreview);
     ['pv-stock','pv-cap','pv-short','pv-direct'].forEach(id => document.getElementById(id)?.addEventListener('input', updateMibalPreview));
     document.getElementById('btn-ex-add')?.addEventListener('click', () => { exampleRows.push({ s:0, c:20, sh:0, d:0, want:'' }); buildExampleRows(); });
+    document.getElementById('btn-ex-generate')?.addEventListener('click', () => autoGenerateFormula());
     document.getElementById('btn-ex-copy')?.addEventListener('click', () => copyExamples());
     document.getElementById('mibal-formula-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mibal-formula-modal') closeMibalFormulaModal(); });
     document.querySelector('#mibal-formula-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
