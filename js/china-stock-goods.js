@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.0 (공식 설정 모달 정리 - 미리보기 제거, 예시 표로 일원화)
+// 중국제작 미발계산기 Ver 5.1 (미발수량 규칙 설정 - 예시/규칙조립/직접입력 3모드)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -123,36 +123,50 @@ function closeSheetSettingsModal() {
 }
 
 // ---------------------------------------------------------
-// [Ver 4.7] 미발수량 공식 설정 모달
+// [Ver 5.1] 미발수량 규칙 설정 모달 (예시 / 규칙 조립 / 직접 입력 3모드)
 // ---------------------------------------------------------
+let formulaMode = 'example';
+
 function openMibalFormulaModal() {
     closeAllMenus();
     document.getElementById('mibal-formula-input').value = mibalFormula;
-    buildExampleRows();      // 예시 표 렌더 (내부에서 '현재수식' 열 계산)
+    setFormulaMode('example');
     document.getElementById('mibal-formula-modal').style.display = 'flex';
 }
 function closeMibalFormulaModal() {
     document.getElementById('mibal-formula-modal').style.display = 'none';
 }
-async function saveMibalFormula() {
-    const expr = document.getElementById('mibal-formula-input').value.trim();
-    if (!expr) { alert('수식을 입력하세요.'); return; }
-    if (!compileMibalFormula(expr)) { alert('수식에 오류가 있습니다.\n예시 표의 \'현재수식\' 열에 정상 결과가 나오는지 확인하세요.'); return; }
+function setFormulaMode(mode) {
+    formulaMode = mode;
+    ['example','builder','advanced'].forEach(m => {
+        const sec = document.getElementById('fmode-' + m);
+        if (sec) sec.style.display = (m === mode) ? 'block' : 'none';
+    });
+    document.querySelectorAll('.fmode-tab').forEach(t => {
+        const on = t.dataset.mode === mode;
+        t.style.borderColor = on ? '#1976d2' : '#ccc';
+        t.style.background = on ? '#e3f2fd' : '#fff';
+        t.style.color = on ? '#0d47a1' : '#555';
+    });
+    if (mode === 'example') buildExampleRows();
+    else if (mode === 'builder') renderRuleRows();
+    else if (mode === 'advanced') document.getElementById('mibal-formula-input').value = mibalFormula;
+}
+
+// 공통: 규칙(수식) 검증 → Firebase 저장 → 표 즉시 재계산
+async function applyAndSaveFormula(expr, okMsg) {
+    if (!expr || !compileMibalFormula(expr)) { alert('규칙이 올바르지 않습니다. 다시 확인해 주세요.'); return; }
     mibalFormula = expr;
     mibalFn = compileMibalFormula(expr);
     try {
         await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { mibalFormula, updatedAt: new Date() }, { merge: true });
         closeMibalFormulaModal();
-        showToast('✅ 미발수량 공식 저장됨');
-        if (savedDates.length > 0) applyDates(); // 표 즉시 재계산
+        showToast(okMsg || '✅ 미발수량 규칙 저장됨');
+        if (savedDates.length > 0) applyDates();
     } catch (e) { alert('저장 실패: ' + e.message); }
 }
-function resetMibalFormulaInput() {
-    document.getElementById('mibal-formula-input').value = DEFAULT_MIBAL_FORMULA;
-    updateExampleCurrent();
-}
 
-// [Ver 4.8] 예시 만들기 표 (원하는 미발수량 입력 → 복사해서 수식 요청용)
+// ===== ① 예시 모드 =====
 let exampleRows = [
     { s:0, c:20, sh:0, d:0, want:'' },
     { s:5, c:20, sh:0, d:0, want:'' },
@@ -177,13 +191,10 @@ function buildExampleRows() {
     updateExampleCurrent();
 }
 function updateExampleCurrent() {
-    const fn = compileMibalFormula((document.getElementById('mibal-formula-input')?.value || '').trim());
+    // '지금 결과' = 현재 저장된 규칙(mibalFn)이 내는 값
     exampleRows.forEach((r,i) => {
         const td = document.getElementById('ex-cur-' + i);
-        if (!td) return;
-        if (!fn) { td.textContent = '-'; return; }
-        try { let v = Math.round(fn(r.s, r.c, r.sh, r.d)); if (v < 0) v = 0; td.textContent = v; }
-        catch (e) { td.textContent = '오류'; }
+        if (td) td.textContent = evalMibal(r.s, r.c, r.sh, r.d);
     });
 }
 function copyExamples() {
@@ -191,8 +202,7 @@ function copyExamples() {
     const text = '[미발수량 예시]\n' + lines.join('\n');
     navigator.clipboard.writeText(text).then(() => showToast('📋 예시 복사됨 (Claude에게 붙여넣으세요)'), () => showToast('복사 실패'));
 }
-
-// [Ver 4.9] 예시로 수식 자동 생성 (입력한 예시에 '정확히 다 맞는' 수식만 채택)
+// 예시 → 수식 자동 생성 후 바로 적용
 const MIBAL_SUBEXPRS = [
     '0', '적재량', '총재고', '부족수량', '직진배송',
     '부족수량+직진배송', '적재량+부족수량', '적재량+직진배송',
@@ -205,9 +215,7 @@ function matchExprAll(expr, pts) {
     return pts.every(p => { let v = Math.round(fn(p.s, p.c, p.sh, p.d)); if (v < 0) v = 0; return v === p.y; });
 }
 function synthMibalFormula(pts) {
-    // 1) 단일 식으로 전부 설명되면 채택
     for (const e of MIBAL_SUBEXPRS) if (matchExprAll(e, pts)) return e;
-    // 2) 총재고===0 기준으로 두 갈래로 나눠 각각 맞는 식 찾기
     const g0 = pts.filter(p => p.s === 0), g1 = pts.filter(p => p.s !== 0);
     if (g0.length && g1.length) {
         let A = null, B = null;
@@ -217,20 +225,98 @@ function synthMibalFormula(pts) {
     }
     return null;
 }
-function autoGenerateFormula() {
+function applyFromExamples() {
     const pts = exampleRows
         .filter(r => r.want !== '' && r.want !== null && r.want !== undefined && !isNaN(parseInt(r.want)))
         .map(r => ({ s: r.s, c: r.c, sh: r.sh, d: r.d, y: parseInt(r.want) }));
-    if (pts.length < 1) { alert('먼저 예시의 [원하는 미발수량] 칸을 채워주세요.'); return; }
+    if (pts.length < 1) { alert('먼저 [원하는 미발수량] 칸을 채워주세요.'); return; }
     const f = synthMibalFormula(pts);
     if (!f) {
-        alert('입력한 예시만으로는 수식을 자동으로 만들지 못했어요.\n\n· 상황이 다른 예시를 더 넣어보세요\n  (재고 0일 때 / 있을 때, 부족수량이 있을 때 등)\n· 그래도 안 되면 [예시 복사] 후 Claude에게 요청하시면 만들어 드립니다.');
+        alert('입력한 예시만으로는 규칙을 자동으로 만들지 못했어요.\n\n· 상황이 다른 예시를 더 넣어보세요 (재고 0일 때 / 있을 때 등)\n· 그래도 안 되면 [📋 예시 복사] 후 Claude에게 요청하세요.');
         return;
     }
-    document.getElementById('mibal-formula-input').value = f;
-    updateExampleCurrent();
     const coversBoth = pts.some(p => p.s === 0) && pts.some(p => p.s !== 0);
-    showToast('✨ 예시에 맞는 수식 생성됨' + (coversBoth ? '' : ' (일부 상황 예시 부족 — 확인 필요)') + ' · 저장 전 확인하세요');
+    applyAndSaveFormula(f, '✨ 예시로 규칙 적용됨' + (coversBoth ? '' : ' (일부 상황 예시 부족)'));
+}
+
+// ===== ② 규칙 조립 모드 =====
+const RULE_VARS = ['총재고','적재량','부족수량','직진배송','부족수량+직진배송'];
+const RULE_OPS = [['=','==='],['≠','!=='],['>','>'],['≥','>='],['<','<'],['≤','<=']];
+const RULE_RIGHT = ['0','총재고','적재량','부족수량','직진배송'];
+const RULE_RESULTS = [
+    ['0 (없음)','0'],['적재량','적재량'],['총재고','총재고'],['부족수량','부족수량'],['직진배송','직진배송'],
+    ['부족수량+직진배송','부족수량+직진배송'],['적재량−총재고','적재량-총재고'],['부족수량+직진배송−총재고','부족수량+직진배송-총재고']
+];
+let ruleRows2 = [
+    { L:'총재고', op:'===', R:'0', result:'적재량' },
+    { L:'부족수량+직진배송', op:'>', R:'총재고', result:'부족수량+직진배송-총재고' }
+];
+let ruleElse = '0';
+function ruleSelect(cls, i, options, selected) {
+    const opts = options.map(o => {
+        const label = Array.isArray(o) ? o[0] : o, val = Array.isArray(o) ? o[1] : o;
+        return `<option value="${val}" ${val === selected ? 'selected' : ''}>${label}</option>`;
+    }).join('');
+    return `<select class="${cls}" data-i="${i}" style="padding:5px; border:1px solid #ccc; border-radius:4px; font-size:12px;">${opts}</select>`;
+}
+function renderRuleRows() {
+    const box = document.getElementById('rule-rows');
+    if (!box) return;
+    box.innerHTML = ruleRows2.map((r,i) => `
+      <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap; background:#f5f5f5; padding:8px; border-radius:6px; margin-bottom:6px; font-size:13px; font-weight:bold;">
+        <span>만약</span>
+        ${ruleSelect('rl-L', i, RULE_VARS, r.L)}
+        ${ruleSelect('rl-op', i, RULE_OPS, r.op)}
+        ${ruleSelect('rl-R', i, RULE_RIGHT, r.R)}
+        <span>이면 → =</span>
+        ${ruleSelect('rl-res', i, RULE_RESULTS, r.result)}
+        <button class="rl-del" data-i="${i}" style="border:none; background:none; color:#d32f2f; cursor:pointer; font-size:15px; margin-left:auto;">✕</button>
+      </div>`).join('');
+    const elseSel = document.getElementById('rule-else');
+    if (elseSel) elseSel.innerHTML = RULE_RESULTS.map(([label,val]) => `<option value="${val}" ${val === ruleElse ? 'selected' : ''}>${label}</option>`).join('');
+    box.querySelectorAll('select').forEach(sel => sel.onchange = () => {
+        const i = +sel.dataset.i;
+        if (sel.classList.contains('rl-L')) ruleRows2[i].L = sel.value;
+        else if (sel.classList.contains('rl-op')) ruleRows2[i].op = sel.value;
+        else if (sel.classList.contains('rl-R')) ruleRows2[i].R = sel.value;
+        else if (sel.classList.contains('rl-res')) ruleRows2[i].result = sel.value;
+        updateRuleCheck();
+    });
+    box.querySelectorAll('.rl-del').forEach(b => b.onclick = () => { ruleRows2.splice(+b.dataset.i, 1); renderRuleRows(); });
+    if (elseSel) elseSel.onchange = () => { ruleElse = elseSel.value; updateRuleCheck(); };
+    updateRuleCheck();
+}
+function buildRuleFormula() {
+    let expr = `(${ruleElse})`;
+    for (let i = ruleRows2.length - 1; i >= 0; i--) {
+        const r = ruleRows2[i];
+        expr = `(${r.L} ${r.op} ${r.R}) ? (${r.result}) : ${expr}`;
+    }
+    return expr;
+}
+function updateRuleCheck() {
+    const el = document.getElementById('rule-check');
+    if (!el) return;
+    const fn = compileMibalFormula(buildRuleFormula());
+    if (!fn) { el.innerHTML = '⚠️ 규칙이 올바르지 않습니다.'; el.style.color = '#d32f2f'; return; }
+    const samples = [[0,20,0,0],[10,20,8,5],[50,40,0,0]];
+    const parts = samples.map(([s,c,sh,d]) => {
+        let v = Math.round(fn(s,c,sh,d)); if (v < 0) v = 0;
+        return `재고${s}·적${c}${sh?'·부'+sh:''}${d?'·직'+d:''} → <b style="color:#e65100;">${v}</b>`;
+    });
+    el.style.color = '#555';
+    el.innerHTML = '확인(예시): ' + parts.join(' &nbsp;/&nbsp; ');
+}
+function applyFromBuilder() { applyAndSaveFormula(buildRuleFormula(), '✔ 규칙 적용됨'); }
+
+// ===== ③ 직접 입력 모드 =====
+function applyFromAdvanced() {
+    const expr = document.getElementById('mibal-formula-input').value.trim();
+    if (!expr) { alert('수식을 입력하세요.'); return; }
+    applyAndSaveFormula(expr, '✅ 미발수량 규칙 저장됨');
+}
+function resetMibalFormulaInput() {
+    document.getElementById('mibal-formula-input').value = DEFAULT_MIBAL_FORMULA;
 }
 
 async function saveSheetSettings() {
@@ -676,7 +762,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.0';
+const WEB_VERSION = '5.1';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -815,15 +901,20 @@ function setupEventListeners() {
     // 18. #sheet-settings-modal .modal-content (전파 방지)
     document.querySelector('#sheet-settings-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
-    // [Ver 4.7] 미발수량 공식 설정 모달
+    // [Ver 5.1] 미발수량 규칙 설정 모달 (예시 / 규칙 조립 / 직접 입력)
     document.getElementById('btn-open-mibal-formula')?.addEventListener('click', () => openMibalFormulaModal());
     document.getElementById('btn-mibal-cancel')?.addEventListener('click', () => closeMibalFormulaModal());
-    document.getElementById('btn-mibal-save')?.addEventListener('click', () => saveMibalFormula());
-    document.getElementById('btn-mibal-reset')?.addEventListener('click', () => resetMibalFormulaInput());
-    document.getElementById('mibal-formula-input')?.addEventListener('input', updateExampleCurrent);
+    document.querySelectorAll('.fmode-tab').forEach(t => t.addEventListener('click', () => setFormulaMode(t.dataset.mode)));
+    // 예시 모드
     document.getElementById('btn-ex-add')?.addEventListener('click', () => { exampleRows.push({ s:0, c:20, sh:0, d:0, want:'' }); buildExampleRows(); });
-    document.getElementById('btn-ex-generate')?.addEventListener('click', () => autoGenerateFormula());
     document.getElementById('btn-ex-copy')?.addEventListener('click', () => copyExamples());
+    document.getElementById('btn-example-apply')?.addEventListener('click', () => applyFromExamples());
+    // 규칙 조립 모드
+    document.getElementById('btn-rule-add')?.addEventListener('click', () => { ruleRows2.push({ L:'총재고', op:'===', R:'0', result:'0' }); renderRuleRows(); });
+    document.getElementById('btn-builder-apply')?.addEventListener('click', () => applyFromBuilder());
+    // 직접 입력 모드
+    document.getElementById('btn-advanced-apply')?.addEventListener('click', () => applyFromAdvanced());
+    document.getElementById('btn-mibal-reset')?.addEventListener('click', () => resetMibalFormulaInput());
     document.getElementById('mibal-formula-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mibal-formula-modal') closeMibalFormulaModal(); });
     document.querySelector('#mibal-formula-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 

@@ -58,7 +58,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 5.0</div>
+            <div class="version-badge">🚀 Ver 5.1</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -148,39 +148,66 @@
     </div>
 
     <div id="mibal-formula-modal" class="modal-overlay">
-        <div class="modal-content" style="width:480px; max-height:88vh; overflow-y:auto;">
-            <h3 style="margin-top:0;">🧮 미발수량 공식 설정</h3>
-            <div style="font-size:12px; color:#666; line-height:1.7; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; padding:8px 10px;">
-                사용 가능한 변수: <b>총재고 · 적재량 · 부족수량 · 직진배송</b><br>
-                조건은 <b>조건 ? 참값 : 거짓값</b> 형식 (엑셀 IF와 동일)<br>
-                예: <code>총재고===0 ? 적재량 : 0</code>
+        <div class="modal-content" style="width:540px; max-width:94vw; max-height:90vh; overflow-y:auto;">
+            <h3 style="margin-top:0;">🧮 미발수량 규칙 설정</h3>
+
+            <!-- 모드 선택 탭 -->
+            <div style="display:flex; gap:6px; margin-bottom:14px;">
+                <button class="fmode-tab" data-mode="example" style="flex:1; padding:9px 4px; border:2px solid #ccc; background:#fff; border-radius:8px; cursor:pointer; font-weight:800; font-size:13px;">😊 예시로 만들기</button>
+                <button class="fmode-tab" data-mode="builder" style="flex:1; padding:9px 4px; border:2px solid #ccc; background:#fff; border-radius:8px; cursor:pointer; font-weight:800; font-size:13px;">🧩 규칙 조립</button>
+                <button class="fmode-tab" data-mode="advanced" style="flex:1; padding:9px 4px; border:2px solid #ccc; background:#fff; border-radius:8px; cursor:pointer; font-weight:800; font-size:13px;">⚙️ 직접 입력</button>
             </div>
-            <textarea id="mibal-formula-input" rows="4" spellcheck="false" style="width:100%; margin-top:10px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:monospace; font-size:13px; box-sizing:border-box; resize:vertical;"></textarea>
-            <div style="margin-top:14px;">
-                <div style="font-size:12px; font-weight:bold; margin-bottom:2px;">📝 예시 만들기</div>
-                <div style="font-size:11px; color:#888; margin-bottom:8px;">각 상황에서 <b style="color:#e65100;">원하는 미발수량</b>을 채운 뒤 <b>[예시 복사]</b> → 저(Claude)에게 붙여넣으면 수식을 만들어 드립니다. 오른쪽 '현재수식'과 비교해 보세요.</div>
+
+            <!-- ① 예시 모드 -->
+            <div id="fmode-example">
+                <div style="font-size:12px; color:#555; background:#e8f5e9; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
+                    각 상황에서 <b style="color:#e65100;">원하는 미발수량</b>만 채우고 아래 <b>[이 예시로 규칙 적용]</b>을 누르세요.<br>규칙(수식)은 자동으로 만들어집니다. 오른쪽 <b>지금 결과</b>는 현재 규칙이 내는 값이에요.
+                </div>
                 <div style="overflow-x:auto;">
-                    <table style="width:100%; border-collapse:collapse; font-size:11px; text-align:center; min-width:420px;">
+                    <table style="width:100%; border-collapse:collapse; font-size:11px; text-align:center; min-width:440px;">
                         <thead><tr style="background:#eceff1; color:#546e7a;">
                             <th style="padding:5px;">총재고</th><th>적재량</th><th>부족수량</th><th>직진배송</th>
-                            <th style="color:#e65100;">원하는<br>미발수량</th><th style="color:#888;">현재수식</th><th></th>
+                            <th style="color:#e65100;">원하는<br>미발수량</th><th style="color:#888;">지금<br>결과</th><th></th>
                         </tr></thead>
                         <tbody id="ex-tbody"></tbody>
                     </table>
                 </div>
                 <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
-                    <button id="btn-ex-add" style="padding:6px 12px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">+ 행 추가</button>
-                    <button id="btn-ex-generate" style="padding:6px 14px; border:none; background:#6a1b9a; color:#fff; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">✨ 자동 생성</button>
-                    <button id="btn-ex-copy" style="padding:6px 12px; border:none; background:#455a64; color:#fff; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">📋 예시 복사</button>
+                    <button id="btn-ex-add" style="padding:6px 12px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">+ 상황 추가</button>
+                    <button id="btn-ex-copy" style="padding:6px 12px; border:1px solid #90a4ae; background:#fff; color:#455a64; border-radius:4px; cursor:pointer; font-size:12px;">📋 예시 복사</button>
+                </div>
+                <button id="btn-example-apply" style="width:100%; margin-top:12px; padding:13px; border:none; background:#2e7d32; color:#fff; border-radius:8px; font-size:16px; font-weight:800; cursor:pointer;">✨ 이 예시로 규칙 적용</button>
+            </div>
+
+            <!-- ② 규칙 조립 모드 -->
+            <div id="fmode-builder" style="display:none;">
+                <div style="font-size:12px; color:#555; background:#e3f2fd; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
+                    <b>"만약 ~이면 → 미발수량 = ~"</b> 문장을 위에서부터 순서대로 조립하세요.<br>위 조건이 맞으면 그 값으로, 아니면 다음 조건으로 넘어가고, 다 아니면 <b>그 외</b> 값이 됩니다.
+                </div>
+                <div id="rule-rows"></div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:13px; font-weight:bold; background:#f5f5f5; padding:8px; border-radius:6px;">
+                    <span>그 외에는 → 미발수량 =</span>
+                    <select id="rule-else" style="padding:5px; border:1px solid #ccc; border-radius:4px;"></select>
+                </div>
+                <button id="btn-rule-add" style="margin-top:8px; padding:6px 12px; border:1px solid #1976d2; background:#fff; color:#1976d2; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">+ 조건 추가</button>
+                <div id="rule-check" style="margin-top:10px; font-size:12px; color:#555; background:#fafafa; border:1px dashed #ddd; border-radius:6px; padding:8px;">확인 중…</div>
+                <button id="btn-builder-apply" style="width:100%; margin-top:12px; padding:13px; border:none; background:#1976d2; color:#fff; border-radius:8px; font-size:16px; font-weight:800; cursor:pointer;">✔ 이 규칙 적용</button>
+            </div>
+
+            <!-- ③ 직접 입력 모드 -->
+            <div id="fmode-advanced" style="display:none;">
+                <div style="font-size:12px; color:#666; line-height:1.7; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; padding:8px 10px;">
+                    변수: <b>총재고 · 적재량 · 부족수량 · 직진배송</b> / 조건은 <b>조건 ? 참값 : 거짓값</b><br>예: <code>총재고===0 ? 적재량 : 0</code>
+                </div>
+                <textarea id="mibal-formula-input" rows="4" spellcheck="false" style="width:100%; margin-top:10px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:monospace; font-size:13px; box-sizing:border-box; resize:vertical;"></textarea>
+                <div style="margin-top:10px; display:flex; gap:8px;">
+                    <button id="btn-mibal-reset" style="padding:8px 14px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">기본값 복원</button>
+                    <button id="btn-advanced-apply" style="flex:1; padding:10px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">저장</button>
                 </div>
             </div>
 
-            <div style="margin-top:18px; display:flex; justify-content:space-between; align-items:center;">
-                <button id="btn-mibal-reset" style="padding:8px 14px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">기본값 복원</button>
-                <div style="display:flex; gap:8px;">
-                    <button id="btn-mibal-cancel" style="padding:8px 15px; border:none; border-radius:4px; cursor:pointer;">취소</button>
-                    <button id="btn-mibal-save" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">저장</button>
-                </div>
+            <div style="margin-top:16px; text-align:right; border-top:1px solid #eee; padding-top:12px;">
+                <button id="btn-mibal-cancel" style="padding:8px 18px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer;">닫기</button>
             </div>
         </div>
     </div>
@@ -188,6 +215,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=5.0"></script>
+    <script type="module" src="js/china-stock-goods.js?v=5.1"></script>
 </body>
 </html>
