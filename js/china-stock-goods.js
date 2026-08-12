@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.3 (부족수량 열을 미발재고로그 값으로 자동 채움)
+// 중국제작 미발계산기 Ver 5.4 (적재량 개별/구역별 수정)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -82,11 +82,14 @@ async function downloadToDesktop(filename, blob) {
     a.href = URL.createObjectURL(blob); a.download = filename; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+let zoneCapacity = {}; // [Ver 5.4] 구역(로케이션 앞 한 글자)별 적재량 일괄값 (Firebase 저장)
 function getCapacityByLocation(locStr) {
     if (!locStr) return 0;
+    if (locStr.includes('★')) return 90;
     const ch = locStr.toString().trim().toUpperCase().charAt(0);
+    if (zoneCapacity[ch] !== undefined && zoneCapacity[ch] !== '') return parseInt(zoneCapacity[ch]) || 0; // 구역별 일괄값
     const map = { 'A':20,'B':20,'C':20,'D':20,'E':40,'F':40,'G':40,'H':15,'I':15,'Z':15,'L':15,'O':15,'P':15,'Q':15,'R':15,'S':15,'T':15 };
-    return locStr.includes('★') ? 90 : (map[ch] || 0);
+    return map[ch] || 0;
 }
 
 // ---------------------------------------------------------
@@ -331,6 +334,47 @@ function updateRuleCheck() {
     el.innerHTML = '확인(예시): ' + parts.join(' &nbsp;/&nbsp; ');
 }
 function applyFromBuilder() { applyAndSaveFormula(buildRuleFormula(), '✔ 규칙 적용됨'); }
+
+// ---------------------------------------------------------
+// [Ver 5.4] 적재량 구역별 일괄 설정 모달
+// ---------------------------------------------------------
+function openZoneCapModal() {
+    closeAllMenus();
+    buildZoneCapRows();
+    document.getElementById('zone-cap-modal').style.display = 'flex';
+}
+function closeZoneCapModal() { document.getElementById('zone-cap-modal').style.display = 'none'; }
+function buildZoneCapRows() {
+    const tb = document.getElementById('zone-cap-tbody');
+    if (!tb) return;
+    const counts = {};
+    tableData.forEach(d => { const ch = (d.location || '').trim().charAt(0).toUpperCase(); if (ch) counts[ch] = (counts[ch] || 0) + 1; });
+    const zones = new Set(Object.keys(counts));
+    Object.keys(zoneCapacity).forEach(z => zones.add(z));
+    const list = [...zones].sort();
+    if (!list.length) {
+        tb.innerHTML = '<tr><td colspan="3" style="padding:20px; color:#888;">표시할 구역이 없습니다.<br>출고일 선택 + 재고로그 업로드 후 이용하세요.</td></tr>';
+        return;
+    }
+    tb.innerHTML = list.map(z => `<tr>
+        <td style="font-weight:800; font-size:15px;">${z}</td>
+        <td style="color:#888;">${counts[z] || 0}</td>
+        <td><input type="number" class="zcap" data-z="${z}" value="${getCapacityByLocation(z)}" style="width:74px; padding:6px; text-align:center;"></td>
+    </tr>`).join('');
+}
+async function saveZoneCap() {
+    document.querySelectorAll('.zcap').forEach(inp => {
+        const z = inp.dataset.z, v = inp.value.trim();
+        if (v === '') delete zoneCapacity[z];
+        else zoneCapacity[z] = parseInt(v) || 0;
+    });
+    try {
+        await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { zoneCapacity, updatedAt: new Date() }, { merge: true });
+        closeZoneCapModal();
+        showToast('✅ 구역별 적재량 저장됨');
+        if (savedDates.length > 0) applyDates(); // 표 재계산
+    } catch (e) { alert('저장 실패: ' + e.message); }
+}
 
 // ===== ③ 직접 입력 모드 =====
 function applyFromAdvanced() {
@@ -709,7 +753,8 @@ function applyDates(opts) {
         const log = stockLogData[item.code] || {}; const ed = editedCells[item.code] || {};
         const loc = (log['로케이션'] || '').split('/')[0].trim();
         const totalStock = parseInt(log['정상재고']) || 0;   // 총재고
-        const capacity = getCapacityByLocation(loc);          // 적재량
+        // [Ver 5.4] 적재량: 개별 수정값 > 구역별/기본값
+        const capacity = (ed.capacity !== undefined && ed.capacity !== '') ? (parseInt(ed.capacity) || 0) : getCapacityByLocation(loc);
         // [Ver 5.3] 부족수량 = 미발재고로그의 '부족수량' 값 (수동 편집이 있으면 그 값 우선)
         const logShort = (log['부족수량'] !== undefined && log['부족수량'] !== null && log['부족수량'] !== '') ? String(log['부족수량']).trim() : '';
         const shortageVal = (ed.shortage !== undefined) ? ed.shortage : logShort; // 부족수량(열)
@@ -732,6 +777,23 @@ function applyDates(opts) {
     if (!(opts && opts.skipSync)) scheduleScanDBSync();
 }
 
+// [Ver 5.4] 셀 편집 시 해당 상품 한 줄만 미발수량 재계산 + 화면 갱신
+function recomputeRow(code) {
+    const row = tableData.find(d => d.code === code);
+    if (!row) return;
+    const ed = editedCells[code] || {};
+    const loc = row.location;
+    const cap = (ed.capacity !== undefined && ed.capacity !== '') ? (parseInt(ed.capacity) || 0) : getCapacityByLocation(loc);
+    const short = parseInt((ed.shortage !== undefined) ? ed.shortage : row.shortage) || 0;
+    const direct = parseInt((ed.directShip !== undefined) ? ed.directShip : row.directShip) || 0;
+    row.capacity = cap;
+    if (ed.shortage !== undefined) row.shortage = ed.shortage;
+    if (ed.directShip !== undefined) row.directShip = ed.directShip;
+    row.mibalQty = evalMibal(row.totalStock, cap, short, direct);
+    renderTable(); updateSummary();
+    scheduleScanDBSync(); // 편집 결과를 앱 스캔DB에도 반영
+}
+
 function renderTable() {
     const tbody = document.getElementById('table-body');
     if (!filteredData.length) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>'; return; }
@@ -739,7 +801,7 @@ function renderTable() {
     filteredData.forEach((row, idx) => {
         const isFromApp = inboundMap[row.code] !== undefined;
         const confirmStyle = isFromApp ? 'color: #1976d2; font-weight: 900;' : '';
-        html += `<tr><td>${idx+1}</td><td class="code-cell" data-code="${row.code}">${row.code}</td><td>${row.name}</td><td>${row.option}</td><td>${row.arrivalQty}</td><td>${row.mibalQty}</td><td>${row.totalStock}</td><td>${row.location}</td><td>${row.capacity}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed" style="${confirmStyle}">${row.confirmed}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="directShip">${row.directShip}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="memo">${row.memo}</td></tr>`;
+        html += `<tr><td>${idx+1}</td><td class="code-cell" data-code="${row.code}">${row.code}</td><td>${row.name}</td><td>${row.option}</td><td>${row.arrivalQty}</td><td>${row.mibalQty}</td><td>${row.totalStock}</td><td>${row.location}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="capacity" style="background:#e3f2fd;">${row.capacity}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed" style="${confirmStyle}">${row.confirmed}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="directShip">${row.directShip}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="memo">${row.memo}</td></tr>`;
     });
     tbody.innerHTML = html;
 }
@@ -787,7 +849,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.3';
+const WEB_VERSION = '5.4';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -832,7 +894,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; } }
 async function saveConfig() { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -903,6 +965,8 @@ function setupEventListeners() {
             const code = e.target.dataset.code; const field = e.target.dataset.field; const value = e.target.textContent.trim();
             if (!editedCells[code]) editedCells[code] = {}; editedCells[code][field] = value;
             clearTimeout(saveTimeout); saveTimeout = setTimeout(() => { saveEditedCells(); showToast('💾 자동 저장됨'); }, 1000);
+            // [Ver 5.4] 미발수량에 영향 주는 값(적재량/부족수량/직진배송)은 즉시 재계산
+            if (['capacity','shortage','directShip'].includes(field)) recomputeRow(code);
         }
     });
 
@@ -944,6 +1008,13 @@ function setupEventListeners() {
     document.getElementById('btn-mibal-reset')?.addEventListener('click', () => resetMibalFormulaInput());
     document.getElementById('mibal-formula-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mibal-formula-modal') closeMibalFormulaModal(); });
     document.querySelector('#mibal-formula-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+
+    // [Ver 5.4] 적재량 구역별 일괄 설정 모달
+    document.getElementById('btn-open-zone-cap')?.addEventListener('click', () => openZoneCapModal());
+    document.getElementById('btn-zone-cancel')?.addEventListener('click', () => closeZoneCapModal());
+    document.getElementById('btn-zone-save')?.addEventListener('click', () => saveZoneCap());
+    document.getElementById('zone-cap-modal')?.addEventListener('click', (e) => { if (e.target.id === 'zone-cap-modal') closeZoneCapModal(); });
+    document.querySelector('#zone-cap-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
 
 
