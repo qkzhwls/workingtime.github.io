@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.2 (다운로드: 저장 대화상자를 바탕화면에서 열기)
+// 중국제작 미발계산기 Ver 5.3 (부족수량 열을 미발재고로그 값으로 자동 채움)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -710,7 +710,9 @@ function applyDates(opts) {
         const loc = (log['로케이션'] || '').split('/')[0].trim();
         const totalStock = parseInt(log['정상재고']) || 0;   // 총재고
         const capacity = getCapacityByLocation(loc);          // 적재량
-        const shortageVal = ed.shortage || '';                // 부족수량(열)
+        // [Ver 5.3] 부족수량 = 미발재고로그의 '부족수량' 값 (수동 편집이 있으면 그 값 우선)
+        const logShort = (log['부족수량'] !== undefined && log['부족수량'] !== null && log['부족수량'] !== '') ? String(log['부족수량']).trim() : '';
+        const shortageVal = (ed.shortage !== undefined) ? ed.shortage : logShort; // 부족수량(열)
         const directShipVal = ed.directShip || '';            // 직진배송(열)
         // [Ver 4.7] 미발수량 = 설정된 공식으로 계산 (변수: 총재고/적재량/부족수량/직진배송)
         const _short = parseInt(shortageVal) || 0;            // 부족수량
@@ -785,7 +787,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.2';
+const WEB_VERSION = '5.3';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
