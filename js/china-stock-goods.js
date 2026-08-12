@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.1 (미발수량 규칙 설정 - 예시/규칙조립/직접입력 3모드)
+// 중국제작 미발계산기 Ver 5.2 (다운로드: 저장 대화상자를 바탕화면에서 열기)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -58,6 +58,29 @@ function showToast(msg) {
     const t = document.getElementById('toast'); if (!t) return;
     t.innerText = msg; t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2500);
+}
+// [Ver 5.2] 파일 저장: 지원 브라우저(크롬/엣지)면 저장 대화상자를 '바탕화면'에서 열어 한 번에 저장,
+//   미지원(사파리/모바일)이면 기본 다운로드 폴더로 저장
+async function downloadToDesktop(filename, blob) {
+    if (window.showSaveFilePicker) {
+        try {
+            const handle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                startIn: 'desktop',
+                types: [{ description: 'Excel', accept: { 'application/vnd.ms-excel': ['.xls'] } }]
+            });
+            const w = await handle.createWritable();
+            await w.write(blob); await w.close();
+            showToast('✅ 저장 완료');
+            return;
+        } catch (e) {
+            if (e && e.name === 'AbortError') return; // 사용자가 취소
+            // 그 외 오류 → 기본 다운로드로 폴백
+        }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 function getCapacityByLocation(locStr) {
     if (!locStr) return 0;
@@ -762,7 +785,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.1';
+const WEB_VERSION = '5.2';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -842,26 +865,28 @@ function setupEventListeners() {
     document.getElementById('btn-date-clear')?.addEventListener('click', clearAllData);
 
     // 10. #btn-excel-download (입고용파일다운로드: 상품코드 + 수량)
-    document.getElementById('btn-excel-download')?.addEventListener('click', () => {
+    document.getElementById('btn-excel-download')?.addEventListener('click', async () => {
         if (!filteredData.length) return;
-        const headers = ['상품코드','수량']; let html = '<table><tr><th>상품코드</th><th>수량</th></tr>';
+        let html = '<table><tr><th>상품코드</th><th>수량</th></tr>';
         filteredData.forEach(r => html += `<tr><td>${r.code}</td><td>${r.arrivalQty}</td></tr>`);
         html += '</table>';
         const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = '입고용파일.xls'; a.click();
+        await downloadToDesktop('입고용파일.xls', blob);
     });
 
     // 10-2. #btn-mibal-download (미발확인파일다운로드: 상품코드 1열, 진짜 .xls 바이너리)
     //  - 이지어드민 업로드용. HTML 위장(.xls)이 아니라 SheetJS로 실제 BIFF8(OLE2) 파일 생성
     //  - 통합 문서1.xls 와 동일 형식(시트명 worksheet, 헤더 '상품코드')
-    document.getElementById('btn-mibal-download')?.addEventListener('click', () => {
+    document.getElementById('btn-mibal-download')?.addEventListener('click', async () => {
         if (!filteredData.length) return;
         const aoa = [['상품코드']];
         filteredData.forEach(r => aoa.push([r.code]));
         const ws = XLSX.utils.aoa_to_sheet(aoa);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
-        XLSX.writeFile(wb, '미발확인파일.xls', { bookType: 'biff8' });
+        const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
+        const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
+        await downloadToDesktop('미발확인파일.xls', blob);
     });
 
     // 11. #search-input (검색)
