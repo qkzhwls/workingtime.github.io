@@ -58,7 +58,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 5.4</div>
+            <div class="version-badge">🚀 Ver 5.5</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -76,6 +76,7 @@
                     <div class="menu-item" id="btn-open-sheet-settings" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#607d8b;">📎 CSV 시트 링크 설정</div>
                     <div class="menu-item" id="btn-open-mibal-formula" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#e65100;">🧮 미발수량 공식 설정</div>
                     <div class="menu-item" id="btn-open-zone-cap" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#1565c0;">📦 적재량 구역별 일괄 설정</div>
+                    <div class="menu-item" id="btn-open-column" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#00838f;">🔧 표 열(헤더) 설정</div>
                 </div>
             </div>
         </div>
@@ -232,9 +233,30 @@
         </div>
     </div>
 
+    <div id="column-modal" class="modal-overlay">
+        <div class="modal-content" style="width:460px; max-height:88vh; overflow-y:auto;">
+            <h3 style="margin-top:0;">🔧 표 열(헤더) 설정</h3>
+            <div style="font-size:12px; color:#555; background:#e0f2f1; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
+                순서를 바꾸거나(<b>↑ ↓</b>), 열을 빼거나(<b>✕</b>), 아래에서 <b>재고로그 필드</b>를 골라 추가하세요.
+            </div>
+            <div id="column-list"></div>
+            <div style="margin-top:10px; display:flex; gap:6px; align-items:center;">
+                <select id="column-add-select" style="flex:1; padding:7px; border:1px solid #ccc; border-radius:4px; font-size:13px;"></select>
+                <button id="btn-column-add" style="padding:7px 14px; border:none; background:#00838f; color:#fff; border-radius:4px; cursor:pointer; font-weight:bold; white-space:nowrap;">+ 추가</button>
+            </div>
+            <div style="margin-top:16px; display:flex; justify-content:space-between; align-items:center;">
+                <button id="btn-column-reset" style="padding:8px 14px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">기본값 복원</button>
+                <div style="display:flex; gap:8px;">
+                    <button id="btn-column-cancel" style="padding:8px 15px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer;">취소</button>
+                    <button id="btn-column-save" style="padding:8px 15px; background:var(--primary); color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=5.4"></script>
+    <script type="module" src="js/china-stock-goods.js?v=5.5"></script>
 </body>
 </html>

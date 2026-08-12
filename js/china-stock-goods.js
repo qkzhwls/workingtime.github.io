@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.4 (적재량 개별/구역별 수정)
+// 중국제작 미발계산기 Ver 5.5 (표 열 순서 변경 + 재고로그 필드 열 추가)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -794,16 +794,113 @@ function recomputeRow(code) {
     scheduleScanDBSync(); // 편집 결과를 앱 스캔DB에도 반영
 }
 
+// ---------------------------------------------------------
+// [Ver 5.5] 표 열(헤더) 구성 - 순서 변경 + 재고로그 필드 열 추가
+// ---------------------------------------------------------
+const DEFAULT_COLUMNS = ['no','code','name','option','arrivalQty','mibalQty','totalStock','location','capacity','confirmed','shortage','directShip','memo'];
+const BUILTIN_COLS = {
+    no:        { label:'No', width:'40px' },
+    code:      { label:'상품코드', sort:'code', code:true, width:'100px' },
+    name:      { label:'상품명', sort:'name', width:'150px' },
+    option:    { label:'옵션명', width:'110px' },
+    arrivalQty:{ label:'도착수량', sort:'arrivalQty', width:'75px' },
+    mibalQty:  { label:'미발수량', sort:'mibalQty', width:'75px' },
+    totalStock:{ label:'총재고', sort:'totalStock', width:'65px' },
+    location:  { label:'로케이션', width:'110px' },
+    capacity:  { label:'적재량', edit:'capacity', width:'60px' },
+    confirmed: { label:'입고확인', edit:'confirmed', width:'70px' },
+    shortage:  { label:'부족수량', edit:'shortage', width:'70px' },
+    directShip:{ label:'직진배송', edit:'directShip', width:'75px' },
+    memo:      { label:'비고', edit:'memo' }
+};
+let columnConfig = null; // null = 기본 순서, 아니면 열 key 배열
+function getColumns() { return (Array.isArray(columnConfig) && columnConfig.length) ? columnConfig : DEFAULT_COLUMNS; }
+function colLabel(key) {
+    if (BUILTIN_COLS[key]) return BUILTIN_COLS[key].label;
+    if (key.startsWith('log:')) return key.slice(4);
+    return key;
+}
+function colValue(key, row, idx) {
+    if (key === 'no') return idx + 1;
+    if (BUILTIN_COLS[key]) return (row[key] !== undefined && row[key] !== null) ? row[key] : '';
+    if (key.startsWith('log:')) { const log = stockLogData[row.code] || {}; const v = log[key.slice(4)]; return (v !== undefined && v !== null) ? v : ''; }
+    return '';
+}
+function logFieldKeys() {
+    for (const c in stockLogData) { return Object.keys(stockLogData[c]); }
+    return [];
+}
+function renderTableHeader(cols) {
+    const tr = document.querySelector('.list-table thead tr');
+    if (!tr) return;
+    tr.innerHTML = cols.map(key => {
+        const def = BUILTIN_COLS[key] || {};
+        const w = def.width ? ` style="width:${def.width};"` : '';
+        if (def.sort) return `<th class="th-sortable" data-sort="${def.sort}"${w}>${colLabel(key)}</th>`;
+        return `<th${w}>${colLabel(key)}</th>`;
+    }).join('');
+    tr.querySelectorAll('.th-sortable').forEach(th => th.addEventListener('click', () => sortTable(th.dataset.sort)));
+}
 function renderTable() {
+    const cols = getColumns();
+    renderTableHeader(cols);
     const tbody = document.getElementById('table-body');
-    if (!filteredData.length) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>'; return; }
+    if (!filteredData.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>`; return; }
     let html = '';
     filteredData.forEach((row, idx) => {
         const isFromApp = inboundMap[row.code] !== undefined;
-        const confirmStyle = isFromApp ? 'color: #1976d2; font-weight: 900;' : '';
-        html += `<tr><td>${idx+1}</td><td class="code-cell" data-code="${row.code}">${row.code}</td><td>${row.name}</td><td>${row.option}</td><td>${row.arrivalQty}</td><td>${row.mibalQty}</td><td>${row.totalStock}</td><td>${row.location}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="capacity" style="background:#e3f2fd;">${row.capacity}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="confirmed" style="${confirmStyle}">${row.confirmed}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="shortage">${row.shortage}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="directShip">${row.directShip}</td><td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="memo">${row.memo}</td></tr>`;
+        let tds = '';
+        cols.forEach(key => {
+            const def = BUILTIN_COLS[key] || {};
+            const val = colValue(key, row, idx);
+            if (def.edit) {
+                let style = key === 'capacity' ? 'background:#e3f2fd;' : '';
+                if (key === 'confirmed' && isFromApp) style += 'color:#1976d2; font-weight:900;';
+                tds += `<td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="${def.edit}" style="${style}">${val}</td>`;
+            } else if (def.code) {
+                tds += `<td class="code-cell" data-code="${row.code}">${val}</td>`;
+            } else {
+                tds += `<td>${val}</td>`;
+            }
+        });
+        html += `<tr>${tds}</tr>`;
     });
     tbody.innerHTML = html;
+}
+
+// [Ver 5.5] 열 설정 모달
+let colEditList = [];
+function openColumnModal() { closeAllMenus(); colEditList = [...getColumns()]; renderColumnEditor(); document.getElementById('column-modal').style.display = 'flex'; }
+function closeColumnModal() { document.getElementById('column-modal').style.display = 'none'; }
+function renderColumnEditor() {
+    const box = document.getElementById('column-list');
+    if (!box) return;
+    const bs = 'border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; width:26px; height:26px; font-weight:bold;';
+    box.innerHTML = colEditList.map((key,i) => `
+        <div style="display:flex; align-items:center; gap:6px; background:#f5f5f5; padding:6px 8px; border-radius:5px; margin-bottom:5px; font-size:13px;">
+            <span style="flex:1; font-weight:bold;">${colLabel(key)}${key.startsWith('log:') ? ' <span style="color:#1976d2; font-size:11px;">(로그)</span>' : ''}</span>
+            <button class="col-up" data-i="${i}" ${i===0?'disabled':''} style="${bs}">↑</button>
+            <button class="col-down" data-i="${i}" ${i===colEditList.length-1?'disabled':''} style="${bs}">↓</button>
+            <button class="col-del" data-i="${i}" style="${bs} color:#d32f2f;">✕</button>
+        </div>`).join('');
+    const sel = document.getElementById('column-add-select');
+    const avail = [];
+    Object.keys(BUILTIN_COLS).forEach(k => { if (!colEditList.includes(k)) avail.push([k, colLabel(k)]); });
+    logFieldKeys().forEach(f => { const k = 'log:' + f; if (!colEditList.includes(k)) avail.push([k, f + ' (로그)']); });
+    sel.innerHTML = avail.length ? avail.map(([k,l]) => `<option value="${k}">${l}</option>`).join('') : '<option value="">추가할 열 없음</option>';
+    box.querySelectorAll('.col-up').forEach(b => b.onclick = () => { const i=+b.dataset.i; if(i>0){ [colEditList[i-1],colEditList[i]]=[colEditList[i],colEditList[i-1]]; renderColumnEditor(); } });
+    box.querySelectorAll('.col-down').forEach(b => b.onclick = () => { const i=+b.dataset.i; if(i<colEditList.length-1){ [colEditList[i+1],colEditList[i]]=[colEditList[i],colEditList[i+1]]; renderColumnEditor(); } });
+    box.querySelectorAll('.col-del').forEach(b => b.onclick = () => { colEditList.splice(+b.dataset.i,1); renderColumnEditor(); });
+}
+function addColumnFromSelect() { const v = document.getElementById('column-add-select').value; if (v && !colEditList.includes(v)) { colEditList.push(v); renderColumnEditor(); } }
+function resetColumns() { colEditList = [...DEFAULT_COLUMNS]; renderColumnEditor(); }
+async function saveColumns() {
+    if (!colEditList.length) { alert('열이 하나도 없습니다.'); return; }
+    columnConfig = [...colEditList];
+    try {
+        await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { columnConfig, updatedAt: new Date() }, { merge: true });
+        closeColumnModal(); showToast('✅ 열 설정 저장됨'); renderTable();
+    } catch (e) { alert('저장 실패: ' + e.message); }
 }
 
 function updateSummary() {
@@ -849,7 +946,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.4';
+const WEB_VERSION = '5.5';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -894,7 +991,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; } }
 async function saveConfig() { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -956,8 +1053,7 @@ function setupEventListeners() {
     // 11. #search-input (검색)
     document.getElementById('search-input')?.addEventListener('input', applySearch);
 
-    // 12. .th-sortable (정렬)
-    document.querySelectorAll('.th-sortable').forEach(th => th.addEventListener('click', () => sortTable(th.dataset.sort)));
+    // 12. .th-sortable (정렬) → [Ver 5.5] 헤더가 동적 생성되어 renderTableHeader에서 바인딩
 
     // 13. #table-body focusout (셀 편집)
     document.getElementById('table-body')?.addEventListener('focusout', (e) => { 
@@ -1015,6 +1111,15 @@ function setupEventListeners() {
     document.getElementById('btn-zone-save')?.addEventListener('click', () => saveZoneCap());
     document.getElementById('zone-cap-modal')?.addEventListener('click', (e) => { if (e.target.id === 'zone-cap-modal') closeZoneCapModal(); });
     document.querySelector('#zone-cap-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+
+    // [Ver 5.5] 표 열(헤더) 설정 모달
+    document.getElementById('btn-open-column')?.addEventListener('click', () => openColumnModal());
+    document.getElementById('btn-column-cancel')?.addEventListener('click', () => closeColumnModal());
+    document.getElementById('btn-column-save')?.addEventListener('click', () => saveColumns());
+    document.getElementById('btn-column-reset')?.addEventListener('click', () => resetColumns());
+    document.getElementById('btn-column-add')?.addEventListener('click', () => addColumnFromSelect());
+    document.getElementById('column-modal')?.addEventListener('click', (e) => { if (e.target.id === 'column-modal') closeColumnModal(); });
+    document.querySelector('#column-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
 
 
@@ -1074,6 +1179,7 @@ async function init() {
     window.addEventListener('focus', () => checkVersion(false));
     try {
         await loadConfig();
+        renderTable(); // [Ver 5.5] 저장된 열 순서로 헤더 먼저 반영
         await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true)]);
         if(savedDates.length > 0) {
             updateSavedDatesFromCheckboxes(); 
