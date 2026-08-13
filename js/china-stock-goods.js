@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.5 (표 열 순서 변경 + 재고로그 필드 열 추가)
+// 중국제작 미발계산기 Ver 5.6 (위치확인 열: 앱 위치지정 실시간 표시/누락 확인)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -412,6 +412,21 @@ function loadInboundHistory() {
     });
 }
 
+// [Ver 5.6] 앱(스캐너)이 지정한 위치 실시간 구독 → '위치확인' 열용 (상품코드 → 위치)
+let locationAssignMap = {};
+function loadLocationHistory() {
+    const q = query(collection(db, 'ChinaStockGoods_LocationHistory'));
+    onSnapshot(q, (snapshot) => {
+        locationAssignMap = {};
+        snapshot.forEach((d) => {
+            const data = d.data();
+            const code = (data.barcode || d.id || '').toString().trim();
+            if (code) locationAssignMap[code] = { location: data.location || '', at: data.at };
+        });
+        if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
+    });
+}
+
 async function syncOrderData(silent = false) {
     if (!csvUrlOrder && !csvUrlBuy) return;
     if(!silent) showLoading('🔄 오더리스트 동기화 중...');
@@ -614,6 +629,15 @@ async function clearAllData() {
             await b2.commit();
         }
 
+        // [Ver 5.6] 앱 위치지정 이력도 초기화
+        const locSnap = await getDocs(collection(db, 'ChinaStockGoods_LocationHistory'));
+        if (locSnap.size > 0) {
+            const b3 = writeBatch(db);
+            locSnap.forEach(d => b3.delete(d.ref));
+            await b3.commit();
+        }
+        locationAssignMap = {};
+
         orderDataOriginal = [];
         orderDataBuy = [];
         stockLogData = {};
@@ -811,7 +835,8 @@ const BUILTIN_COLS = {
     confirmed: { label:'입고확인', edit:'confirmed', width:'70px' },
     shortage:  { label:'부족수량', edit:'shortage', width:'70px' },
     directShip:{ label:'직진배송', edit:'directShip', width:'75px' },
-    memo:      { label:'비고', edit:'memo' }
+    memo:      { label:'비고', edit:'memo' },
+    locCheck:  { label:'위치확인', width:'110px' }   // [Ver 5.6] 앱이 지정한 위치 / 미지정 표시
 };
 let columnConfig = null; // null = 기본 순서, 아니면 열 key 배열
 function getColumns() { return (Array.isArray(columnConfig) && columnConfig.length) ? columnConfig : DEFAULT_COLUMNS; }
@@ -822,6 +847,10 @@ function colLabel(key) {
 }
 function colValue(key, row, idx) {
     if (key === 'no') return idx + 1;
+    if (key === 'locCheck') { // [Ver 5.6] 앱 지정 위치 (없으면 미지정)
+        const a = locationAssignMap[row.code];
+        return (a && a.location) ? a.location : '<span style="color:#d32f2f; font-weight:bold;">⚠️ 미지정</span>';
+    }
     if (BUILTIN_COLS[key]) return (row[key] !== undefined && row[key] !== null) ? row[key] : '';
     if (key.startsWith('log:')) { const log = stockLogData[row.code] || {}; const v = log[key.slice(4)]; return (v !== undefined && v !== null) ? v : ''; }
     return '';
@@ -946,7 +975,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.5';
+const WEB_VERSION = '5.6';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1173,6 +1202,7 @@ function setupEventListeners() {
 async function init() {
     setupEventListeners();
     loadInboundHistory();
+    loadLocationHistory(); // [Ver 5.6] 앱 위치지정 실시간 구독
     // [Ver 3.3] 버전 체크: 로드 시 1회(앱 최신버전 게시 포함) + 10분 간격 + 창 복귀 시
     checkVersion(true);
     setInterval(() => checkVersion(false), 10 * 60 * 1000);

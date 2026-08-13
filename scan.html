@@ -144,13 +144,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=5.5"></script>
+    <script src="js/location-map.js?v=5.6"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '5.5'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '5.6'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -431,22 +431,38 @@
 
         async function sendLocation() {
             if (!locationQueue.length || sending) return;
-            if (!gsUrl) { showAlert('구글 스크립트 URL이 설정되지 않았습니다.\n(설정에서 입력하거나 설정 QR을 스캔하세요)'); return; }
             sending = true; updateSendBtn('전송 중...');
-            const payload = locationQueue.map(it => ({ barcode: it.barcode, location: it.location }));
+            const items = [...locationQueue];
+            // [Ver 5.6] Firebase에 위치지정 기록 (웹 미발계산기 '위치확인' 열용) - 상품코드별 최신 위치
+            let fbOk = false;
             try {
-                let ok = false;
-                try {
-                    const res = await fetch(gsUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ data: payload }) });
-                    ok = res.ok;
-                } catch (corsErr) {
-                    // CORS로 응답을 못 읽는 경우: no-cors로 재전송 (전송은 되지만 응답 확인 불가)
-                    await fetch(gsUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ data: payload }) });
-                    ok = true;
+                for (let i = 0; i < items.length; i += 400) {
+                    const batch = writeBatch(db);
+                    items.slice(i, i + 400).forEach(it => batch.set(doc(db, 'ChinaStockGoods_LocationHistory', it.barcode), {
+                        barcode: it.barcode, location: it.location, sub: it.sub || '', at: serverTimestamp(), worker: 'Scanner_Web'
+                    }));
+                    await batch.commit();
                 }
-                if (ok) { locationQueue = []; fixedLocation = null; saveQueues(); renderQueue(); renderLocBanner(); speak('전송 완료'); toast('✅ 위치 전송 완료'); }
-                else showAlert('전송 실패 (서버 응답 오류)');
-            } catch (e) { showAlert('네트워크 오류'); }
+                fbOk = true;
+            } catch (e) { console.error('위치 Firebase 기록 실패:', e); }
+            // 구글 스크립트 전송(설정된 경우만) - ERP 반영용
+            let gsOk = true;
+            if (gsUrl) {
+                const payload = items.map(it => ({ barcode: it.barcode, location: it.location }));
+                try {
+                    try {
+                        const res = await fetch(gsUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ data: payload }) });
+                        gsOk = res.ok;
+                    } catch (corsErr) {
+                        await fetch(gsUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ data: payload }) });
+                        gsOk = true;
+                    }
+                } catch (e) { gsOk = false; }
+            }
+            if (fbOk || gsOk) {
+                locationQueue = []; fixedLocation = null; saveQueues(); renderQueue(); renderLocBanner();
+                speak('전송 완료'); toast('✅ 위치 전송 완료');
+            } else { showAlert('전송 실패\n(네트워크 확인)'); }
             sending = false; updateSendBtn();
         }
 
