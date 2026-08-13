@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.0 (앱 설치 안내 버튼 제거 - 웹 스캐너 전용)
+// 중국제작 미발계산기 Ver 6.1 (위치 이동 내역 조회 - 당일/기존재고 구분)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -136,6 +136,45 @@ function closeAllMenus() {
         popup.style.display = 'none';
         onDatePopupClosed(); // [Ver 3.1] 팝업이 닫히는 시점에 변경된 선택을 한 번만 적용
     }
+}
+
+// [Ver 6.1] 위치 이동 내역 조회 — 앱(웹 스캐너)이 지정한 상품별 최신 위치를 당일/기존 구분과 함께 표시
+let lmFilter = 'all'; // all | today | existing
+function openLocMoveModal() {
+    closeAllMenus();
+    lmFilter = 'all'; setLmFilterUI();
+    const s = document.getElementById('lm-search'); if (s) s.value = '';
+    renderLocMoveTable();
+    document.getElementById('locmove-modal').style.display = 'flex';
+}
+function closeLocMoveModal() { document.getElementById('locmove-modal').style.display = 'none'; }
+function setLmFilterUI() {
+    document.querySelectorAll('.lm-filter').forEach(b => {
+        const on = b.dataset.f === lmFilter;
+        b.style.background = on ? '#1976d2' : '#fff';
+        b.style.color = on ? '#fff' : '#333';
+    });
+}
+function lmAtMs(at) { try { return at && at.toDate ? at.toDate().getTime() : 0; } catch (e) { return 0; } }
+function lmFmtAt(at) {
+    try {
+        const d = at && at.toDate ? at.toDate() : null;
+        if (!d) return '';
+        const p = n => String(n).padStart(2, '0');
+        return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    } catch (e) { return ''; }
+}
+function renderLocMoveTable() {
+    const tb = document.getElementById('lm-tbody'); if (!tb) return;
+    const kw = (document.getElementById('lm-search')?.value || '').trim().toUpperCase();
+    let rows = Object.entries(locationAssignMap).map(([code, v]) => ({ code, location: v.location || '', sub: v.sub || '', at: v.at }));
+    if (lmFilter !== 'all') rows = rows.filter(r => r.sub === lmFilter);
+    if (kw) rows = rows.filter(r => r.code.toUpperCase().includes(kw) || r.location.toUpperCase().includes(kw));
+    rows.sort((a, b) => lmAtMs(b.at) - lmAtMs(a.at)); // 최신순
+    const cEl = document.getElementById('lm-count'); if (cEl) cEl.textContent = `총 ${rows.length}건`;
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="4" style="padding:24px; color:#888;">내역 없음</td></tr>'; return; }
+    const subLabel = s => s === 'today' ? '<span style="color:#e65100; font-weight:bold;">당일입고</span>' : s === 'existing' ? '<span style="color:#1976d2; font-weight:bold;">기존재고</span>' : '<span style="color:#999;">-</span>';
+    tb.innerHTML = rows.map(r => `<tr style="border-bottom:1px solid #eee;"><td style="padding:7px 6px; font-weight:bold;">${r.code}</td><td style="padding:7px 6px;">${r.location || '<span style=\'color:#c62828;\'>미지정</span>'}</td><td style="padding:7px 6px;">${subLabel(r.sub)}</td><td style="padding:7px 6px; color:#888;">${lmFmtAt(r.at)}</td></tr>`).join('');
 }
 
 function openSheetSettingsModal() {
@@ -422,9 +461,10 @@ function loadLocationHistory() {
         snapshot.forEach((d) => {
             const data = d.data();
             const code = (data.barcode || d.id || '').toString().trim();
-            if (code) locationAssignMap[code] = { location: data.location || '', at: data.at };
+            if (code) locationAssignMap[code] = { location: data.location || '', at: data.at, sub: data.sub || '', worker: data.worker || '' };
         });
         if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
+        if (document.getElementById('locmove-modal')?.style.display === 'flex') renderLocMoveTable(); // 위치 이동 내역 실시간 갱신
     });
 }
 
@@ -1012,7 +1052,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.0';
+const WEB_VERSION = '6.1';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1216,6 +1256,14 @@ function setupEventListeners() {
     document.getElementById('btn-column-add')?.addEventListener('click', () => addColumnFromSelect());
     document.getElementById('column-modal')?.addEventListener('click', (e) => { if (e.target.id === 'column-modal') closeColumnModal(); });
     document.querySelector('#column-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+
+    // [Ver 6.1] 위치 이동 내역 모달
+    document.getElementById('btn-open-locmove')?.addEventListener('click', () => openLocMoveModal());
+    document.getElementById('btn-locmove-close')?.addEventListener('click', () => closeLocMoveModal());
+    document.getElementById('locmove-modal')?.addEventListener('click', (e) => { if (e.target.id === 'locmove-modal') closeLocMoveModal(); });
+    document.querySelector('#locmove-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
+    document.querySelectorAll('.lm-filter').forEach(b => b.addEventListener('click', () => { lmFilter = b.dataset.f; setLmFilterUI(); renderLocMoveTable(); }));
+    document.getElementById('lm-search')?.addEventListener('input', () => renderLocMoveTable());
 
 
 
