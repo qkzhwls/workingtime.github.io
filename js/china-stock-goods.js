@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.6 (위치확인 열: 앱 위치지정 실시간 표시/누락 확인)
+// 중국제작 미발계산기 Ver 5.7 (위치값 다운로드: 상품코드+옵션추가항목1)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -975,7 +975,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.6';
+const WEB_VERSION = '5.7';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1077,6 +1077,24 @@ function setupEventListeners() {
         const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
         const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
         await downloadToDesktop('미발확인파일.xls', blob);
+    });
+
+    // 10-3. #btn-loc-download (위치값다운로드: 상품코드 + 위치확인 → 헤더 '옵션추가항목1', 진짜 .xls)
+    //  - 앱(웹 스캐너)에서 지정된 위치만 포함. 이지어드민 옵션추가항목1 일괄 업로드용
+    document.getElementById('btn-loc-download')?.addEventListener('click', async () => {
+        if (!filteredData.length) return;
+        const aoa = [['상품코드', '옵션추가항목1']];
+        filteredData.forEach(r => {
+            const a = locationAssignMap[r.code];
+            if (a && a.location) aoa.push([r.code, a.location]);
+        });
+        if (aoa.length === 1) { alert('위치가 지정된 상품이 없습니다.\n(위치 모드에서 위치를 지정한 뒤 이용하세요)'); return; }
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
+        const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
+        const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
+        await downloadToDesktop('위치값.xls', blob);
     });
 
     // 11. #search-input (검색)
