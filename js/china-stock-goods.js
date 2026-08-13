@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.8 (위치 매핑 Firebase화 - 하드코딩 제거, 파일 업로드로 변경)
+// 중국제작 미발계산기 Ver 5.9 (헤더 정리: 작업메뉴=다운로드 / 환경설정 분리)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -130,6 +130,7 @@ mibalFn = compileMibalFormula(mibalFormula);
 // ---------------------------------------------------------
 function closeAllMenus() {
     const menu = document.getElementById('main-tools-menu'); if (menu) menu.style.display = 'none';
+    const dl = document.getElementById('download-menu'); if (dl) dl.style.display = 'none'; // [Ver 5.9] 다운로드 드롭다운
     const popup = document.getElementById('date-dropdown-popup');
     if (popup && popup.style.display === 'block') {
         popup.style.display = 'none';
@@ -1011,7 +1012,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.8';
+const WEB_VERSION = '5.9';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1066,15 +1067,25 @@ async function loadStockLogFromFirebase() { const snap = await getDocs(collectio
 // 이벤트 바인딩 (체크리스트 기반 완전 복원)
 // ---------------------------------------------------------
 function setupEventListeners() {
-    // 1. #btn-toggle-menu (작업 메뉴 토글)
-    document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => { 
-        e.stopPropagation(); 
-        const m = document.getElementById('main-tools-menu'); 
-        m.style.display = m.style.display === 'block' ? 'none' : 'block'; 
+    // 1. #btn-toggle-menu (환경설정 토글)
+    document.getElementById('btn-toggle-menu')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const dl = document.getElementById('download-menu'); if (dl) dl.style.display = 'none';
+        const m = document.getElementById('main-tools-menu');
+        m.style.display = m.style.display === 'block' ? 'none' : 'block';
     });
 
     // 2. #main-tools-menu (메뉴 내부 클릭 전파 방지)
     document.getElementById('main-tools-menu')?.addEventListener('click', (e) => e.stopPropagation());
+
+    // 1-2. [Ver 5.9] #btn-toggle-download (작업 메뉴 = 다운로드 드롭다운)
+    document.getElementById('btn-toggle-download')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById('main-tools-menu'); if (menu) menu.style.display = 'none';
+        const m = document.getElementById('download-menu');
+        m.style.display = m.style.display === 'block' ? 'none' : 'block';
+    });
+    document.getElementById('download-menu')?.addEventListener('click', (e) => e.stopPropagation());
 
     // 3. document click (메뉴 닫기)
     document.addEventListener('click', () => closeAllMenus());
