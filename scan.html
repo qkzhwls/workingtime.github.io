@@ -144,13 +144,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=5.7"></script>
+    <script src="js/location-map.js?v=5.8"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '5.7'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '5.8'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -171,6 +171,16 @@
         const serverLabel = serverCfg ? (serverCfg.label || serverCfg.projectId) : (firebaseConfig.projectId + ' (기본)');
         const app = initializeApp(activeCfg, 'scanApp');
         const db = getFirestore(app);
+
+        // [Ver 5.8] 위치 매핑을 Firebase(LOCATION_MAP)에서 로드 - 하드코딩 대신 (없으면 location-map.js 기본값)
+        let locMapOverride = null;
+        async function loadLocationMap() {
+            try {
+                const snap = await getDoc(doc(db, 'ChinaStockGoods', 'LOCATION_MAP'));
+                if (snap.exists() && snap.data().map && Object.keys(snap.data().map).length) locMapOverride = snap.data().map;
+            } catch (e) {}
+        }
+        function getLoc(key) { return locMapOverride ? locMapOverride[key] : (typeof barcodeMap !== 'undefined' ? barcodeMap[key] : undefined); }
 
         // ---------------- 상태 ----------------
         let mode = localStorage.getItem('scanMode') || 'in';
@@ -385,8 +395,9 @@
         // ---------------- 위치 모드 ----------------
         async function processLocation(code) {
             const key = code.toUpperCase();
-            if (barcodeMap[key]) {
-                fixedLocation = barcodeMap[key];
+            const mapped = getLoc(key);
+            if (mapped) {
+                fixedLocation = mapped;
                 renderLocBanner(); speak('위치 변경'); resumeScan(); return;
             }
             if (!fixedLocation) { speak('위치를 먼저 찍으세요'); toast('위치 바코드를 먼저 스캔하세요'); resumeScan(); return; }
@@ -608,6 +619,7 @@
         };
 
         // ---------------- 초기화 ----------------
+        loadLocationMap(); // [Ver 5.8] 위치 매핑 로드
         buildNumpad();
         $('status-line').textContent = `v${SCAN_VERSION} · 서버: ${serverLabel}`;
         setLocSubMode(locSubMode); // [Ver 4.1] 저장된 세부 작업 복원

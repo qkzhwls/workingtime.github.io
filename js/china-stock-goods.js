@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.7 (위치값 다운로드: 상품코드+옵션추가항목1)
+// 중국제작 미발계산기 Ver 5.8 (위치 매핑 Firebase화 - 하드코딩 제거, 파일 업로드로 변경)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -558,6 +558,42 @@ function handleStockLogUpload(e) {
     reader.readAsText(file, 'UTF-8');
 }
 
+// [Ver 5.8] 위치 매핑 업로드 → Firebase(LOCATION_MAP) 저장 (하드코딩 대체, 코딩 없이 변경)
+//  - 파일: 상품코드 열 + 위치 열(로케이션/옵션/옵션추가항목1/위치 등) → {상품코드: 위치}
+async function handleLocationMapUpload(e) {
+    const file = e.target.files[0]; if (!file) return;
+    showLoading('📍 위치 매핑 처리 중...');
+    try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        let hi = -1, headers = [];
+        for (let i = 0; i < Math.min(20, rows.length); i++) {
+            const cl = rows[i].map(h => cleanKey(h));
+            if (cl.includes('상품코드')) { hi = i; headers = cl; break; }
+        }
+        if (hi < 0) { hideLoading(); alert('상품코드 열을 찾지 못했습니다.'); e.target.value = ''; return; }
+        const codeIdx = headers.indexOf('상품코드');
+        // 위치 열: 알려진 이름 우선, 없으면 상품코드가 아닌 첫 열
+        const known = ['로케이션','위치','옵션추가항목1','옵션'];
+        let locIdx = headers.findIndex(h => known.includes(h) && headers.indexOf(h) !== codeIdx);
+        if (locIdx < 0) locIdx = headers.findIndex((h,i) => i !== codeIdx && h);
+        if (locIdx < 0) { hideLoading(); alert('위치 열을 찾지 못했습니다.'); e.target.value = ''; return; }
+        const map = {};
+        for (let i = hi + 1; i < rows.length; i++) {
+            const code = (rows[i][codeIdx] || '').toString().trim().toUpperCase();
+            const loc = (rows[i][locIdx] || '').toString().trim();
+            if (code) map[code] = loc;
+        }
+        const cnt = Object.keys(map).length;
+        if (!cnt) { hideLoading(); alert('유효한 행이 없습니다.'); e.target.value = ''; return; }
+        await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_MAP'), { map, count: cnt, updatedAt: new Date() });
+        hideLoading();
+        showToast(`✅ 위치 매핑 저장 완료 (${cnt}건) — 스캐너에 즉시 반영`);
+    } catch (err) { hideLoading(); alert('위치 매핑 처리 실패: ' + err.message); }
+    e.target.value = '';
+}
+
 // [Ver 2.8] 스캔DB 동기화 공용 코어
 //  - 도착수량은 (도착예정 - 이미 입고된 수량)으로 차감해 업로드
 //    → 자동 동기화가 여러 번 돌아도 앱에서 처리한 입고 차감분이 유지됨
@@ -975,7 +1011,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.7';
+const WEB_VERSION = '5.8';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1049,6 +1085,8 @@ function setupEventListeners() {
 
     // 7. #upload-stock-log (미발재고로그 업로드)
     document.getElementById('upload-stock-log')?.addEventListener('change', (e) => handleStockLogUpload(e));
+    // 7-2. #upload-location-map (위치 매핑 업로드 - Ver 5.8)
+    document.getElementById('upload-location-map')?.addEventListener('change', (e) => handleLocationMapUpload(e));
 
 
     // 9. #btn-date-clear (전체 초기화 - 입고이력/전체데이터 초기화 통합, Ver 4.4)
