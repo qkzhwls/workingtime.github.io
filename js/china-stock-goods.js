@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 5.9 (헤더 정리: 작업메뉴=다운로드 / 환경설정 분리)
+// 중국제작 미발계산기 Ver 6.0 (앱 설치 안내 버튼 제거 - 웹 스캐너 전용)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1012,7 +1012,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '5.9';
+const WEB_VERSION = '6.0';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1244,7 +1244,6 @@ function setupEventListeners() {
 
     // 22. 스캐너 앱 연동 (입고앱실행 / 설치 안내)
     document.getElementById('btn-open-app')?.addEventListener('click', openInScannerApp);
-    document.getElementById('btn-install-guide')?.addEventListener('click', () => { closeAllMenus(); window.open(INSTALL_PAGE, '_blank'); });
 
     // ========= 바인딩 체크리스트 =========
     // 1. #btn-toggle-menu [OK]
