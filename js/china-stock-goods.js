@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.5 (위치 다중값 append + 기존재고 옵션추가항목1 시드 업로드)
+// 중국제작 미발계산기 Ver 6.6 (업로드 위치 열 선택 우선순위 수정 - 옵션추가항목1 우선)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -25,6 +25,12 @@ let saveTimeout = null;
 // 유틸리티
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+// [Ver 6.6] 위치 열 선택: known 배열의 '우선순위 순서'대로 찾음 (파일 열 순서 아님).
+//   예) 옵션추가항목1을 옵션보다 우선. 못 찾으면 상품코드가 아닌 첫 비어있지 않은 열.
+function pickLocationColumn(headers, codeIdx, known) {
+    for (const name of known) { const idx = headers.indexOf(name); if (idx >= 0 && idx !== codeIdx) return idx; }
+    return headers.findIndex((h, i) => i !== codeIdx && h);
+}
 const hasValue = (v) => v !== '' && v !== undefined && v !== null && v !== 0 && v !== '0';
 
 function getProductName(row) { return row['상품명'] || row['공급처상품명'] || ''; }
@@ -658,9 +664,7 @@ async function handleLocationMapUpload(e) {
         if (hi < 0) { hideLoading(); alert('상품코드 열을 찾지 못했습니다.'); e.target.value = ''; return; }
         const codeIdx = headers.indexOf('상품코드');
         // 위치 열: 알려진 이름 우선, 없으면 상품코드가 아닌 첫 열
-        const known = ['로케이션','위치','옵션추가항목1','옵션'];
-        let locIdx = headers.findIndex(h => known.includes(h) && headers.indexOf(h) !== codeIdx);
-        if (locIdx < 0) locIdx = headers.findIndex((h,i) => i !== codeIdx && h);
+        const locIdx = pickLocationColumn(headers, codeIdx, ['로케이션','위치','옵션추가항목1','옵션']);
         if (locIdx < 0) { hideLoading(); alert('위치 열을 찾지 못했습니다.'); e.target.value = ''; return; }
         const map = {};
         for (let i = hi + 1; i < rows.length; i++) {
@@ -697,9 +701,7 @@ async function handleExistingLocUpload(e) {
         }
         if (hi < 0) { hideLoading(); alert('상품코드 열을 찾지 못했습니다.'); e.target.value = ''; return; }
         const codeIdx = headers.indexOf('상품코드');
-        const known = ['옵션추가항목1', '로케이션', '위치', '옵션'];
-        let locIdx = headers.findIndex(h => known.includes(h) && headers.indexOf(h) !== codeIdx);
-        if (locIdx < 0) locIdx = headers.findIndex((h, i) => i !== codeIdx && h);
+        const locIdx = pickLocationColumn(headers, codeIdx, ['옵션추가항목1', '로케이션', '위치', '옵션']);
         if (locIdx < 0) { hideLoading(); alert('옵션추가항목1(위치) 열을 찾지 못했습니다.'); e.target.value = ''; return; }
         const entries = [];
         for (let i = hi + 1; i < rows.length; i++) {
@@ -1138,7 +1140,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.5';
+const WEB_VERSION = '6.6';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
