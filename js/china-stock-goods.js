@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 7.3 (새로 추가된 위치 초록 강조 + 기존재고는 새 자리 추가 상품만 표시)
+// 중국제작 미발계산기 Ver 7.4 (전체 초기화 모드별 분리: 미발 ↔ 위치 각각만 초기화)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -796,35 +796,24 @@ async function runScanDBSync() {
     if (scanDbSyncPending) { scanDbSyncPending = false; scheduleScanDBSync(); }
 }
 
+// [Ver 7.4] 컬렉션 전체 삭제 (배치 한도 500 회피 위해 400씩 청크)
+async function deleteAllDocs(collName) {
+    const snap = await getDocs(collection(db, collName));
+    for (let i = 0; i < snap.docs.length; i += 400) {
+        const b = writeBatch(db);
+        snap.docs.slice(i, i + 400).forEach(d => b.delete(d.ref));
+        await b.commit();
+    }
+}
+// [Ver 7.4] 전체 초기화 — 현재 모드의 데이터만 초기화 (미발 ↔ 위치 서로 영향 없음)
 async function clearAllData() {
-    if (!confirm("모든 데이터를 초기화하시겠습니까?\n(수동편집, 미발재고로그, 앱 입고이력이 모두 삭제됩니다.)")) return;
-    showLoading('🗑️ 전체 데이터 초기화 중...');
+    if (viewMode === 'location') { await clearLocationData(); return; }
+    if (!confirm("미발계산기 데이터를 초기화할까요?\n(수동편집·미발재고로그·앱 입고이력 삭제 / 위치 데이터는 유지)")) return;
+    showLoading('🗑️ 미발계산기 초기화 중...');
     try {
         await deleteDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'));
-        
-        const stockSnap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog'));
-        if (stockSnap.size > 0) {
-            const b1 = writeBatch(db);
-            stockSnap.forEach(d => b1.delete(d.ref));
-            await b1.commit();
-        }
-        
-        const inboundSnap = await getDocs(collection(db, 'ChinaStockGoods_InboundHistory'));
-        if (inboundSnap.size > 0) {
-            const b2 = writeBatch(db);
-            inboundSnap.forEach(d => b2.delete(d.ref));
-            await b2.commit();
-        }
-
-        // [Ver 5.6] 앱 위치지정 이력도 초기화
-        const locSnap = await getDocs(collection(db, 'ChinaStockGoods_LocationHistory'));
-        if (locSnap.size > 0) {
-            const b3 = writeBatch(db);
-            locSnap.forEach(d => b3.delete(d.ref));
-            await b3.commit();
-        }
-        locationAssignMap = {};
-
+        await deleteAllDocs(CHINA_COLLECTION + '_StockLog');
+        await deleteAllDocs('ChinaStockGoods_InboundHistory');
         orderDataOriginal = [];
         orderDataBuy = [];
         stockLogData = {};
@@ -833,7 +822,6 @@ async function clearAllData() {
         tableData = [];
         filteredData = [];
         savedDates = [];
-        
         updateSavedDatesFromCheckboxes();
         renderSelectedTags();
         renderTable();
@@ -841,9 +829,24 @@ async function clearAllData() {
         document.getElementById('date-checklist-container').innerHTML = '';
         await saveConfig(); // 선택 출고일 비운 상태 저장
         await syncOrderData(true); // [Ver 4.4] 초기화 후 출고일 목록 다시 로드 (빈 화면 방지)
-
         hideLoading();
-        showToast('✅ 전체 초기화 완료');
+        showToast('✅ 미발계산기 초기화 완료 (위치 데이터는 유지)');
+    } catch (e) {
+        hideLoading();
+        alert('초기화 실패: ' + e.message);
+    }
+}
+// [Ver 7.4] 위치 데이터만 초기화 (당일·기존재고 위치 지정 전체 / 미발 데이터는 유지)
+async function clearLocationData() {
+    if (!confirm("위치 데이터를 초기화할까요?\n(당일·기존재고 위치 지정 전체 삭제 / 미발 데이터는 유지)")) return;
+    showLoading('🗑️ 위치 데이터 초기화 중...');
+    try {
+        await deleteAllDocs('ChinaStockGoods_LocationHistory');
+        locationAssignMap = {};
+        if (filteredData.length > 0) renderTable(); // 위치확인 열 갱신
+        renderLocMoveTable(); // 기존재고 목록 갱신
+        hideLoading();
+        showToast('✅ 위치 데이터 초기화 완료 (미발 데이터는 유지)');
     } catch (e) {
         hideLoading();
         alert('초기화 실패: ' + e.message);
@@ -1040,6 +1043,8 @@ function applyViewMode() {
     const title = document.getElementById('app-title');
     if (label) label.textContent = viewMode === 'location' ? '📍 중국제작 위치지정모드' : '🏭 중국제작 미발계산기';
     if (title) title.style.color = viewMode === 'location' ? '#6a1b9a' : '#333';
+    const clr = document.getElementById('btn-date-clear'); // [Ver 7.4] 모드별 초기화 라벨
+    if (clr) clr.textContent = viewMode === 'location' ? '🗑️ 위치 초기화' : '🗑️ 미발 초기화';
     if (viewMode === 'location') applyLocSub(); else renderTable();
 }
 function applyLocSub() {
@@ -1203,7 +1208,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '7.3';
+const WEB_VERSION = '7.4';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
