@@ -58,7 +58,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 6.2</div>
+            <div class="version-badge">🚀 Ver 6.3</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -282,8 +282,11 @@
                     <tbody id="lm-tbody"></tbody>
                 </table>
             </div>
-            <div style="margin-top:16px; display:flex; justify-content:space-between; align-items:center;">
-                <button id="btn-locmove-download" style="padding:8px 16px; background:#00695c; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
+            <div style="margin-top:16px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button id="btn-locmove-download" style="padding:8px 16px; background:#00695c; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
+                    <button id="btn-locmove-reset" style="padding:8px 14px; background:#fff; color:#c62828; border:1px solid #c62828; border-radius:4px; cursor:pointer; font-weight:bold;">🗑️ 초기화</button>
+                </div>
                 <button id="btn-locmove-close" style="padding:8px 18px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-weight:bold;">닫기</button>
             </div>
         </div>
@@ -292,6 +295,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=6.2"></script>
+    <script type="module" src="js/china-stock-goods.js?v=6.3"></script>
 </body>
 </html>

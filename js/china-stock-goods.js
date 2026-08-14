@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.2 (위치 이동 내역 - 기존재고 전용 + 옵션추가항목1 다운로드)
+// 중국제작 미발계산기 Ver 6.3 (위치 이동 내역 - 기존재고 초기화 버튼 추가)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -184,6 +184,33 @@ async function downloadLocMove() {
     const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
     await downloadToDesktop('기존재고_위치값.xls', blob);
+}
+// [Ver 6.3] 기존재고 이동 내역만 초기화 (당일입고 위치확인은 유지 — Firebase 누적 방지)
+async function resetLocMove() {
+    const cnt = Object.values(locationAssignMap).filter(v => (v.sub || '') === 'existing').length;
+    if (!cnt) { alert('초기화할 기존재고 내역이 없습니다.'); return; }
+    if (!confirm(`기존재고 위치 이동 내역 ${cnt}건을 삭제할까요?\n(당일입고 위치확인은 유지됩니다. 되돌릴 수 없습니다.)`)) return;
+    showLoading('🗑️ 기존재고 내역 삭제 중...');
+    try {
+        const snap = await getDocs(collection(db, 'ChinaStockGoods_LocationHistory'));
+        const targets = [];
+        snap.forEach(d => { if ((d.data().sub || '') === 'existing') targets.push(d.ref); });
+        for (let i = 0; i < targets.length; i += 400) {
+            const b = writeBatch(db);
+            targets.slice(i, i + 400).forEach(ref => b.delete(ref));
+            await b.commit();
+        }
+        // 로컬 즉시 반영 (onSnapshot도 곧 갱신)
+        Object.keys(locationAssignMap).forEach(k => { if ((locationAssignMap[k].sub || '') === 'existing') delete locationAssignMap[k]; });
+        renderLocMoveTable();
+        if (filteredData.length > 0) renderTable();
+        hideLoading();
+        showToast('✅ 기존재고 내역 초기화 완료');
+    } catch (e) {
+        hideLoading();
+        console.error('기존재고 내역 삭제 실패:', e);
+        alert('삭제 중 오류가 발생했습니다. 콘솔을 확인하세요.');
+    }
 }
 
 function openSheetSettingsModal() {
@@ -1061,7 +1088,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.2';
+const WEB_VERSION = '6.3';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1270,6 +1297,7 @@ function setupEventListeners() {
     document.getElementById('btn-open-locmove')?.addEventListener('click', () => openLocMoveModal());
     document.getElementById('btn-locmove-close')?.addEventListener('click', () => closeLocMoveModal());
     document.getElementById('btn-locmove-download')?.addEventListener('click', () => downloadLocMove());
+    document.getElementById('btn-locmove-reset')?.addEventListener('click', () => resetLocMove());
     document.getElementById('locmove-modal')?.addEventListener('click', (e) => { if (e.target.id === 'locmove-modal') closeLocMoveModal(); });
     document.querySelector('#locmove-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
     document.getElementById('lm-search')?.addEventListener('input', () => renderLocMoveTable());
