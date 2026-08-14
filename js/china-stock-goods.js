@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.4 (★ 구역 적재량 설정 적용 - 하드코딩 90 제거)
+// 중국제작 미발계산기 Ver 6.5 (위치 다중값 append + 기존재고 옵션추가항목1 시드 업로드)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -677,6 +677,50 @@ async function handleLocationMapUpload(e) {
     e.target.value = '';
 }
 
+// [Ver 6.5] 기존재고 옵션추가항목1(현재 위치값) 시드 업로드 → LocationHistory(sub=existing)에 세팅
+//  - 파일: 상품코드 + 옵션추가항목1(콤마 다중 위치) → 스캐너가 이 값 뒤에 새 자리를 append 함
+//  - 해당 상품의 기존재고 위치값을 파일 값으로 '덮어쓰기'(ERP 기준값 재세팅). 스캔 전에 먼저 올리세요.
+function normLocList(s) {
+    return (s || '').toString().split(',').map(x => x.trim()).filter(Boolean).join(',');
+}
+async function handleExistingLocUpload(e) {
+    const file = e.target.files[0]; if (!file) return;
+    showLoading('📥 기존재고 위치값 처리 중...');
+    try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        let hi = -1, headers = [];
+        for (let i = 0; i < Math.min(20, rows.length); i++) {
+            const cl = rows[i].map(h => cleanKey(h));
+            if (cl.includes('상품코드')) { hi = i; headers = cl; break; }
+        }
+        if (hi < 0) { hideLoading(); alert('상품코드 열을 찾지 못했습니다.'); e.target.value = ''; return; }
+        const codeIdx = headers.indexOf('상품코드');
+        const known = ['옵션추가항목1', '로케이션', '위치', '옵션'];
+        let locIdx = headers.findIndex(h => known.includes(h) && headers.indexOf(h) !== codeIdx);
+        if (locIdx < 0) locIdx = headers.findIndex((h, i) => i !== codeIdx && h);
+        if (locIdx < 0) { hideLoading(); alert('옵션추가항목1(위치) 열을 찾지 못했습니다.'); e.target.value = ''; return; }
+        const entries = [];
+        for (let i = hi + 1; i < rows.length; i++) {
+            const code = (rows[i][codeIdx] || '').toString().trim().toUpperCase();
+            const loc = normLocList(rows[i][locIdx]);
+            if (code && loc) entries.push([code, loc]);
+        }
+        if (!entries.length) { hideLoading(); alert('유효한 (상품코드+위치) 행이 없습니다.'); e.target.value = ''; return; }
+        for (let i = 0; i < entries.length; i += 400) {
+            const batch = writeBatch(db);
+            entries.slice(i, i + 400).forEach(([code, loc]) => batch.set(doc(db, 'ChinaStockGoods_LocationHistory', code), {
+                barcode: code, location: loc, sub: 'existing', at: new Date(), worker: 'Seed_Upload'
+            }));
+            await batch.commit();
+        }
+        hideLoading();
+        showToast(`✅ 기존재고 위치값 세팅 완료 (${entries.length}건) — 스캐너가 이 값 뒤에 새 자리를 추가합니다`);
+    } catch (err) { hideLoading(); alert('기존재고 위치값 처리 실패: ' + err.message); }
+    e.target.value = '';
+}
+
 // [Ver 2.8] 스캔DB 동기화 공용 코어
 //  - 도착수량은 (도착예정 - 이미 입고된 수량)으로 차감해 업로드
 //    → 자동 동기화가 여러 번 돌아도 앱에서 처리한 입고 차감분이 유지됨
@@ -1094,7 +1138,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.4';
+const WEB_VERSION = '6.5';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1180,6 +1224,8 @@ function setupEventListeners() {
     document.getElementById('upload-stock-log')?.addEventListener('change', (e) => handleStockLogUpload(e));
     // 7-2. #upload-location-map (위치 매핑 업로드 - Ver 5.8)
     document.getElementById('upload-location-map')?.addEventListener('change', (e) => handleLocationMapUpload(e));
+    // 7-3. #upload-existing-loc (기존재고 옵션추가항목1 시드 업로드 - Ver 6.5)
+    document.getElementById('upload-existing-loc')?.addEventListener('change', (e) => handleExistingLocUpload(e));
 
 
     // 9. #btn-date-clear (전체 초기화 - 입고이력/전체데이터 초기화 통합, Ver 4.4)

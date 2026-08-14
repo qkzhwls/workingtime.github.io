@@ -144,13 +144,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=6.4"></script>
+    <script src="js/location-map.js?v=6.5"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '6.4'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '6.5'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -440,18 +440,43 @@
             sending = false; updateSendBtn();
         }
 
+        // [Ver 6.5] 위치 병합: 기존값(콤마 다중) + 새 위치들 → 중복 제거, 새 자리는 끝에 추가
+        function mergeLocations(existing, additions) {
+            const list = [], seen = new Set();
+            const push = v => { v = (v || '').toString().trim(); if (v && !seen.has(v)) { seen.add(v); list.push(v); } };
+            (existing || '').toString().split(',').forEach(push);
+            (additions || []).forEach(push);
+            return list.join(',');
+        }
         async function sendLocation() {
             if (!locationQueue.length || sending) return;
             sending = true; updateSendBtn('전송 중...');
             const items = [...locationQueue];
-            // [Ver 5.6] Firebase에 위치지정 기록 (웹 미발계산기 '위치확인' 열용) - 상품코드별 최신 위치
+            // [Ver 6.5] 상품별 최신 위치를 '누적(append)'로 기록 — 한 상품이 여러 자리를 가짐(콤마 구분)
+            //   같은 상품을 여러 번 찍으면 스캔 순서대로 이어붙이고, 기존 저장값 뒤에 새 자리를 추가
             let fbOk = false;
             try {
-                for (let i = 0; i < items.length; i += 400) {
+                // 상품별 스캔 위치 모으기 (queue는 최신이 앞 → 시간순으로 뒤집어 순서 보존)
+                const byCode = new Map();
+                [...items].reverse().forEach(it => {
+                    if (!byCode.has(it.barcode)) byCode.set(it.barcode, { sub: it.sub || '', locs: [] });
+                    byCode.get(it.barcode).locs.push(it.location);
+                });
+                const codes = [...byCode.keys()];
+                // 각 상품의 기존 저장값 읽기 (append 기준)
+                const existingMap = {};
+                await Promise.all(codes.map(async c => {
+                    try { const s = await getDoc(doc(db, 'ChinaStockGoods_LocationHistory', c)); existingMap[c] = s.exists() ? (s.data().location || '') : ''; }
+                    catch (e) { existingMap[c] = ''; }
+                }));
+                for (let i = 0; i < codes.length; i += 400) {
                     const batch = writeBatch(db);
-                    items.slice(i, i + 400).forEach(it => batch.set(doc(db, 'ChinaStockGoods_LocationHistory', it.barcode), {
-                        barcode: it.barcode, location: it.location, sub: it.sub || '', at: serverTimestamp(), worker: 'Scanner_Web'
-                    }));
+                    codes.slice(i, i + 400).forEach(c => {
+                        const g = byCode.get(c);
+                        batch.set(doc(db, 'ChinaStockGoods_LocationHistory', c), {
+                            barcode: c, location: mergeLocations(existingMap[c], g.locs), sub: g.sub, at: serverTimestamp(), worker: 'Scanner_Web'
+                        });
+                    });
                     await batch.commit();
                 }
                 fbOk = true;
