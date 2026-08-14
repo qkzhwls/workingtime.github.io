@@ -47,6 +47,14 @@
 
         #toast { visibility: hidden; min-width: 250px; background-color: #333; color: #fff; text-align: center; border-radius: 8px; padding: 12px; position: fixed; z-index: 10001; left: 50%; bottom: 50px; transform: translateX(-50%); opacity: 0; transition: 0.3s; }
         #toast.show { visibility: visible; opacity: 1; }
+
+        /* [Ver 6.8] 보기 모드(미발계산기/위치지정모드) 전환 */
+        #app-title { cursor: pointer; user-select: none; }
+        #app-title:hover { color: #1976d2; }
+        .loc-only { display: none; }
+        body[data-view="location"] .loc-only { display: flex; }
+        .mode-card { border:2px solid #ddd; border-radius:12px; padding:22px 18px; cursor:pointer; text-align:center; transition:.15s; background:#fff; }
+        .mode-card:hover { border-color:#1976d2; box-shadow:0 4px 14px rgba(0,0,0,.12); transform:translateY(-2px); }
     </style>
 </head>
 <body>
@@ -57,8 +65,9 @@
 
     <div class="controls-header">
         <div class="header-left">
-            <h2 style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기</h2>
-            <div class="version-badge">🚀 Ver 6.7</div>
+            <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기 <span style="font-size:13px; color:#999;">▾</span></h2>
+            <div class="version-badge">🚀 Ver 6.8</div>
+            <span id="mode-chip" style="font-size:12px; font-weight:bold; padding:3px 10px; border-radius:12px; background:#ede7f6; color:#5e35b1; white-space:nowrap;">🏭 미발계산기</span>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -114,6 +123,14 @@
         <div class="summary-card highlight"><span class="label">총 SKU</span><span class="value" id="sum-sku">0</span></div>
         <div class="summary-card highlight"><span class="label">총 도착수량</span><span class="value" id="sum-arrival">0</span></div>
         <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span></div>
+    </div>
+
+    <div id="loc-toolbar" class="loc-only" style="gap:8px; align-items:center; flex-wrap:wrap; padding:10px 16px; background:#f3e5f5; border-bottom:1px solid #e1bee7;">
+        <span style="font-weight:bold; color:#6a1b9a; font-size:13px;">📍 위치 작업:</span>
+        <button id="btn-loc-upload2" style="padding:7px 13px; background:#00838f; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">📥 기존재고 업로드</button>
+        <button id="btn-loc-download2" style="padding:7px 13px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
+        <button id="btn-loc-history2" style="padding:7px 13px; background:#00695c; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">📋 위치 이동 내역</button>
+        <span style="font-size:12px; color:#888;">※ 위치 지정은 스캐너([📱 입고앱실행])로, 여기선 확인·업로드·다운로드</span>
     </div>
 
     <div class="list-container">
@@ -296,9 +313,31 @@
         </div>
     </div>
 
+    <!-- [Ver 6.8] 모드 선택 (제목 클릭) -->
+    <div id="mode-select-modal" class="modal-overlay">
+        <div class="modal-content" style="width:440px; max-width:92vw;">
+            <h3 style="margin-top:0; text-align:center;">모드 선택</h3>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:10px;">
+                <div class="mode-card" data-mode="mibal">
+                    <div style="font-size:34px;">🏭</div>
+                    <div style="font-weight:800; margin-top:8px; font-size:15px;">미발계산기</div>
+                    <div style="font-size:12px; color:#888; margin-top:6px; line-height:1.5;">도착·미발·재고·적재량<br>계산 및 파일 다운로드</div>
+                </div>
+                <div class="mode-card" data-mode="location">
+                    <div style="font-size:34px;">📍</div>
+                    <div style="font-weight:800; margin-top:8px; font-size:15px;">위치지정모드</div>
+                    <div style="font-size:12px; color:#888; margin-top:6px; line-height:1.5;">상품별 위치 확인<br>옵션추가항목1 업/다운로드</div>
+                </div>
+            </div>
+            <div style="margin-top:18px; text-align:right;">
+                <button id="btn-mode-close" style="padding:8px 18px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-weight:bold;">닫기</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=6.7"></script>
+    <script type="module" src="js/china-stock-goods.js?v=6.8"></script>
 </body>
 </html>

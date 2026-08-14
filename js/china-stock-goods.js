@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.7 (위치 이동 내역 모달 개선: 헤더 고정 스크롤/상위 N건 + 업로드 버튼 내장)
+// 중국제작 미발계산기 Ver 6.8 (보기 모드 분리: 미발계산기 / 위치지정모드 - 제목 클릭 전환)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1009,6 +1009,28 @@ const BUILTIN_COLS = {
 };
 let columnConfig = null; // null = 기본 순서, 아니면 열 key 배열
 function getColumns() { return (Array.isArray(columnConfig) && columnConfig.length) ? columnConfig : DEFAULT_COLUMNS; }
+// [Ver 6.8] 보기 모드: 미발계산기(mibal) / 위치지정모드(location)
+let viewMode = localStorage.getItem('csgViewMode') || 'mibal';
+const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'locCheck']; // 위치 중심 상품표
+function getActiveColumns() { return viewMode === 'location' ? LOCATION_COLUMNS : getColumns(); }
+function applyViewMode() {
+    document.body.dataset.view = viewMode;
+    const chip = document.getElementById('mode-chip');
+    if (chip) {
+        chip.textContent = viewMode === 'location' ? '📍 위치지정모드' : '🏭 미발계산기';
+        chip.style.background = viewMode === 'location' ? '#e0f2f1' : '#ede7f6';
+        chip.style.color = viewMode === 'location' ? '#00695c' : '#5e35b1';
+    }
+    renderTable();
+}
+function openModeSelect() { document.getElementById('mode-select-modal').style.display = 'flex'; }
+function closeModeSelect() { document.getElementById('mode-select-modal').style.display = 'none'; }
+function setViewMode(m) {
+    viewMode = (m === 'location') ? 'location' : 'mibal';
+    localStorage.setItem('csgViewMode', viewMode);
+    closeModeSelect();
+    applyViewMode();
+}
 function colLabel(key) {
     if (BUILTIN_COLS[key]) return BUILTIN_COLS[key].label;
     if (key.startsWith('log:')) return key.slice(4);
@@ -1040,7 +1062,7 @@ function renderTableHeader(cols) {
     tr.querySelectorAll('.th-sortable').forEach(th => th.addEventListener('click', () => sortTable(th.dataset.sort)));
 }
 function renderTable() {
-    const cols = getColumns();
+    const cols = getActiveColumns();
     renderTableHeader(cols);
     const tbody = document.getElementById('table-body');
     if (!filteredData.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>`; return; }
@@ -1144,7 +1166,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.7';
+const WEB_VERSION = '6.8';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1279,6 +1301,16 @@ function setupEventListeners() {
         const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
         await downloadToDesktop('위치값.xls', blob);
     });
+
+    // [Ver 6.8] 모드 선택 (제목 클릭 → 미발계산기/위치지정모드) + 위치 툴바
+    document.getElementById('app-title')?.addEventListener('click', openModeSelect);
+    document.getElementById('btn-mode-close')?.addEventListener('click', closeModeSelect);
+    document.getElementById('mode-select-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mode-select-modal') closeModeSelect(); });
+    document.querySelectorAll('.mode-card').forEach(c => c.addEventListener('click', () => setViewMode(c.dataset.mode)));
+    document.getElementById('btn-loc-upload2')?.addEventListener('click', () => document.getElementById('upload-existing-loc')?.click());
+    document.getElementById('btn-loc-download2')?.addEventListener('click', () => document.getElementById('btn-loc-download')?.click());
+    document.getElementById('btn-loc-history2')?.addEventListener('click', () => openLocMoveModal());
+    applyViewMode(); // 저장된 모드 초기 적용
 
     // 11. #search-input (검색)
     document.getElementById('search-input')?.addEventListener('input', applySearch);
