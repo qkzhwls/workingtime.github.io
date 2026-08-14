@@ -65,9 +65,8 @@
 
     <div class="controls-header">
         <div class="header-left">
-            <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;">🏭 중국제작 미발계산기 <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 6.8</div>
-            <span id="mode-chip" style="font-size:12px; font-weight:bold; padding:3px 10px; border-radius:12px; background:#ede7f6; color:#5e35b1; white-space:nowrap;">🏭 미발계산기</span>
+            <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
+            <div class="version-badge">🚀 Ver 6.9</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -78,7 +77,6 @@
                     <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a;">📥 파일 다운로드</div>
                     <button id="btn-excel-download" style="display:block; width:100%; text-align:left; padding: 12px 20px; font-size: 13px; cursor: pointer; border:none; border-bottom: 1px solid #eee; font-weight: bold; background:#fff; color:#1976d2;">📥 입고용파일다운로드</button>
                     <button id="btn-mibal-download" style="display:block; width:100%; text-align:left; padding: 12px 20px; font-size: 13px; cursor: pointer; border:none; border-bottom: 1px solid #eee; font-weight: bold; background:#fff; color:#00897b;">📥 미발확인파일다운로드</button>
-                    <button id="btn-loc-download" style="display:block; width:100%; text-align:left; padding: 12px 20px; font-size: 13px; cursor: pointer; border:none; border-bottom: 1px solid #eee; font-weight: bold; background:#fff; color:#5e35b1;">📥 옵션추가항목1 다운로드</button>
                 </div>
             </div>
             <div class="upload-dropdown" style="position: relative; display: inline-block;">
@@ -86,9 +84,6 @@
                 <div class="upload-menu" id="main-tools-menu" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 10001; width: 280px;">
                     <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a;">📊 데이터 소스 관리</div>
                     <label style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold;">📂 미발재고로그 업로드<input type="file" id="upload-stock-log" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
-                    <label style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#5e35b1;">📍 위치매핑 업로드 (스캐너용)<input type="file" id="upload-location-map" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
-                    <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a; border-top:1px solid #ddd;">📍 위치 관리</div>
-                    <div class="menu-item" id="btn-open-locmove" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#00695c;">📋 위치 이동 내역 (기존재고)</div>
                     <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a; border-top:1px solid #ddd;">⚙️ 설정</div>
                     <div class="menu-item" id="btn-open-sheet-settings" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#607d8b;">📎 CSV 시트 링크 설정</div>
                     <div class="menu-item" id="btn-open-mibal-formula" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#e65100;">🧮 미발수량 공식 설정</div>
@@ -128,6 +123,7 @@
     <div id="loc-toolbar" class="loc-only" style="gap:8px; align-items:center; flex-wrap:wrap; padding:10px 16px; background:#f3e5f5; border-bottom:1px solid #e1bee7;">
         <span style="font-weight:bold; color:#6a1b9a; font-size:13px;">📍 위치 작업:</span>
         <button id="btn-loc-upload2" style="padding:7px 13px; background:#00838f; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">📥 기존재고 업로드</button>
+        <label style="padding:7px 13px; background:#7b1fa2; color:#fff; border-radius:5px; cursor:pointer; font-weight:bold;">📍 위치매핑 업로드<input type="file" id="upload-location-map" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
         <button id="btn-loc-download2" style="padding:7px 13px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
         <button id="btn-loc-history2" style="padding:7px 13px; background:#00695c; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">📋 위치 이동 내역</button>
         <span style="font-size:12px; color:#888;">※ 위치 지정은 스캐너([📱 입고앱실행])로, 여기선 확인·업로드·다운로드</span>
@@ -338,6 +334,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=6.8"></script>
+    <script type="module" src="js/china-stock-goods.js?v=6.9"></script>
 </body>
 </html>

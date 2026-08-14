@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.8 (보기 모드 분리: 미발계산기 / 위치지정모드 - 제목 클릭 전환)
+// 중국제작 미발계산기 Ver 6.9 (모드별 위치버튼 정리 + 제목이 모드명으로 변경)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -200,6 +200,19 @@ async function downloadLocMove() {
     const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
     await downloadToDesktop('기존재고_위치값.xls', blob);
+}
+// [Ver 6.9] 당일입고 위치값 다운로드 (현재 표의 상품 + 앱 지정 위치 → 헤더 상품코드/옵션추가항목1, 진짜 .xls)
+async function downloadDayLoc() {
+    if (!filteredData.length) return;
+    const aoa = [['상품코드', '옵션추가항목1']];
+    filteredData.forEach(r => { const a = locationAssignMap[r.code]; if (a && a.location) aoa.push([r.code, a.location]); });
+    if (aoa.length === 1) { alert('위치가 지정된 상품이 없습니다.\n(위치 모드에서 위치를 지정한 뒤 이용하세요)'); return; }
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
+    const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
+    await downloadToDesktop('위치값.xls', blob);
 }
 // [Ver 6.3] 기존재고 이동 내역만 초기화 (당일입고 위치확인은 유지 — Firebase 누적 방지)
 async function resetLocMove() {
@@ -1015,12 +1028,10 @@ const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'locCheck'
 function getActiveColumns() { return viewMode === 'location' ? LOCATION_COLUMNS : getColumns(); }
 function applyViewMode() {
     document.body.dataset.view = viewMode;
-    const chip = document.getElementById('mode-chip');
-    if (chip) {
-        chip.textContent = viewMode === 'location' ? '📍 위치지정모드' : '🏭 미발계산기';
-        chip.style.background = viewMode === 'location' ? '#e0f2f1' : '#ede7f6';
-        chip.style.color = viewMode === 'location' ? '#00695c' : '#5e35b1';
-    }
+    const label = document.getElementById('app-title-label');
+    const title = document.getElementById('app-title');
+    if (label) label.textContent = viewMode === 'location' ? '📍 중국제작 위치지정모드' : '🏭 중국제작 미발계산기';
+    if (title) title.style.color = viewMode === 'location' ? '#6a1b9a' : '#333';
     renderTable();
 }
 function openModeSelect() { document.getElementById('mode-select-modal').style.display = 'flex'; }
@@ -1166,7 +1177,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.8';
+const WEB_VERSION = '6.9';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1284,23 +1295,7 @@ function setupEventListeners() {
         await downloadToDesktop('미발확인파일.xls', blob);
     });
 
-    // 10-3. #btn-loc-download (위치값다운로드: 상품코드 + 위치확인 → 헤더 '옵션추가항목1', 진짜 .xls)
-    //  - 앱(웹 스캐너)에서 지정된 위치만 포함. 이지어드민 옵션추가항목1 일괄 업로드용
-    document.getElementById('btn-loc-download')?.addEventListener('click', async () => {
-        if (!filteredData.length) return;
-        const aoa = [['상품코드', '옵션추가항목1']];
-        filteredData.forEach(r => {
-            const a = locationAssignMap[r.code];
-            if (a && a.location) aoa.push([r.code, a.location]);
-        });
-        if (aoa.length === 1) { alert('위치가 지정된 상품이 없습니다.\n(위치 모드에서 위치를 지정한 뒤 이용하세요)'); return; }
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
-        const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
-        const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
-        await downloadToDesktop('위치값.xls', blob);
-    });
+    // 10-3. 옵션추가항목1(당일입고 위치값) 다운로드 → 위치지정모드 툴바 버튼(btn-loc-download2)에서 downloadDayLoc 호출
 
     // [Ver 6.8] 모드 선택 (제목 클릭 → 미발계산기/위치지정모드) + 위치 툴바
     document.getElementById('app-title')?.addEventListener('click', openModeSelect);
@@ -1308,7 +1303,7 @@ function setupEventListeners() {
     document.getElementById('mode-select-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mode-select-modal') closeModeSelect(); });
     document.querySelectorAll('.mode-card').forEach(c => c.addEventListener('click', () => setViewMode(c.dataset.mode)));
     document.getElementById('btn-loc-upload2')?.addEventListener('click', () => document.getElementById('upload-existing-loc')?.click());
-    document.getElementById('btn-loc-download2')?.addEventListener('click', () => document.getElementById('btn-loc-download')?.click());
+    document.getElementById('btn-loc-download2')?.addEventListener('click', () => downloadDayLoc());
     document.getElementById('btn-loc-history2')?.addEventListener('click', () => openLocMoveModal());
     applyViewMode(); // 저장된 모드 초기 적용
 
