@@ -144,13 +144,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=7.2"></script>
+    <script src="js/location-map.js?v=7.3"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '7.2'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '7.3'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -463,18 +463,23 @@
                     byCode.get(it.barcode).locs.push(it.location);
                 });
                 const codes = [...byCode.keys()];
-                // 각 상품의 기존 저장값 읽기 (append 기준)
+                // 각 상품의 기존 저장값 읽기 (append 기준 + baseLocation=기준값)
+                //   baseLocation 필드가 없던 기존 문서는 '현재 위치값'을 기준으로 삼음(그 이후 찍는 것만 '새 자리')
                 const existingMap = {};
                 await Promise.all(codes.map(async c => {
-                    try { const s = await getDoc(doc(db, 'ChinaStockGoods_LocationHistory', c)); existingMap[c] = s.exists() ? (s.data().location || '') : ''; }
-                    catch (e) { existingMap[c] = ''; }
+                    try {
+                        const s = await getDoc(doc(db, 'ChinaStockGoods_LocationHistory', c));
+                        const d = s.exists() ? s.data() : {};
+                        const loc = d.location || '';
+                        existingMap[c] = { location: loc, base: (d.baseLocation !== undefined ? d.baseLocation : loc) };
+                    } catch (e) { existingMap[c] = { location: '', base: '' }; }
                 }));
                 for (let i = 0; i < codes.length; i += 400) {
                     const batch = writeBatch(db);
                     codes.slice(i, i + 400).forEach(c => {
                         const g = byCode.get(c);
                         batch.set(doc(db, 'ChinaStockGoods_LocationHistory', c), {
-                            barcode: c, location: mergeLocations(existingMap[c], g.locs), sub: g.sub, at: serverTimestamp(), worker: 'Scanner_Web'
+                            barcode: c, location: mergeLocations(existingMap[c].location, g.locs), baseLocation: existingMap[c].base, sub: g.sub, at: serverTimestamp(), worker: 'Scanner_Web'
                         });
                     });
                     await batch.commit();

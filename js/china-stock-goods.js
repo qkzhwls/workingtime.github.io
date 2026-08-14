@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 7.2 (위치지정모드: 요약 숨김 + 헤더메뉴 모드별 구성)
+// 중국제작 미발계산기 Ver 7.3 (새로 추가된 위치 초록 강조 + 기존재고는 새 자리 추가 상품만 표시)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -160,12 +160,24 @@ function lmFmtAt(at) {
         return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
     } catch (e) { return ''; }
 }
-// 기존재고(sub==='existing')만, 검색어(있으면) 반영, 최신순
+// [Ver 7.3] 위치 다중값 표시 — 기준값(base)에 없는 '새로 추가된 자리'는 초록 강조
+function locPartsArr(s) { return (s || '').toString().split(',').map(x => x.trim()).filter(Boolean); }
+function locHasNew(location, base) { const b = new Set(locPartsArr(base)); return locPartsArr(location).some(p => !b.has(p)); }
+function renderLocList(location, base) {
+    const b = new Set(locPartsArr(base));
+    const parts = locPartsArr(location);
+    if (!parts.length) return '';
+    return parts.map(p => b.has(p)
+        ? `<span style="color:#555;">${p}</span>`
+        : `<span style="background:#c8e6c9; color:#1b5e20; font-weight:bold; padding:0 5px; border-radius:3px;">${p}</span>`
+    ).join(', ');
+}
+// 기존재고(sub==='existing') 중 '새 자리가 추가된' 상품만, 검색어(있으면) 반영, 최신순
 function lmExistingRows() {
     const kw = (document.getElementById('lm-search')?.value || '').trim().toUpperCase();
     let rows = Object.entries(locationAssignMap)
-        .map(([code, v]) => ({ code, location: v.location || '', sub: v.sub || '', at: v.at }))
-        .filter(r => r.sub === 'existing');
+        .map(([code, v]) => ({ code, location: v.location || '', base: v.base || '', sub: v.sub || '', at: v.at }))
+        .filter(r => r.sub === 'existing' && locHasNew(r.location, r.base));
     if (kw) rows = rows.filter(r => r.code.toUpperCase().includes(kw) || r.location.toUpperCase().includes(kw));
     rows.sort((a, b) => lmAtMs(b.at) - lmAtMs(a.at));
     return rows;
@@ -174,17 +186,17 @@ const LM_RENDER_CAP = 300; // [Ver 6.7] 표시 상한(렌더 성능/가독성). 
 function renderLocMoveTable() {
     const tb = document.getElementById('lm-tbody'); if (!tb) return;
     const rows = lmExistingRows();
-    const cEl = document.getElementById('lm-count'); if (cEl) cEl.textContent = `총 ${rows.length}건`;
+    const cEl = document.getElementById('lm-count'); if (cEl) cEl.textContent = `새 자리 추가 ${rows.length}건`;
     const moreEl = document.getElementById('lm-more');
-    if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" style="padding:24px; color:#888;">기존재고 이동 내역 없음</td></tr>'; if (moreEl) moreEl.textContent = ''; return; }
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" style="padding:24px; color:#888;">새로 추가된 자리가 없습니다.<br><span style="font-size:11px;">(기존재고 업로드 후 스캐너 \'기존재고\' 모드로 새 자리를 찍으면 여기 표시됩니다)</span></td></tr>'; if (moreEl) moreEl.textContent = ''; return; }
     const shown = rows.slice(0, LM_RENDER_CAP);
-    tb.innerHTML = shown.map(r => `<tr style="border-bottom:1px solid #eee;"><td style="padding:7px 6px; font-weight:bold;">${r.code}</td><td style="padding:7px 6px;">${r.location || '<span style=\'color:#c62828;\'>미지정</span>'}</td><td style="padding:7px 6px; color:#888;">${lmFmtAt(r.at)}</td></tr>`).join('');
+    tb.innerHTML = shown.map(r => `<tr style="border-bottom:1px solid #eee;"><td style="padding:7px 6px; font-weight:bold;">${r.code}</td><td style="padding:7px 6px; text-align:left;">${renderLocList(r.location, r.base)}</td><td style="padding:7px 6px; color:#888;">${lmFmtAt(r.at)}</td></tr>`).join('');
     if (moreEl) moreEl.textContent = rows.length > LM_RENDER_CAP ? `상위 ${LM_RENDER_CAP}건만 표시 중 · 전체 ${rows.length}건 — 검색으로 좁혀보세요 (다운로드는 전체 포함)` : '';
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
 async function downloadLocMove() {
     const rows = lmExistingRows().filter(r => r.location);
-    if (!rows.length) { alert('다운로드할 기존재고 위치 내역이 없습니다.'); return; }
+    if (!rows.length) { alert('새로 추가된 위치가 없습니다.\n(기존재고 업로드 후 스캐너 "기존재고" 모드로 새 자리를 지정하세요)'); return; }
     const aoa = [['상품코드', '옵션추가항목1']];
     rows.forEach(r => aoa.push([r.code, r.location]));
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -519,7 +531,7 @@ function loadLocationHistory() {
         snapshot.forEach((d) => {
             const data = d.data();
             const code = (data.barcode || d.id || '').toString().trim();
-            if (code) locationAssignMap[code] = { location: data.location || '', at: data.at, sub: data.sub || '', worker: data.worker || '' };
+            if (code) locationAssignMap[code] = { location: data.location || '', at: data.at, sub: data.sub || '', worker: data.worker || '', base: (data.baseLocation !== undefined ? data.baseLocation : (data.location || '')) };
         });
         if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
         if (viewMode === 'location' && locSubView === 'existing') renderLocMoveTable(); // 기존재고 인라인 목록 실시간 갱신
@@ -723,7 +735,7 @@ async function handleExistingLocUpload(e) {
         for (let i = 0; i < entries.length; i += 400) {
             const batch = writeBatch(db);
             entries.slice(i, i + 400).forEach(([code, loc]) => batch.set(doc(db, 'ChinaStockGoods_LocationHistory', code), {
-                barcode: code, location: loc, sub: 'existing', at: new Date(), worker: 'Seed_Upload'
+                barcode: code, location: loc, baseLocation: loc, sub: 'existing', at: new Date(), worker: 'Seed_Upload'
             }));
             await batch.commit();
         }
@@ -1063,9 +1075,9 @@ function colLabel(key) {
 }
 function colValue(key, row, idx) {
     if (key === 'no') return idx + 1;
-    if (key === 'locCheck') { // [Ver 5.6→7.1] 앱이 '당일 입고분' 모드로 지정한 위치만 (없으면 미지정)
+    if (key === 'locCheck') { // [Ver 5.6→7.3] 앱이 '당일 입고분' 모드로 지정한 위치 (새 자리는 초록 강조, 없으면 미지정)
         const a = locationAssignMap[row.code];
-        return (a && a.location && (a.sub || '') === 'today') ? a.location : '<span style="color:#d32f2f; font-weight:bold;">⚠️ 미지정</span>';
+        return (a && a.location && (a.sub || '') === 'today') ? renderLocList(a.location, a.base) : '<span style="color:#d32f2f; font-weight:bold;">⚠️ 미지정</span>';
     }
     if (BUILTIN_COLS[key]) return (row[key] !== undefined && row[key] !== null) ? row[key] : '';
     if (key.startsWith('log:')) { const log = stockLogData[row.code] || {}; const v = log[key.slice(4)]; return (v !== undefined && v !== null) ? v : ''; }
@@ -1191,7 +1203,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '7.2';
+const WEB_VERSION = '7.3';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
