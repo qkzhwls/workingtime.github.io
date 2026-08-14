@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.9 (모드별 위치버튼 정리 + 제목이 모드명으로 변경)
+// 중국제작 미발계산기 Ver 7.0 (미발: 작업메뉴→파일 다운로드, 위치확인 열 제외)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1021,7 +1021,8 @@ const BUILTIN_COLS = {
     locCheck:  { label:'위치확인', width:'110px' }   // [Ver 5.6] 앱이 지정한 위치 / 미지정 표시
 };
 let columnConfig = null; // null = 기본 순서, 아니면 열 key 배열
-function getColumns() { return (Array.isArray(columnConfig) && columnConfig.length) ? columnConfig : DEFAULT_COLUMNS; }
+// [Ver 7.0] 미발계산기 열: locCheck(위치확인)는 위치지정모드 전용이므로 미발 열에서 제외
+function getColumns() { const base = (Array.isArray(columnConfig) && columnConfig.length) ? columnConfig : DEFAULT_COLUMNS; return base.filter(k => k !== 'locCheck'); }
 // [Ver 6.8] 보기 모드: 미발계산기(mibal) / 위치지정모드(location)
 let viewMode = localStorage.getItem('csgViewMode') || 'mibal';
 const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'locCheck']; // 위치 중심 상품표
@@ -1116,7 +1117,7 @@ function renderColumnEditor() {
         </div>`).join('');
     const sel = document.getElementById('column-add-select');
     const avail = [];
-    Object.keys(BUILTIN_COLS).forEach(k => { if (!colEditList.includes(k)) avail.push([k, colLabel(k)]); });
+    Object.keys(BUILTIN_COLS).forEach(k => { if (!colEditList.includes(k) && k !== 'locCheck') avail.push([k, colLabel(k)]); }); // locCheck=위치확인은 위치모드 전용
     logFieldKeys().forEach(f => { const k = 'log:' + f; if (!colEditList.includes(k)) avail.push([k, f + ' (로그)']); });
     sel.innerHTML = avail.length ? avail.map(([k,l]) => `<option value="${k}">${l}</option>`).join('') : '<option value="">추가할 열 없음</option>';
     box.querySelectorAll('.col-up').forEach(b => b.onclick = () => { const i=+b.dataset.i; if(i>0){ [colEditList[i-1],colEditList[i]]=[colEditList[i],colEditList[i-1]]; renderColumnEditor(); } });
@@ -1177,7 +1178,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.9';
+const WEB_VERSION = '7.0';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
