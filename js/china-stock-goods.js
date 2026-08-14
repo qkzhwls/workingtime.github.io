@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.6 (업로드 위치 열 선택 우선순위 수정 - 옵션추가항목1 우선)
+// 중국제작 미발계산기 Ver 6.7 (위치 이동 내역 모달 개선: 헤더 고정 스크롤/상위 N건 + 업로드 버튼 내장)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -177,12 +177,16 @@ function lmExistingRows() {
     rows.sort((a, b) => lmAtMs(b.at) - lmAtMs(a.at));
     return rows;
 }
+const LM_RENDER_CAP = 300; // [Ver 6.7] 표시 상한(렌더 성능/가독성). 다운로드는 전체 포함.
 function renderLocMoveTable() {
     const tb = document.getElementById('lm-tbody'); if (!tb) return;
     const rows = lmExistingRows();
     const cEl = document.getElementById('lm-count'); if (cEl) cEl.textContent = `총 ${rows.length}건`;
-    if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" style="padding:24px; color:#888;">기존재고 이동 내역 없음</td></tr>'; return; }
-    tb.innerHTML = rows.map(r => `<tr style="border-bottom:1px solid #eee;"><td style="padding:7px 6px; font-weight:bold;">${r.code}</td><td style="padding:7px 6px;">${r.location || '<span style=\'color:#c62828;\'>미지정</span>'}</td><td style="padding:7px 6px; color:#888;">${lmFmtAt(r.at)}</td></tr>`).join('');
+    const moreEl = document.getElementById('lm-more');
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" style="padding:24px; color:#888;">기존재고 이동 내역 없음</td></tr>'; if (moreEl) moreEl.textContent = ''; return; }
+    const shown = rows.slice(0, LM_RENDER_CAP);
+    tb.innerHTML = shown.map(r => `<tr style="border-bottom:1px solid #eee;"><td style="padding:7px 6px; font-weight:bold;">${r.code}</td><td style="padding:7px 6px;">${r.location || '<span style=\'color:#c62828;\'>미지정</span>'}</td><td style="padding:7px 6px; color:#888;">${lmFmtAt(r.at)}</td></tr>`).join('');
+    if (moreEl) moreEl.textContent = rows.length > LM_RENDER_CAP ? `상위 ${LM_RENDER_CAP}건만 표시 중 · 전체 ${rows.length}건 — 검색으로 좁혀보세요 (다운로드는 전체 포함)` : '';
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
 async function downloadLocMove() {
@@ -1140,7 +1144,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.6';
+const WEB_VERSION = '6.7';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
