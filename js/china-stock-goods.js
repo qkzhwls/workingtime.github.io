@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 7.0 (미발: 작업메뉴→파일 다운로드, 위치확인 열 제외)
+// 중국제작 미발계산기 Ver 7.1 (위치지정모드 서브탭: 당일입고지정/기존재고지정 분리)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -150,14 +150,7 @@ function closeAllMenus() {
     }
 }
 
-// [Ver 6.2] 위치 이동 내역 — 기존재고 전용 (당일입고는 웹페이지 표가 곧 당일입고 내역이므로 제외)
-function openLocMoveModal() {
-    closeAllMenus();
-    const s = document.getElementById('lm-search'); if (s) s.value = '';
-    renderLocMoveTable();
-    document.getElementById('locmove-modal').style.display = 'flex';
-}
-function closeLocMoveModal() { document.getElementById('locmove-modal').style.display = 'none'; }
+// [Ver 6.2→7.1] 위치 이동 내역(기존재고) — 위치지정모드 '기존재고지정' 서브뷰에 인라인 표시
 function lmAtMs(at) { try { return at && at.toDate ? at.toDate().getTime() : 0; } catch (e) { return 0; } }
 function lmFmtAt(at) {
     try {
@@ -205,8 +198,8 @@ async function downloadLocMove() {
 async function downloadDayLoc() {
     if (!filteredData.length) return;
     const aoa = [['상품코드', '옵션추가항목1']];
-    filteredData.forEach(r => { const a = locationAssignMap[r.code]; if (a && a.location) aoa.push([r.code, a.location]); });
-    if (aoa.length === 1) { alert('위치가 지정된 상품이 없습니다.\n(위치 모드에서 위치를 지정한 뒤 이용하세요)'); return; }
+    filteredData.forEach(r => { const a = locationAssignMap[r.code]; if (a && a.location && (a.sub || '') === 'today') aoa.push([r.code, a.location]); });
+    if (aoa.length === 1) { alert('당일 입고분으로 위치가 지정된 상품이 없습니다.\n(스캐너 위치모드 "당일 입고분"으로 지정 후 이용하세요)'); return; }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
@@ -529,7 +522,7 @@ function loadLocationHistory() {
             if (code) locationAssignMap[code] = { location: data.location || '', at: data.at, sub: data.sub || '', worker: data.worker || '' };
         });
         if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
-        if (document.getElementById('locmove-modal')?.style.display === 'flex') renderLocMoveTable(); // 위치 이동 내역 실시간 갱신
+        if (viewMode === 'location' && locSubView === 'existing') renderLocMoveTable(); // 기존재고 인라인 목록 실시간 갱신
     });
 }
 
@@ -1025,7 +1018,9 @@ let columnConfig = null; // null = 기본 순서, 아니면 열 key 배열
 function getColumns() { const base = (Array.isArray(columnConfig) && columnConfig.length) ? columnConfig : DEFAULT_COLUMNS; return base.filter(k => k !== 'locCheck'); }
 // [Ver 6.8] 보기 모드: 미발계산기(mibal) / 위치지정모드(location)
 let viewMode = localStorage.getItem('csgViewMode') || 'mibal';
-const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'locCheck']; // 위치 중심 상품표
+// [Ver 7.1] 위치지정모드 서브뷰: 당일입고지정(today) / 기존재고지정(existing)
+let locSubView = localStorage.getItem('csgLocSub') || 'today';
+const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'locCheck']; // 위치 중심 상품표(당일)
 function getActiveColumns() { return viewMode === 'location' ? LOCATION_COLUMNS : getColumns(); }
 function applyViewMode() {
     document.body.dataset.view = viewMode;
@@ -1033,7 +1028,23 @@ function applyViewMode() {
     const title = document.getElementById('app-title');
     if (label) label.textContent = viewMode === 'location' ? '📍 중국제작 위치지정모드' : '🏭 중국제작 미발계산기';
     if (title) title.style.color = viewMode === 'location' ? '#6a1b9a' : '#333';
-    renderTable();
+    if (viewMode === 'location') applyLocSub(); else renderTable();
+}
+function applyLocSub() {
+    document.body.dataset.locsub = locSubView;
+    document.querySelectorAll('.loc-subtab').forEach(b => {
+        const on = b.dataset.sub === locSubView;
+        b.style.background = on ? '#5e35b1' : '#fff';
+        b.style.color = on ? '#fff' : '#5e35b1';
+        b.style.boxShadow = on ? 'none' : 'inset 0 0 0 1px #b39ddb';
+    });
+    if (locSubView === 'existing') renderLocMoveTable(); // 기존재고 인라인 목록
+    else renderTable(); // 당일입고 상품표(위치확인 열)
+}
+function setLocSubView(s) {
+    locSubView = (s === 'existing') ? 'existing' : 'today';
+    localStorage.setItem('csgLocSub', locSubView);
+    applyLocSub();
 }
 function openModeSelect() { document.getElementById('mode-select-modal').style.display = 'flex'; }
 function closeModeSelect() { document.getElementById('mode-select-modal').style.display = 'none'; }
@@ -1050,9 +1061,9 @@ function colLabel(key) {
 }
 function colValue(key, row, idx) {
     if (key === 'no') return idx + 1;
-    if (key === 'locCheck') { // [Ver 5.6] 앱 지정 위치 (없으면 미지정)
+    if (key === 'locCheck') { // [Ver 5.6→7.1] 앱이 '당일 입고분' 모드로 지정한 위치만 (없으면 미지정)
         const a = locationAssignMap[row.code];
-        return (a && a.location) ? a.location : '<span style="color:#d32f2f; font-weight:bold;">⚠️ 미지정</span>';
+        return (a && a.location && (a.sub || '') === 'today') ? a.location : '<span style="color:#d32f2f; font-weight:bold;">⚠️ 미지정</span>';
     }
     if (BUILTIN_COLS[key]) return (row[key] !== undefined && row[key] !== null) ? row[key] : '';
     if (key.startsWith('log:')) { const log = stockLogData[row.code] || {}; const v = log[key.slice(4)]; return (v !== undefined && v !== null) ? v : ''; }
@@ -1178,7 +1189,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '7.0';
+const WEB_VERSION = '7.1';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1298,14 +1309,13 @@ function setupEventListeners() {
 
     // 10-3. 옵션추가항목1(당일입고 위치값) 다운로드 → 위치지정모드 툴바 버튼(btn-loc-download2)에서 downloadDayLoc 호출
 
-    // [Ver 6.8] 모드 선택 (제목 클릭 → 미발계산기/위치지정모드) + 위치 툴바
+    // [Ver 6.8→7.1] 모드 선택 (제목 클릭) + 위치지정모드 서브탭(당일/기존) + 당일 다운로드
     document.getElementById('app-title')?.addEventListener('click', openModeSelect);
     document.getElementById('btn-mode-close')?.addEventListener('click', closeModeSelect);
     document.getElementById('mode-select-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mode-select-modal') closeModeSelect(); });
     document.querySelectorAll('.mode-card').forEach(c => c.addEventListener('click', () => setViewMode(c.dataset.mode)));
-    document.getElementById('btn-loc-upload2')?.addEventListener('click', () => document.getElementById('upload-existing-loc')?.click());
+    document.querySelectorAll('.loc-subtab').forEach(b => b.addEventListener('click', () => setLocSubView(b.dataset.sub)));
     document.getElementById('btn-loc-download2')?.addEventListener('click', () => downloadDayLoc());
-    document.getElementById('btn-loc-history2')?.addEventListener('click', () => openLocMoveModal());
     applyViewMode(); // 저장된 모드 초기 적용
 
     // 11. #search-input (검색)
@@ -1379,13 +1389,9 @@ function setupEventListeners() {
     document.getElementById('column-modal')?.addEventListener('click', (e) => { if (e.target.id === 'column-modal') closeColumnModal(); });
     document.querySelector('#column-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
-    // [Ver 6.1→6.2] 위치 이동 내역 모달 (기존재고 전용 + 다운로드)
-    document.getElementById('btn-open-locmove')?.addEventListener('click', () => openLocMoveModal());
-    document.getElementById('btn-locmove-close')?.addEventListener('click', () => closeLocMoveModal());
+    // [Ver 6.1→7.1] 기존재고지정 인라인 패널 (다운로드/초기화/검색)
     document.getElementById('btn-locmove-download')?.addEventListener('click', () => downloadLocMove());
     document.getElementById('btn-locmove-reset')?.addEventListener('click', () => resetLocMove());
-    document.getElementById('locmove-modal')?.addEventListener('click', (e) => { if (e.target.id === 'locmove-modal') closeLocMoveModal(); });
-    document.querySelector('#locmove-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
     document.getElementById('lm-search')?.addEventListener('input', () => renderLocMoveTable());
 
 

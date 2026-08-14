@@ -53,6 +53,14 @@
         #app-title:hover { color: #1976d2; }
         .loc-only { display: none; }
         body[data-view="location"] .loc-only { display: flex; }
+        /* 위치지정모드 서브뷰: 당일입고지정(today) / 기존재고지정(existing) */
+        .loc-today-only, .loc-existing-only { display: none; }
+        body[data-view="location"][data-locsub="today"] .loc-today-only { display: flex; }
+        body[data-view="location"][data-locsub="existing"] .loc-existing-only { display: block; }
+        /* 기존재고지정에서는 요약/출고일/상품표 숨김 */
+        body[data-view="location"][data-locsub="existing"] .summary-bar,
+        body[data-view="location"][data-locsub="existing"] .date-bar,
+        body[data-view="location"][data-locsub="existing"] .list-container { display: none; }
         .mode-card { border:2px solid #ddd; border-radius:12px; padding:22px 18px; cursor:pointer; text-align:center; transition:.15s; background:#fff; }
         .mode-card:hover { border-color:#1976d2; box-shadow:0 4px 14px rgba(0,0,0,.12); transform:translateY(-2px); }
     </style>
@@ -66,7 +74,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 7.0</div>
+            <div class="version-badge">🚀 Ver 7.1</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -120,13 +128,17 @@
         <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span></div>
     </div>
 
-    <div id="loc-toolbar" class="loc-only" style="gap:8px; align-items:center; flex-wrap:wrap; padding:10px 16px; background:#f3e5f5; border-bottom:1px solid #e1bee7;">
-        <span style="font-weight:bold; color:#6a1b9a; font-size:13px;">📍 위치 작업:</span>
-        <button id="btn-loc-upload2" style="padding:7px 13px; background:#00838f; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">📥 기존재고 업로드</button>
-        <label style="padding:7px 13px; background:#7b1fa2; color:#fff; border-radius:5px; cursor:pointer; font-weight:bold;">📍 위치매핑 업로드<input type="file" id="upload-location-map" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
+    <!-- [Ver 7.1] 위치지정모드 서브탭: 당일입고지정 / 기존재고지정 -->
+    <div id="loc-subtabs" class="loc-only" style="gap:8px; align-items:center; flex-wrap:wrap; padding:9px 16px; background:#ede7f6; border-bottom:1px solid #d1c4e9;">
+        <button class="loc-subtab" data-sub="today" style="padding:7px 15px; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">📅 당일입고지정</button>
+        <button class="loc-subtab" data-sub="existing" style="padding:7px 15px; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">📦 기존재고지정</button>
+        <label style="margin-left:auto; padding:7px 13px; background:#7b1fa2; color:#fff; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">📍 위치매핑 업로드<input type="file" id="upload-location-map" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
+    </div>
+    <!-- 당일입고지정 도구 (당일 서브뷰 전용) -->
+    <div id="loc-tools-today" class="loc-today-only" style="gap:8px; align-items:center; flex-wrap:wrap; padding:10px 16px; background:#f3e5f5; border-bottom:1px solid #e1bee7;">
+        <span style="font-weight:bold; color:#6a1b9a; font-size:13px;">📅 당일입고 위치:</span>
         <button id="btn-loc-download2" style="padding:7px 13px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
-        <button id="btn-loc-history2" style="padding:7px 13px; background:#00695c; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">📋 위치 이동 내역</button>
-        <span style="font-size:12px; color:#888;">※ 위치 지정은 스캐너([📱 입고앱실행])로, 여기선 확인·업로드·다운로드</span>
+        <span style="font-size:12px; color:#888;">※ 위치 지정은 스캐너([📱 입고앱실행])의 '당일 입고분' 모드로. 아래 표 <b>위치확인</b> 열에서 누락 확인.</span>
     </div>
 
     <div class="list-container">
@@ -152,6 +164,31 @@
                 <tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>
             </tbody>
         </table>
+    </div>
+
+    <!-- [Ver 7.1] 기존재고지정 패널 (인라인) -->
+    <div id="existing-panel" class="loc-existing-only" style="padding:14px 16px;">
+        <div style="font-size:12px; color:#555; background:#e0f2f1; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
+            이미 입고된 상품을 <b>기존재고</b>로 재배치한 내역입니다. <b>[📥 기존재고 업로드]</b>로 현재 옵션추가항목1을 세팅 → 스캐너 위치모드 <b>'기존재고'</b>로 새 자리를 추가(콤마로 끝에 append) → <b>[⬇️ 다운로드]</b>로 받아 이지어드민에 일괄 업로드하세요.
+        </div>
+        <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap;">
+            <label style="padding:8px 14px; background:#00838f; color:#fff; border-radius:5px; cursor:pointer; font-weight:bold;">📥 기존재고 업로드<input type="file" id="upload-existing-loc" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
+            <button id="btn-locmove-download" style="padding:8px 14px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
+            <button id="btn-locmove-reset" style="padding:8px 14px; background:#fff; color:#c62828; border:1px solid #c62828; border-radius:5px; cursor:pointer; font-weight:bold;">🗑️ 초기화</button>
+            <input id="lm-search" placeholder="🔍 상품코드/위치" style="flex:1; min-width:120px; padding:7px 10px; border:1px solid #ccc; border-radius:5px; font-size:13px;">
+            <span id="lm-count" style="color:#888; font-size:12px; white-space:nowrap;"></span>
+        </div>
+        <div style="max-height:60vh; overflow:auto; border:1px solid #eee; border-radius:6px;">
+            <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:center;">
+                <thead><tr>
+                    <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">상품코드</th>
+                    <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">위치</th>
+                    <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">시각</th>
+                </tr></thead>
+                <tbody id="lm-tbody"></tbody>
+            </table>
+        </div>
+        <div id="lm-more" style="font-size:11px; color:#888; text-align:center; padding:6px 0;"></div>
     </div>
 
     <div id="sheet-settings-modal" class="modal-overlay">
@@ -275,40 +312,6 @@
         </div>
     </div>
 
-    <!-- [Ver 6.2→6.7] 위치 이동 내역 (기존재고 전용) — 고정 높이 스크롤 + 헤더 고정 -->
-    <div id="locmove-modal" class="modal-overlay">
-        <div class="modal-content" style="width:560px; max-width:94vw; max-height:88vh; display:flex; flex-direction:column;">
-            <h3 style="margin-top:0; flex:0 0 auto;">📋 위치 이동 내역 <span style="font-size:13px; color:#1976d2;">(기존재고)</span></h3>
-            <div style="flex:0 0 auto; font-size:12px; color:#555; background:#e0f2f1; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
-                이미 입고된 상품을 <b>기존재고 모드</b>로 재배치한 내역입니다. (당일입고는 이 웹페이지 표가 곧 그 내역이라 제외)<br>
-                <b>[📥 기존재고 업로드]</b>로 현재 옵션추가항목1을 세팅하고, <b>[⬇️ 다운로드]</b>로 상품코드+옵션추가항목1(위치) 파일을 받아 일괄 업로드하세요.
-            </div>
-            <div style="flex:0 0 auto; display:flex; gap:6px; margin-bottom:8px; align-items:center; flex-wrap:wrap;">
-                <input id="lm-search" placeholder="🔍 상품코드/위치" style="flex:1; min-width:120px; padding:6px 10px; border:1px solid #ccc; border-radius:4px; font-size:13px;">
-                <span id="lm-count" style="color:#888; font-size:12px; white-space:nowrap;"></span>
-            </div>
-            <div style="flex:1 1 auto; min-height:120px; overflow:auto; border:1px solid #eee; border-radius:6px;">
-                <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:center;">
-                    <thead><tr>
-                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">상품코드</th>
-                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">위치</th>
-                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">시각</th>
-                    </tr></thead>
-                    <tbody id="lm-tbody"></tbody>
-                </table>
-            </div>
-            <div id="lm-more" style="flex:0 0 auto; font-size:11px; color:#888; text-align:center; padding:5px 0;"></div>
-            <div style="flex:0 0 auto; margin-top:6px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap;">
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                    <label style="padding:8px 14px; background:#00838f; color:#fff; border-radius:4px; cursor:pointer; font-weight:bold;">📥 기존재고 업로드<input type="file" id="upload-existing-loc" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
-                    <button id="btn-locmove-download" style="padding:8px 16px; background:#00695c; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">⬇️ 다운로드</button>
-                    <button id="btn-locmove-reset" style="padding:8px 14px; background:#fff; color:#c62828; border:1px solid #c62828; border-radius:4px; cursor:pointer; font-weight:bold;">🗑️ 초기화</button>
-                </div>
-                <button id="btn-locmove-close" style="padding:8px 18px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-weight:bold;">닫기</button>
-            </div>
-        </div>
-    </div>
-
     <!-- [Ver 6.8] 모드 선택 (제목 클릭) -->
     <div id="mode-select-modal" class="modal-overlay">
         <div class="modal-content" style="width:440px; max-width:92vw;">
@@ -334,6 +337,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=7.0"></script>
+    <script type="module" src="js/china-stock-goods.js?v=7.1"></script>
 </body>
 </html>
