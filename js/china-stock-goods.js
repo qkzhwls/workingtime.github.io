@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 6.3 (위치 이동 내역 - 기존재고 초기화 버튼 추가)
+// 중국제작 미발계산기 Ver 6.4 (★ 구역 적재량 설정 적용 - 하드코딩 90 제거)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -83,11 +83,17 @@ async function downloadToDesktop(filename, blob) {
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 let zoneCapacity = {}; // [Ver 5.4] 구역(로케이션 앞 한 글자)별 적재량 일괄값 (Firebase 저장)
+// [Ver 6.4] 구역 키: ★ 로케이션(★-001, ★★-001 등)은 별 개수와 무관하게 모두 '★' 구역으로 묶음, 그 외는 첫 글자
+function zoneKey(locStr) {
+    const s = (locStr || '').toString().trim().toUpperCase();
+    if (!s) return '';
+    return s.includes('★') ? '★' : s.charAt(0);
+}
 function getCapacityByLocation(locStr) {
     if (!locStr) return 0;
-    if (locStr.includes('★')) return 90;
-    const ch = locStr.toString().trim().toUpperCase().charAt(0);
-    if (zoneCapacity[ch] !== undefined && zoneCapacity[ch] !== '') return parseInt(zoneCapacity[ch]) || 0; // 구역별 일괄값
+    const ch = zoneKey(locStr);
+    if (zoneCapacity[ch] !== undefined && zoneCapacity[ch] !== '') return parseInt(zoneCapacity[ch]) || 0; // 설정값 우선(★ 포함)
+    if (ch === '★') return 90; // ★ 구역 기본값(미설정 시) — 기존 동작 유지
     const map = { 'A':20,'B':20,'C':20,'D':20,'E':40,'F':40,'G':40,'H':15,'I':15,'Z':15,'L':15,'O':15,'P':15,'Q':15,'R':15,'S':15,'T':15 };
     return map[ch] || 0;
 }
@@ -424,7 +430,7 @@ function buildZoneCapRows() {
     const tb = document.getElementById('zone-cap-tbody');
     if (!tb) return;
     const counts = {};
-    tableData.forEach(d => { const ch = (d.location || '').trim().charAt(0).toUpperCase(); if (ch) counts[ch] = (counts[ch] || 0) + 1; });
+    tableData.forEach(d => { const ch = zoneKey(d.location); if (ch) counts[ch] = (counts[ch] || 0) + 1; });
     const zones = new Set(Object.keys(counts));
     Object.keys(zoneCapacity).forEach(z => zones.add(z));
     const list = [...zones].sort();
@@ -433,7 +439,7 @@ function buildZoneCapRows() {
         return;
     }
     tb.innerHTML = list.map(z => `<tr>
-        <td style="font-weight:800; font-size:15px;">${z}</td>
+        <td style="font-weight:800; font-size:15px;">${z === '★' ? '★ <span style="font-size:11px; font-weight:400; color:#888;">(별표 구역, ★·★★ 포함)</span>' : z}</td>
         <td style="color:#888;">${counts[z] || 0}</td>
         <td><input type="number" class="zcap" data-z="${z}" value="${getCapacityByLocation(z)}" style="width:74px; padding:6px; text-align:center;"></td>
     </tr>`).join('');
@@ -1088,7 +1094,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '6.3';
+const WEB_VERSION = '6.4';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
