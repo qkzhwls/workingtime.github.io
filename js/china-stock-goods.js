@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 7.7 (기존재고 목록: 행별 수정(✏️)·삭제(🗑️) - 다운로드 전 편집)
+// 중국제작 미발계산기 Ver 7.8 (기존재고 목록 수정: prompt → 인라인 입력창 편집)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -199,7 +199,7 @@ function renderLocMoveTable() {
         const badge = noBase ? '<div style="margin-top:3px;"><span title="업로드 파일에 없던 상품 — 기존 위치를 몰라 스캔한 자리만 반영됩니다. ERP 업로드 시 기존값이 덮어써질 수 있어요." style="background:#fff3e0; color:#e65100; border:1px solid #ffcc80; border-radius:4px; padding:0 4px; font-size:10px; font-weight:bold; white-space:nowrap;">⚠️ 파일에 없던 상품</span></div>' : '';
         return `<tr style="border-bottom:1px solid #eee;${noBase ? ' background:#fffdf5;' : ''}"><td style="padding:7px 6px; font-weight:bold; white-space:nowrap;">${r.code}${badge}</td><td style="padding:7px 6px; text-align:left;">${renderLocList(r.location, r.base)}</td><td style="padding:7px 6px; color:#888; white-space:nowrap;">${lmFmtAt(r.at)}</td><td style="padding:7px 6px; white-space:nowrap;"><span class="lm-edit" data-code="${r.code}" title="수정" style="cursor:pointer; margin-right:10px; font-size:15px;">✏️</span><span class="lm-del" data-code="${r.code}" title="삭제" style="cursor:pointer; font-size:15px;">🗑️</span></td></tr>`;
     }).join('');
-    tb.querySelectorAll('.lm-edit').forEach(b => b.onclick = () => editLocMoveRow(b.dataset.code));
+    tb.querySelectorAll('.lm-edit').forEach(b => b.onclick = () => startEditLocMoveRow(b.dataset.code, b.closest('tr')));
     tb.querySelectorAll('.lm-del').forEach(b => b.onclick = () => deleteLocMoveRow(b.dataset.code));
     const flagged = rows.filter(r => !r.base).length;
     const notes = [];
@@ -219,13 +219,26 @@ async function deleteLocMoveRow(code) {
         hideLoading(); showToast('✅ 삭제됨');
     } catch (e) { hideLoading(); alert('삭제 실패: ' + e.message); }
 }
-// [Ver 7.7] 기존재고 목록 행 수정 — 위치값(콤마 다중) 편집. 비우면 삭제. base(기준값)는 유지.
-async function editLocMoveRow(code) {
+// [Ver 7.8] 기존재고 목록 행 인라인 수정 — 위치 칸을 입력창으로 바꿔 편집(Enter 저장 / Esc 취소)
+function startEditLocMoveRow(code, tr) {
+    const v = locationAssignMap[code]; if (!v || !tr) return;
+    const tds = tr.querySelectorAll('td');
+    const locTd = tds[1], actTd = tds[3];
+    if (!locTd || !actTd) return;
+    const cur = (v.location || '').replace(/"/g, '&quot;');
+    locTd.innerHTML = `<input type="text" class="lm-edit-input" value="${cur}" placeholder="예: 비축-211,비축-210 (비우면 삭제)" style="width:100%; padding:5px 6px; border:1px solid #7b1fa2; border-radius:4px; font-size:12px; box-sizing:border-box;">`;
+    actTd.innerHTML = `<span class="lm-save" title="저장" style="cursor:pointer; margin-right:10px; font-size:15px;">✅</span><span class="lm-cancel" title="취소" style="cursor:pointer; font-size:15px;">✖️</span>`;
+    const input = locTd.querySelector('.lm-edit-input');
+    input.focus(); input.select();
+    const save = () => saveEditLocMoveRow(code, input.value);
+    input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } else if (e.key === 'Escape') { renderLocMoveTable(); } };
+    actTd.querySelector('.lm-save').onclick = save;
+    actTd.querySelector('.lm-cancel').onclick = () => renderLocMoveTable();
+}
+async function saveEditLocMoveRow(code, raw) {
     const v = locationAssignMap[code]; if (!v) return;
-    const input = prompt(`'${code}' 위치값 수정 (콤마로 구분)\n· 잘못 찍힌 자리를 지우거나 고칠 수 있습니다\n· 비우면 이 상품이 목록에서 제외됩니다`, v.location || '');
-    if (input === null) return; // 취소
-    const norm = input.split(',').map(x => x.trim()).filter(Boolean).join(',');
-    showLoading('💾 수정 중...');
+    const norm = (raw || '').split(',').map(x => x.trim()).filter(Boolean).join(','); // 비우면 삭제, base(기준값)는 유지
+    showLoading('💾 저장 중...');
     try {
         if (!norm) {
             await deleteDoc(doc(db, 'ChinaStockGoods_LocationHistory', code));
@@ -633,7 +646,7 @@ function loadLocationHistory() {
             if (code) locationAssignMap[code] = { location: data.location || '', at: data.at, sub: data.sub || '', worker: data.worker || '', base: (data.baseLocation !== undefined ? data.baseLocation : (data.location || '')) };
         });
         if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
-        if (viewMode === 'location' && locSubView === 'existing') renderLocMoveTable(); // 기존재고 인라인 목록 실시간 갱신
+        if (viewMode === 'location' && locSubView === 'existing' && !document.querySelector('.lm-edit-input')) renderLocMoveTable(); // 기존재고 인라인 목록 실시간 갱신(편집 중이면 건너뜀)
     });
 }
 
@@ -1307,7 +1320,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '7.7';
+const WEB_VERSION = '7.8';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
