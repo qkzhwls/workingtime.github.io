@@ -83,12 +83,19 @@
         <button class="btn-gear" id="btn-settings">⚙️</button>
     </div>
     <div class="status-line" id="status-line">-</div>
+    <!-- [Ver 8.1] 오프라인 표시 -->
+    <div id="offline-bar" style="display:none; background:#c62828; color:#fff; text-align:center; padding:7px; font-weight:800; font-size:13px;">🔴 오프라인 — 스캔은 계속 가능, 인터넷 연결 후 [전송하기] 하세요</div>
 
     <div class="loc-submode" id="loc-submode">
         <button data-sub="today" class="active">📥 당일 입고분</button>
         <button data-sub="existing">🔄 기존재고</button>
     </div>
     <div class="loc-banner" id="loc-banner">위치를 먼저 스캔하세요</div>
+
+    <!-- [Ver 8.1] 수동입력 토글 버튼 (위치모드) -->
+    <div id="loc-manual-row" style="display:none; padding:6px 10px 0; background:#f4f6f8;">
+        <button id="btn-manual-toggle" style="width:100%; padding:9px; border:1px dashed #90a4ae; background:#fff; color:#455a64; border-radius:8px; font-weight:800; cursor:pointer;">⌨️ 수동입력</button>
+    </div>
 
     <!-- [Ver 8.0] 위치모드 수동 입력 (스캔이 안 될 때) -->
     <div id="loc-manual" style="display:none; flex-direction:column; gap:6px; padding:8px 10px; background:#f4f6f8;">
@@ -156,13 +163,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.0"></script>
+    <script src="js/location-map.js?v=8.1"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.0'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.1'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -414,16 +421,17 @@
             }
             if (!fixedLocation) { speak('위치를 먼저 찍으세요'); toast('위치 바코드를 먼저 스캔하세요'); resumeScan(); return; }
             if (!/^S\d{6}$/.test(key)) { showAlert('형식 오류\n(올바른 상품 바코드가 아닙니다)'); return; }
-            // [Ver 4.1] ScanDB 조회
+            // [Ver 4.1→8.1] ScanDB 조회 (오프라인이면 생략 → 스캔은 허용)
             let name = '', exists = false, dbError = false;
-            try {
-                const snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key));
-                if (snap.exists()) { exists = true; name = snap.data().name || ''; }
-            } catch (e) { dbError = true; }
-            // 당일 입고분 모드: 목록에 없으면 오스캔으로 보고 거부 (S123456→S123457 오독 차단)
+            if (navigator.onLine) {
+                try { const snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key)); if (snap.exists()) { exists = true; name = snap.data().name || ''; } }
+                catch (e) { dbError = true; }
+            }
+            // 당일 입고분 모드: 온라인일 때만 목록 검증(오스캔 차단), 오프라인이면 생략
             if (locSubMode === 'today') {
-                if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
-                if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n(오스캔 여부 확인)\n' + key); return; }
+                if (!navigator.onLine) { toast('⚠️ 오프라인 · 목록 확인 생략'); }
+                else if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
+                else if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n(오스캔 여부 확인)\n' + key); return; }
             }
             locationQueue.unshift({ barcode: key, location: fixedLocation, name, sub: locSubMode, time: new Date().toTimeString().slice(0, 8) });
             saveQueues(); renderQueue(); speak('스캔'); resumeScan();
@@ -442,13 +450,14 @@
             if (!fixedLocation) { showAlert('위치를 먼저 설정하세요\n(위 칸에 위치를 입력하거나 위치 바코드를 스캔)'); return; }
             if (!/^S\d{6}$/.test(key)) { showAlert('형식 오류\nS로 시작하는 7자리로 입력하세요 (예: S123456)'); return; }
             let name = '', exists = false, dbError = false;
-            try {
-                const snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key));
-                if (snap.exists()) { exists = true; name = snap.data().name || ''; }
-            } catch (e) { dbError = true; }
+            if (navigator.onLine) {
+                try { const snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key)); if (snap.exists()) { exists = true; name = snap.data().name || ''; } }
+                catch (e) { dbError = true; }
+            }
             if (locSubMode === 'today') {
-                if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
-                if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n' + key); return; }
+                if (!navigator.onLine) { toast('⚠️ 오프라인 · 목록 확인 생략'); }
+                else if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
+                else if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n' + key); return; }
             }
             locationQueue.unshift({ barcode: key, location: fixedLocation, name, sub: locSubMode, time: new Date().toTimeString().slice(0, 8) });
             saveQueues(); renderQueue(); el.value = ''; el.focus();
@@ -458,6 +467,7 @@
         // ---------------- 전송 ----------------
         async function sendInbound() {
             if (!inboundQueue.length || sending) return;
+            if (!navigator.onLine) { showAlert('오프라인 상태입니다.\n인터넷 연결 후 [전송하기]를 눌러주세요.\n(스캔 내역은 저장되어 있습니다)'); return; }
             sending = true; updateSendBtn('전송 중...');
             try {
                 const CHUNK = 200; // 배치당 400 작업 (한도 500 이내)
@@ -488,6 +498,7 @@
         }
         async function sendLocation() {
             if (!locationQueue.length || sending) return;
+            if (!navigator.onLine) { showAlert('오프라인 상태입니다.\n인터넷 연결 후 [전송하기]를 눌러주세요.\n(스캔 내역은 저장되어 있습니다)'); return; }
             sending = true; updateSendBtn('전송 중...');
             const items = [...locationQueue];
             // [Ver 6.5] 상품별 최신 위치를 '누적(append)'로 기록 — 한 상품이 여러 자리를 가짐(콤마 구분)
@@ -599,7 +610,9 @@
             $('tab-in').classList.toggle('active', m === 'in');
             $('tab-loc').classList.toggle('active', m === 'loc');
             $('loc-submode').style.display = m === 'loc' ? 'flex' : 'none'; // [Ver 4.1]
-            $('loc-manual').style.display = m === 'loc' ? 'flex' : 'none'; // [Ver 8.0] 위치모드 수동 입력
+            $('loc-manual-row').style.display = m === 'loc' ? 'block' : 'none'; // [Ver 8.1] 수동입력 토글 버튼
+            $('loc-manual').style.display = 'none'; // 토글로만 열림 (모드 전환 시 닫음)
+            const mt = $('btn-manual-toggle'); if (mt) { mt.textContent = '⌨️ 수동입력'; mt.style.background = '#fff'; }
             const theme = m === 'in' ? '#1976d2' : '#2e7d32';
             document.querySelector('.tabs').style.background = theme;
             $('btn-send').style.background = '';
@@ -646,11 +659,24 @@
         };
         // [Ver 3.9] 수동 촬영 버튼 + 화면 탭 → 초점
         $('btn-capture').onclick = (e) => { e.stopPropagation(); manualCapture(); };
+        // [Ver 8.1] 수동입력 토글
+        $('btn-manual-toggle').onclick = () => {
+            const open = $('loc-manual').style.display !== 'flex';
+            $('loc-manual').style.display = open ? 'flex' : 'none';
+            $('btn-manual-toggle').textContent = open ? '⌨️ 수동입력 닫기' : '⌨️ 수동입력';
+            $('btn-manual-toggle').style.background = open ? '#eceff1' : '#fff';
+            if (open) $('manual-loc').focus();
+        };
         // [Ver 8.0] 위치모드 수동 입력 바인딩 (버튼 + Enter)
         $('btn-manual-loc').onclick = manualSetLocation;
         $('manual-loc').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); manualSetLocation(); } });
         $('btn-manual-code').onclick = manualAddProduct;
         $('manual-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); manualAddProduct(); } });
+        // [Ver 8.1] 오프라인 감지 표시
+        function updateNet() { const b = $('offline-bar'); if (b) b.style.display = navigator.onLine ? 'none' : 'block'; }
+        window.addEventListener('online', updateNet);
+        window.addEventListener('offline', updateNet);
+        updateNet();
         $('reader').addEventListener('click', (e) => {
             if (!scanning) return;
             const rect = e.currentTarget.getBoundingClientRect();
