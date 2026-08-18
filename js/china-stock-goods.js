@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.1 (스캐너: 수동입력 토글 버튼 + 오프라인 스캔/전송 가드)
+// 중국제작 미발계산기 Ver 8.2 (기존재고 다운로드: 파일에 없던 상품 '비고' 열로 별도 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -258,8 +258,14 @@ async function downloadLocMove() {
     if (!rows.length) { alert('새로 추가된 위치가 없습니다.\n(기존재고 업로드 후 스캐너 "기존재고" 모드로 새 자리를 지정하세요)'); return; }
     const flagged = rows.filter(r => !r.base).length;
     if (flagged && !confirm(`⚠️ 파일에 없던 상품 ${flagged}건이 포함되어 있습니다.\n이 상품들은 기존 위치 없이 '스캔한 자리만' 내보내져, 이지어드민의 기존 옵션추가항목1을 덮어쓸 수 있습니다.\n\n그래도 전체 다운로드할까요?`)) return;
-    const aoa = [['상품코드', '옵션추가항목1']];
-    rows.forEach(r => aoa.push([r.code, r.location]));
+    // [Ver 8.2] 파일에 없던 상품이 있으면 '비고' 열로 별도 표시 (없으면 기존 2열 그대로)
+    const hasFlag = flagged > 0;
+    const aoa = [hasFlag ? ['상품코드', '옵션추가항목1', '비고'] : ['상품코드', '옵션추가항목1']];
+    rows.forEach(r => {
+        const row = [r.code, r.location];
+        if (hasFlag) row.push(r.base ? '' : '파일에 없던 상품');
+        aoa.push(row);
+    });
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
@@ -1323,7 +1329,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.1';
+const WEB_VERSION = '8.2';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
