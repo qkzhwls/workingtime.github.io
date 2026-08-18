@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 7.5 (미발 규칙 변수: 재고로그 헤더를 공식 변수로 선택/추가/삭제)
+// 중국제작 미발계산기 Ver 7.6 (기존재고: 시드 파일에 없던 스캔 상품 ⚠️ 배지 표시 + 다운로드 경고)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -194,13 +194,23 @@ function renderLocMoveTable() {
     const moreEl = document.getElementById('lm-more');
     if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" style="padding:24px; color:#888;">새로 추가된 자리가 없습니다.<br><span style="font-size:11px;">(기존재고 업로드 후 스캐너 \'기존재고\' 모드로 새 자리를 찍으면 여기 표시됩니다)</span></td></tr>'; if (moreEl) moreEl.textContent = ''; return; }
     const shown = rows.slice(0, LM_RENDER_CAP);
-    tb.innerHTML = shown.map(r => `<tr style="border-bottom:1px solid #eee;"><td style="padding:7px 6px; font-weight:bold;">${r.code}</td><td style="padding:7px 6px; text-align:left;">${renderLocList(r.location, r.base)}</td><td style="padding:7px 6px; color:#888;">${lmFmtAt(r.at)}</td></tr>`).join('');
-    if (moreEl) moreEl.textContent = rows.length > LM_RENDER_CAP ? `상위 ${LM_RENDER_CAP}건만 표시 중 · 전체 ${rows.length}건 — 검색으로 좁혀보세요 (다운로드는 전체 포함)` : '';
+    tb.innerHTML = shown.map(r => {
+        const noBase = !r.base; // 시드 파일에 없던 상품(기준 위치 없음)
+        const badge = noBase ? '<div style="margin-top:3px;"><span title="업로드 파일에 없던 상품 — 기존 위치를 몰라 스캔한 자리만 반영됩니다. ERP 업로드 시 기존값이 덮어써질 수 있어요." style="background:#fff3e0; color:#e65100; border:1px solid #ffcc80; border-radius:4px; padding:0 4px; font-size:10px; font-weight:bold; white-space:nowrap;">⚠️ 파일에 없던 상품</span></div>' : '';
+        return `<tr style="border-bottom:1px solid #eee;${noBase ? ' background:#fffdf5;' : ''}"><td style="padding:7px 6px; font-weight:bold; white-space:nowrap;">${r.code}${badge}</td><td style="padding:7px 6px; text-align:left;">${renderLocList(r.location, r.base)}</td><td style="padding:7px 6px; color:#888;">${lmFmtAt(r.at)}</td></tr>`;
+    }).join('');
+    const flagged = rows.filter(r => !r.base).length;
+    const notes = [];
+    if (flagged) notes.push(`<b style="color:#e65100;">⚠️ 파일에 없던 상품 ${flagged}건 포함</b>`);
+    if (rows.length > LM_RENDER_CAP) notes.push(`상위 ${LM_RENDER_CAP}건만 표시 · 전체 ${rows.length}건 (검색으로 좁히기)`);
+    if (moreEl) moreEl.innerHTML = notes.join(' · ');
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
 async function downloadLocMove() {
     const rows = lmExistingRows().filter(r => r.location);
     if (!rows.length) { alert('새로 추가된 위치가 없습니다.\n(기존재고 업로드 후 스캐너 "기존재고" 모드로 새 자리를 지정하세요)'); return; }
+    const flagged = rows.filter(r => !r.base).length;
+    if (flagged && !confirm(`⚠️ 파일에 없던 상품 ${flagged}건이 포함되어 있습니다.\n이 상품들은 기존 위치 없이 '스캔한 자리만' 내보내져, 이지어드민의 기존 옵션추가항목1을 덮어쓸 수 있습니다.\n\n그래도 전체 다운로드할까요?`)) return;
     const aoa = [['상품코드', '옵션추가항목1']];
     rows.forEach(r => aoa.push([r.code, r.location]));
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -1263,7 +1273,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '7.5';
+const WEB_VERSION = '7.6';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
