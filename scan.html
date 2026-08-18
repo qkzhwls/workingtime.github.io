@@ -163,13 +163,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.2"></script>
+    <script src="js/location-map.js?v=8.3"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.2'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.3'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -200,6 +200,19 @@
             } catch (e) {}
         }
         function getLoc(key) { return locMapOverride ? locMapOverride[key] : (typeof barcodeMap !== 'undefined' ? barcodeMap[key] : undefined); }
+
+        // [Ver 8.3] 바코드 ≠ 상품코드 대응: 미발재고로그의 바코드→상품코드 맵을 로드해 변환
+        let barcodeToCode = {};
+        async function loadBarcodeMap() {
+            try {
+                const snap = await getDoc(doc(db, 'ChinaStockGoods', 'BARCODE_MAP'));
+                if (snap.exists() && snap.data().map) barcodeToCode = snap.data().map;
+            } catch (e) {}
+        }
+        function resolveCode(scanned) {
+            const k = (scanned || '').toString().trim().toUpperCase();
+            return barcodeToCode[k] || k; // 바코드로 등록된 값이면 상품코드로, 아니면 그대로
+        }
 
         // ---------------- 상태 ----------------
         let mode = localStorage.getItem('scanMode') || 'in';
@@ -360,7 +373,7 @@
 
         // ---------------- 입고 모드 ----------------
         async function processInbound(code) {
-            let key = code.toUpperCase();
+            let key = resolveCode(code); // [Ver 8.3] 바코드 → 상품코드 변환
             if (/^[0-9]+$/.test(key)) key = 'S' + key;
             let snap;
             try { snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key)); }
@@ -413,13 +426,14 @@
 
         // ---------------- 위치 모드 ----------------
         async function processLocation(code) {
-            const key = code.toUpperCase();
-            const mapped = getLoc(key);
+            const raw = code.toUpperCase();
+            const mapped = getLoc(raw);
             if (mapped) {
                 fixedLocation = mapped;
                 renderLocBanner(); speak('위치 변경'); resumeScan(); return;
             }
             if (!fixedLocation) { speak('위치를 먼저 찍으세요'); toast('위치 바코드를 먼저 스캔하세요'); resumeScan(); return; }
+            const key = resolveCode(raw); // [Ver 8.3] 바코드 → 상품코드 변환
             if (!/^S\d{6}$/.test(key)) { showAlert('형식 오류\n(올바른 상품 바코드가 아닙니다)'); return; }
             // [Ver 4.1→8.1] ScanDB 조회 (오프라인이면 생략 → 스캔은 허용)
             let name = '', exists = false, dbError = false;
@@ -445,7 +459,7 @@
             speak('위치 설정'); toast('위치 설정: ' + v);
         }
         async function manualAddProduct() {
-            const el = $('manual-code'); const key = (el.value || '').trim().toUpperCase();
+            const el = $('manual-code'); const key = resolveCode(el.value); // [Ver 8.3] 바코드 → 상품코드 변환
             if (!key) return;
             if (!fixedLocation) { showAlert('위치를 먼저 설정하세요\n(위 칸에 위치를 입력하거나 위치 바코드를 스캔)'); return; }
             if (!/^S\d{6}$/.test(key)) { showAlert('형식 오류\nS로 시작하는 7자리로 입력하세요 (예: S123456)'); return; }
@@ -723,6 +737,7 @@
 
         // ---------------- 초기화 ----------------
         loadLocationMap(); // [Ver 5.8] 위치 매핑 로드
+        loadBarcodeMap(); // [Ver 8.3] 바코드→상품코드 맵 로드
         buildNumpad();
         $('status-line').textContent = `v${SCAN_VERSION} · 서버: ${serverLabel}`;
         setLocSubMode(locSubMode); // [Ver 4.1] 저장된 세부 작업 복원

@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.2 (기존재고 다운로드: 파일에 없던 상품 '비고' 열로 별도 표시)
+// 중국제작 미발계산기 Ver 8.3 (바코드≠상품코드 매핑: 업로드 시 BARCODE_MAP 생성 → 스캐너 변환)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -777,8 +777,16 @@ function handleStockLogUpload(e) {
             });
             
             await saveChunkedData(rows, 'StockLog', (msg) => showLoading(msg));
-            hideLoading(); 
-            showToast('✅ 미발재고 저장 완료');
+            // [Ver 8.3] 바코드 ≠ 상품코드 매핑 저장 → 스캐너가 바코드로 찍어도 상품코드로 변환
+            const bcMap = {};
+            rows.forEach(row => {
+                const c = (row['상품코드'] || '').toString().trim().toUpperCase();
+                const bc = (row['바코드'] || '').toString().trim().toUpperCase();
+                if (c && bc && bc !== c) bcMap[bc] = c;
+            });
+            try { await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_MAP'), { map: bcMap, count: Object.keys(bcMap).length, updatedAt: new Date() }); } catch (e) {}
+            hideLoading();
+            showToast(`✅ 미발재고 저장 완료 (바코드≠상품코드 ${Object.keys(bcMap).length}건 매핑)`);
             if (tableData.length > 0) applyDates();
             
         } catch (err) { 
@@ -1329,7 +1337,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.2';
+const WEB_VERSION = '8.3';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
