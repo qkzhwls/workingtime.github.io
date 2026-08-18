@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 7.4 (전체 초기화 모드별 분리: 미발 ↔ 위치 각각만 초기화)
+// 중국제작 미발계산기 Ver 7.5 (미발 규칙 변수: 재고로그 헤더를 공식 변수로 선택/추가/삭제)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -112,25 +112,29 @@ function getCapacityByLocation(locStr) {
 const DEFAULT_MIBAL_FORMULA = '총재고===0 ? 적재량 : (부족수량+직진배송 > 총재고 ? 부족수량+직진배송-총재고 : 0)';
 let mibalFormula = DEFAULT_MIBAL_FORMULA;
 let mibalFn = null;
+let mibalVars = []; // [Ver 7.5] 미발 공식에 추가로 쓸 재고로그 헤더(변수)
+const MIBAL_FIXED_VARS = ['총재고', '적재량', '부족수량', '직진배송'];
 
 function defaultMibal(총재고, 적재량, 부족수량, 직진배송) {
     return (총재고 === 0) ? 적재량 : ((부족수량 + 직진배송 > 총재고) ? (부족수량 + 직진배송 - 총재고) : 0);
 }
+function toNum(v) { if (v == null) return 0; const n = parseFloat(String(v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
 
-// 수식 문자열을 함수로 컴파일 (실패 시 null). 테스트 실행으로 숫자 반환 여부 확인.
+// 수식 문자열을 함수로 컴파일 (실패 시 null). 기본 4변수 + 추가 변수(mibalVars) 지원.
 function compileMibalFormula(expr) {
     try {
-        const fn = new Function('총재고', '적재량', '부족수량', '직진배송', 'return (' + expr + ');');
-        const t = fn(0, 20, 0, 0);
+        const fn = new Function(...MIBAL_FIXED_VARS, ...mibalVars, 'return (' + expr + ');');
+        const t = fn(0, 20, 0, 0, ...mibalVars.map(() => 0));
         if (typeof t !== 'number' || isNaN(t)) return null;
         return fn;
     } catch (e) { return null; }
 }
 
-// 실제 계산 (오류 시 기본 공식 폴백 + 0 이상 정수로 보정)
-function evalMibal(총재고, 적재량, 부족수량, 직진배송) {
+// 실제 계산 (오류 시 기본 공식 폴백 + 0 이상 정수). log = 해당 상품 재고로그 행(추가 변수값 조회용)
+function evalMibal(총재고, 적재량, 부족수량, 직진배송, log) {
     let v;
-    try { if (mibalFn) v = mibalFn(총재고, 적재량, 부족수량, 직진배송); } catch (e) { v = undefined; }
+    const extras = mibalVars.map(h => toNum((log || {})[h]));
+    try { if (mibalFn) v = mibalFn(총재고, 적재량, 부족수량, 직진배송, ...extras); } catch (e) { v = undefined; }
     if (typeof v !== 'number' || isNaN(v)) v = defaultMibal(총재고, 적재량, 부족수량, 직진배송);
     v = Math.round(v);
     return v < 0 ? 0 : v;
@@ -266,6 +270,7 @@ let formulaMode = 'example';
 function openMibalFormulaModal() {
     closeAllMenus();
     document.getElementById('mibal-formula-input').value = mibalFormula;
+    renderMibalVars(); // [Ver 7.5] 규칙 변수(재고로그 헤더) 목록/선택지 갱신
     setFormulaMode('example');
     document.getElementById('mibal-formula-modal').style.display = 'flex';
 }
@@ -302,6 +307,55 @@ async function applyAndSaveFormula(expr, okMsg) {
     } catch (e) { alert('저장 실패: ' + e.message); }
 }
 
+// ===== 미발 규칙 변수(재고로그 헤더) 관리 [Ver 7.5] =====
+function isValidVarName(h) { try { new Function(h, 'return 0'); return true; } catch (e) { return false; } }
+function sanitizeMibalVars(arr) {
+    return Array.isArray(arr) ? arr.filter(h => typeof h === 'string' && h && isValidVarName(h) && !MIBAL_FIXED_VARS.includes(h)) : [];
+}
+function renderMibalVars() {
+    const list = document.getElementById('mibal-vars-list');
+    if (list) {
+        list.innerHTML = mibalVars.length
+            ? mibalVars.map(h => `<span style="display:inline-flex; align-items:center; gap:5px; background:#7b1fa2; color:#fff; padding:3px 9px; border-radius:12px; font-size:12px; font-weight:bold;">${h}<span class="mibal-var-del" data-h="${h}" style="cursor:pointer; font-weight:900;">✕</span></span>`).join('')
+            : '<span style="font-size:11px; color:#999;">추가된 변수 없음</span>';
+        list.querySelectorAll('.mibal-var-del').forEach(x => x.onclick = () => removeMibalVar(x.dataset.h));
+    }
+    const sel = document.getElementById('mibal-var-select');
+    if (sel) {
+        const exclude = ['상품코드', '상품명', '옵션', ...MIBAL_FIXED_VARS, ...mibalVars];
+        const avail = logFieldKeys().filter(f => !exclude.includes(f) && isValidVarName(f));
+        sel.innerHTML = avail.length
+            ? '<option value="">헤더 선택…</option>' + avail.map(f => `<option value="${f}">${f}</option>`).join('')
+            : '<option value="">추가 가능한 헤더 없음 (미발재고로그 업로드 필요)</option>';
+    }
+}
+function addMibalVar() {
+    const sel = document.getElementById('mibal-var-select');
+    const h = sel && sel.value;
+    if (!h) return;
+    if (mibalVars.includes(h) || MIBAL_FIXED_VARS.includes(h)) { alert('이미 있는 변수이거나 기본 변수와 이름이 같습니다: ' + h); return; }
+    if (!isValidVarName(h)) { alert('변수로 쓸 수 없는 헤더입니다(공백/특수문자/숫자로 시작 등): ' + h); return; }
+    mibalVars.push(h);
+    renderMibalVars();
+    saveMibalVars();
+}
+function removeMibalVar(h) {
+    if (mibalFormula.includes(h) && !confirm(`'${h}' 변수가 현재 규칙에 쓰이는 것 같습니다.\n삭제하면 규칙이 기본 계산으로 돌아갈 수 있습니다. 계속할까요?`)) return;
+    mibalVars = mibalVars.filter(v => v !== h);
+    renderMibalVars();
+    saveMibalVars();
+}
+async function saveMibalVars() {
+    mibalFn = compileMibalFormula(mibalFormula); // 변수 목록 변경 → 재컴파일(인자 수 반영)
+    try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { mibalVars, updatedAt: new Date() }, { merge: true }); } catch (e) { }
+    if (formulaMode === 'builder') renderRuleRows(); // 조립모드 드롭다운 갱신
+    if (savedDates.length > 0) applyDates();
+}
+// 조립모드 옵션(추가 변수 포함)
+function ruleLeftOpts() { return [...RULE_VARS, ...mibalVars]; }
+function ruleRightOpts() { return [...RULE_RIGHT, ...mibalVars]; }
+function ruleResultOpts() { return [...RULE_RESULTS, ...mibalVars.map(h => [h, h])]; }
+
 // ===== ① 예시 모드 =====
 let exampleRows = [
     { s:0, c:20, sh:0, d:0, want:'' },
@@ -330,7 +384,7 @@ function updateExampleCurrent() {
     // '지금 결과' = 현재 저장된 규칙(mibalFn)이 내는 값
     exampleRows.forEach((r,i) => {
         const td = document.getElementById('ex-cur-' + i);
-        if (td) td.textContent = evalMibal(r.s, r.c, r.sh, r.d);
+        if (td) td.textContent = evalMibal(r.s, r.c, r.sh, r.d, {});
     });
 }
 function copyExamples() {
@@ -401,15 +455,15 @@ function renderRuleRows() {
     box.innerHTML = ruleRows2.map((r,i) => `
       <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap; background:#f5f5f5; padding:8px; border-radius:6px; margin-bottom:6px; font-size:13px; font-weight:bold;">
         <span>만약</span>
-        ${ruleSelect('rl-L', i, RULE_VARS, r.L)}
+        ${ruleSelect('rl-L', i, ruleLeftOpts(), r.L)}
         ${ruleSelect('rl-op', i, RULE_OPS, r.op)}
-        ${ruleSelect('rl-R', i, RULE_RIGHT, r.R)}
+        ${ruleSelect('rl-R', i, ruleRightOpts(), r.R)}
         <span>이면 → =</span>
-        ${ruleSelect('rl-res', i, RULE_RESULTS, r.result)}
+        ${ruleSelect('rl-res', i, ruleResultOpts(), r.result)}
         <button class="rl-del" data-i="${i}" style="border:none; background:none; color:#d32f2f; cursor:pointer; font-size:15px; margin-left:auto;">✕</button>
       </div>`).join('');
     const elseSel = document.getElementById('rule-else');
-    if (elseSel) elseSel.innerHTML = RULE_RESULTS.map(([label,val]) => `<option value="${val}" ${val === ruleElse ? 'selected' : ''}>${label}</option>`).join('');
+    if (elseSel) elseSel.innerHTML = ruleResultOpts().map(([label,val]) => `<option value="${val}" ${val === ruleElse ? 'selected' : ''}>${label}</option>`).join('');
     box.querySelectorAll('select').forEach(sel => sel.onchange = () => {
         const i = +sel.dataset.i;
         if (sel.classList.contains('rl-L')) ruleRows2[i].L = sel.value;
@@ -436,8 +490,9 @@ function updateRuleCheck() {
     const fn = compileMibalFormula(buildRuleFormula());
     if (!fn) { el.innerHTML = '⚠️ 규칙이 올바르지 않습니다.'; el.style.color = '#d32f2f'; return; }
     const samples = [[0,20,0,0],[10,20,8,5],[50,40,0,0]];
+    const zeros = mibalVars.map(() => 0); // 미리보기: 추가 변수는 0으로 가정
     const parts = samples.map(([s,c,sh,d]) => {
-        let v = Math.round(fn(s,c,sh,d)); if (v < 0) v = 0;
+        let v = Math.round(fn(s,c,sh,d, ...zeros)); if (v < 0) v = 0;
         return `재고${s}·적${c}${sh?'·부'+sh:''}${d?'·직'+d:''} → <b style="color:#e65100;">${v}</b>`;
     });
     el.style.color = '#555';
@@ -976,7 +1031,7 @@ function applyDates(opts) {
         // [Ver 4.7] 미발수량 = 설정된 공식으로 계산 (변수: 총재고/적재량/부족수량/직진배송)
         const _short = parseInt(shortageVal) || 0;            // 부족수량
         const _direct = parseInt(directShipVal) || 0;         // 직진배송수량
-        const mibalQty = evalMibal(totalStock, capacity, _short, _direct);
+        const mibalQty = evalMibal(totalStock, capacity, _short, _direct, log);
         return {
             code: item.code, name: item.name, option: item.option, arrivalQty: item.arrivalQty,
             mibalQty, totalStock,
@@ -1003,7 +1058,7 @@ function recomputeRow(code) {
     row.capacity = cap;
     if (ed.shortage !== undefined) row.shortage = ed.shortage;
     if (ed.directShip !== undefined) row.directShip = ed.directShip;
-    row.mibalQty = evalMibal(row.totalStock, cap, short, direct);
+    row.mibalQty = evalMibal(row.totalStock, cap, short, direct, stockLogData[code] || {});
     renderTable(); updateSummary();
     scheduleScanDBSync(); // 편집 결과를 앱 스캔DB에도 반영
 }
@@ -1208,7 +1263,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '7.4';
+const WEB_VERSION = '7.5';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1253,7 +1308,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; } }
 async function saveConfig() { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -1383,6 +1438,8 @@ function setupEventListeners() {
     document.getElementById('btn-ex-add')?.addEventListener('click', () => { exampleRows.push({ s:0, c:20, sh:0, d:0, want:'' }); buildExampleRows(); });
     document.getElementById('btn-ex-copy')?.addEventListener('click', () => copyExamples());
     document.getElementById('btn-example-apply')?.addEventListener('click', () => applyFromExamples());
+    // [Ver 7.5] 규칙 변수(재고로그 헤더) 추가
+    document.getElementById('btn-mibal-var-add')?.addEventListener('click', () => addMibalVar());
     // 규칙 조립 모드
     document.getElementById('btn-rule-add')?.addEventListener('click', () => { ruleRows2.push({ L:'총재고', op:'===', R:'0', result:'0' }); renderRuleRows(); });
     document.getElementById('btn-builder-apply')?.addEventListener('click', () => applyFromBuilder());
