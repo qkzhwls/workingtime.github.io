@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 7.6 (기존재고: 시드 파일에 없던 스캔 상품 ⚠️ 배지 표시 + 다운로드 경고)
+// 중국제작 미발계산기 Ver 7.7 (기존재고 목록: 행별 수정(✏️)·삭제(🗑️) - 다운로드 전 편집)
 
 import { initializeFirebase } from './config.js';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -192,18 +192,52 @@ function renderLocMoveTable() {
     const rows = lmExistingRows();
     const cEl = document.getElementById('lm-count'); if (cEl) cEl.textContent = `새 자리 추가 ${rows.length}건`;
     const moreEl = document.getElementById('lm-more');
-    if (!rows.length) { tb.innerHTML = '<tr><td colspan="3" style="padding:24px; color:#888;">새로 추가된 자리가 없습니다.<br><span style="font-size:11px;">(기존재고 업로드 후 스캐너 \'기존재고\' 모드로 새 자리를 찍으면 여기 표시됩니다)</span></td></tr>'; if (moreEl) moreEl.textContent = ''; return; }
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="4" style="padding:24px; color:#888;">새로 추가된 자리가 없습니다.<br><span style="font-size:11px;">(기존재고 업로드 후 스캐너 \'기존재고\' 모드로 새 자리를 찍으면 여기 표시됩니다)</span></td></tr>'; if (moreEl) moreEl.textContent = ''; return; }
     const shown = rows.slice(0, LM_RENDER_CAP);
     tb.innerHTML = shown.map(r => {
         const noBase = !r.base; // 시드 파일에 없던 상품(기준 위치 없음)
         const badge = noBase ? '<div style="margin-top:3px;"><span title="업로드 파일에 없던 상품 — 기존 위치를 몰라 스캔한 자리만 반영됩니다. ERP 업로드 시 기존값이 덮어써질 수 있어요." style="background:#fff3e0; color:#e65100; border:1px solid #ffcc80; border-radius:4px; padding:0 4px; font-size:10px; font-weight:bold; white-space:nowrap;">⚠️ 파일에 없던 상품</span></div>' : '';
-        return `<tr style="border-bottom:1px solid #eee;${noBase ? ' background:#fffdf5;' : ''}"><td style="padding:7px 6px; font-weight:bold; white-space:nowrap;">${r.code}${badge}</td><td style="padding:7px 6px; text-align:left;">${renderLocList(r.location, r.base)}</td><td style="padding:7px 6px; color:#888;">${lmFmtAt(r.at)}</td></tr>`;
+        return `<tr style="border-bottom:1px solid #eee;${noBase ? ' background:#fffdf5;' : ''}"><td style="padding:7px 6px; font-weight:bold; white-space:nowrap;">${r.code}${badge}</td><td style="padding:7px 6px; text-align:left;">${renderLocList(r.location, r.base)}</td><td style="padding:7px 6px; color:#888; white-space:nowrap;">${lmFmtAt(r.at)}</td><td style="padding:7px 6px; white-space:nowrap;"><span class="lm-edit" data-code="${r.code}" title="수정" style="cursor:pointer; margin-right:10px; font-size:15px;">✏️</span><span class="lm-del" data-code="${r.code}" title="삭제" style="cursor:pointer; font-size:15px;">🗑️</span></td></tr>`;
     }).join('');
+    tb.querySelectorAll('.lm-edit').forEach(b => b.onclick = () => editLocMoveRow(b.dataset.code));
+    tb.querySelectorAll('.lm-del').forEach(b => b.onclick = () => deleteLocMoveRow(b.dataset.code));
     const flagged = rows.filter(r => !r.base).length;
     const notes = [];
     if (flagged) notes.push(`<b style="color:#e65100;">⚠️ 파일에 없던 상품 ${flagged}건 포함</b>`);
     if (rows.length > LM_RENDER_CAP) notes.push(`상위 ${LM_RENDER_CAP}건만 표시 · 전체 ${rows.length}건 (검색으로 좁히기)`);
     if (moreEl) moreEl.innerHTML = notes.join(' · ');
+}
+// [Ver 7.7] 기존재고 목록 행 삭제 — 해당 상품의 위치기록 제거(목록/다운로드에서 제외)
+async function deleteLocMoveRow(code) {
+    if (!confirm(`'${code}' 위치 기록을 삭제할까요?\n(이 상품은 목록·다운로드에서 제외됩니다. 되돌릴 수 없습니다)`)) return;
+    showLoading('🗑️ 삭제 중...');
+    try {
+        await deleteDoc(doc(db, 'ChinaStockGoods_LocationHistory', code));
+        delete locationAssignMap[code];
+        renderLocMoveTable();
+        if (filteredData.length > 0) renderTable();
+        hideLoading(); showToast('✅ 삭제됨');
+    } catch (e) { hideLoading(); alert('삭제 실패: ' + e.message); }
+}
+// [Ver 7.7] 기존재고 목록 행 수정 — 위치값(콤마 다중) 편집. 비우면 삭제. base(기준값)는 유지.
+async function editLocMoveRow(code) {
+    const v = locationAssignMap[code]; if (!v) return;
+    const input = prompt(`'${code}' 위치값 수정 (콤마로 구분)\n· 잘못 찍힌 자리를 지우거나 고칠 수 있습니다\n· 비우면 이 상품이 목록에서 제외됩니다`, v.location || '');
+    if (input === null) return; // 취소
+    const norm = input.split(',').map(x => x.trim()).filter(Boolean).join(',');
+    showLoading('💾 수정 중...');
+    try {
+        if (!norm) {
+            await deleteDoc(doc(db, 'ChinaStockGoods_LocationHistory', code));
+            delete locationAssignMap[code];
+        } else {
+            await setDoc(doc(db, 'ChinaStockGoods_LocationHistory', code), { location: norm, at: new Date() }, { merge: true });
+            locationAssignMap[code] = { ...v, location: norm };
+        }
+        renderLocMoveTable();
+        if (filteredData.length > 0) renderTable();
+        hideLoading(); showToast('✅ 수정됨');
+    } catch (e) { hideLoading(); alert('수정 실패: ' + e.message); }
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
 async function downloadLocMove() {
@@ -1273,7 +1307,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '7.6';
+const WEB_VERSION = '7.7';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
