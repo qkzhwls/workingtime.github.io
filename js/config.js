@@ -1,6 +1,6 @@
 // === js/config.js ===
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 // ==========================================
@@ -36,7 +36,13 @@ export const initializeFirebase = () => {
     try {
         // 1. A창고 문 열기 (기본 앱)
         const app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
+        // [Ver 7.9] 오프라인 캐시(IndexedDB) 사용 → 새로고침 시 서버 전체 재읽기 최소화(무료 읽기 한도 절감)
+        try {
+            db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
+        } catch (e) {
+            console.warn('Firestore 로컬 캐시 미적용(폴백):', e);
+            db = getFirestore(app);
+        }
         auth = getAuth(app);
         
         // 2. B창고 문 열기 (이름표 "SecondaryApp" 부착)

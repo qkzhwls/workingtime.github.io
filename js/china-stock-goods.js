@@ -1,7 +1,7 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 7.8 (기존재고 목록 수정: prompt → 인라인 입력창 편집)
+// 중국제작 미발계산기 Ver 7.9 (읽기 절감: 위치 데이터 지연 로딩 + Firestore 오프라인 캐시)
 
-import { initializeFirebase } from './config.js';
+import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
@@ -636,6 +636,9 @@ function loadInboundHistory() {
 
 // [Ver 5.6] 앱(스캐너)이 지정한 위치 실시간 구독 → '위치확인' 열용 (상품코드 → 위치)
 let locationAssignMap = {};
+// [Ver 7.9] 읽기 절감: 위치 데이터(2천건+)는 위치지정모드에 처음 들어갈 때만 1회 구독
+let locHistSubscribed = false;
+function ensureLocationHistory() { if (!locHistSubscribed) { locHistSubscribed = true; loadLocationHistory(); } }
 function loadLocationHistory() {
     const q = query(collection(db, 'ChinaStockGoods_LocationHistory'));
     onSnapshot(q, (snapshot) => {
@@ -1157,7 +1160,7 @@ function applyViewMode() {
     if (title) title.style.color = viewMode === 'location' ? '#6a1b9a' : '#333';
     const clr = document.getElementById('btn-date-clear'); // [Ver 7.4] 모드별 초기화 라벨
     if (clr) clr.textContent = viewMode === 'location' ? '🗑️ 위치 초기화' : '🗑️ 미발 초기화';
-    if (viewMode === 'location') applyLocSub(); else renderTable();
+    if (viewMode === 'location') { ensureLocationHistory(); applyLocSub(); } else renderTable();
 }
 function applyLocSub() {
     document.body.dataset.locsub = locSubView;
@@ -1320,7 +1323,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '7.8';
+const WEB_VERSION = '7.9';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1578,7 +1581,7 @@ function setupEventListeners() {
 async function init() {
     setupEventListeners();
     loadInboundHistory();
-    loadLocationHistory(); // [Ver 5.6] 앱 위치지정 실시간 구독
+    // [Ver 7.9] 위치 구독은 위치지정모드 진입 시에만(setupEventListeners의 applyViewMode → ensureLocationHistory) → 미발 접속은 위치 2천건 읽기 0
     // [Ver 3.3] 버전 체크: 로드 시 1회(앱 최신버전 게시 포함) + 10분 간격 + 창 복귀 시
     checkVersion(true);
     setInterval(() => checkVersion(false), 10 * 60 * 1000);
