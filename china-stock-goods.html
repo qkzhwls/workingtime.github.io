@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.8</div>
+            <div class="version-badge">🚀 Ver 8.9</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -247,12 +247,10 @@
                     <select id="rule-else" style="padding:5px; border:1px solid #ccc; border-radius:4px;"></select>
                 </div>
                 <button id="btn-rule-add" style="margin-top:8px; padding:6px 12px; border:1px solid #1976d2; background:#fff; color:#1976d2; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">+ 조건 추가</button>
-                <!-- [Ver 8.8] 규칙 테스트: 값을 넣으면 내가 만든 규칙의 결과가 나옴 -->
+                <!-- [Ver 8.9] 완성된 예시: 임의 값으로 내가 만든 규칙을 적용한 결과 -->
                 <div style="margin-top:12px; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; padding:10px;">
-                    <div style="font-weight:bold; font-size:12px; color:#e65100; margin-bottom:8px;">🧪 규칙 테스트 — 값을 넣으면 위에서 만든 규칙의 결과가 나옵니다</div>
-                    <div id="rule-test-inputs" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
-                    <div style="margin-top:10px; font-size:14px; font-weight:bold;">→ 미발수량 = <span id="rule-test-result" style="color:#e65100; font-size:19px;">0</span></div>
-                    <div id="rule-test-warn" style="font-size:11px; color:#d32f2f; margin-top:4px;"></div>
+                    <div style="font-weight:bold; font-size:12px; color:#e65100; margin-bottom:6px;">🧪 완성된 예시 — 임의 값으로 내 규칙을 적용한 결과</div>
+                    <div id="rule-examples" style="font-size:12px; color:#444; line-height:1.9;"></div>
                 </div>
                 <button id="btn-builder-apply" style="width:100%; margin-top:12px; padding:13px; border:none; background:#1976d2; color:#fff; border-radius:8px; font-size:16px; font-weight:800; cursor:pointer;">✔ 이 규칙 적용</button>
             </div>
@@ -340,6 +338,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.8"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.9"></script>
 </body>
 </html>
