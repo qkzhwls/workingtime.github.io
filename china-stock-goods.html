@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.10</div>
+            <div class="version-badge">🚀 Ver 8.11</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -335,9 +335,18 @@
         </div>
     </div>
 
+    <!-- [Ver 8.11] 모바일 접속 시 입고앱 실행 안내 -->
+    <div id="mobile-gate" style="display:none; position:fixed; inset:0; z-index:100000; background:linear-gradient(160deg,#6a1b9a,#4a148c); color:#fff; flex-direction:column; justify-content:center; align-items:center; text-align:center; padding:24px; box-sizing:border-box;">
+        <div style="font-size:54px; margin-bottom:12px;">📱</div>
+        <div style="font-size:21px; font-weight:800; margin-bottom:8px;">입고앱(스캐너)을 실행하시겠습니까?</div>
+        <div style="font-size:14px; opacity:.85; margin-bottom:30px; line-height:1.6;">모바일에서는 스캐너로 바로 작업할 수 있습니다.<br><span style="font-size:12px; opacity:.7;">미발계산기 화면은 PC에서 보기 편합니다.</span></div>
+        <button id="mg-open-scan" style="width:100%; max-width:330px; padding:17px; font-size:18px; font-weight:800; border:none; border-radius:12px; background:#fff; color:#4a148c; cursor:pointer; margin-bottom:12px;">📱 입고앱 실행</button>
+        <button id="mg-open-web" style="width:100%; max-width:330px; padding:12px; font-size:14px; font-weight:700; border:1px solid rgba(255,255,255,.55); border-radius:12px; background:transparent; color:#fff; cursor:pointer;">그냥 웹 페이지 보기</button>
+    </div>
+
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.10"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.11"></script>
 </body>
 </html>
