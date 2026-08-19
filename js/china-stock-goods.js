@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.3 (바코드≠상품코드 매핑: 업로드 시 BARCODE_MAP 생성 → 스캐너 변환)
+// 중국제작 미발계산기 Ver 8.4 (출고일 유예 일수 설정 + 미발재고로그 업로드를 파일메뉴로 이동)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -19,7 +19,8 @@ let inboundMap = {};
 let sortConfig = { key: '', direction: 'asc' };
 let csvUrlOrder = '';
 let csvUrlBuy = '';
-let savedDates = []; 
+let savedDates = [];
+let graceDays = 1; // [Ver 8.4] 출고일 유예: 실입고 표시돼도 (출고일+graceDays)까지는 목록/표/스캐너에 유지
 let saveTimeout = null;
 
 // 유틸리티
@@ -53,6 +54,21 @@ function normalizeDate(dateStr) {
         return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
     }
     return s;
+}
+// [Ver 8.4] 출고일 유예: 출고일 + graceDays 가 '오늘' 이후(포함)면 아직 유예 안 지남 → 유지
+function withinGrace(shipDateStr) {
+    if (!shipDateStr || shipDateStr.length < 10) return false;
+    const d = new Date(shipDateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return false;
+    d.setDate(d.getDate() + (parseInt(graceDays) || 0));
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return d.getTime() >= today.getTime();
+}
+// 한 회차를 목록/표에서 제외할지: 미실입고=유지, 실입고=유예 지났으면 제외
+function isRoundExpired(row, iQcol, iAcol, dCol) {
+    const received = hasValue(row[iQcol]) || hasValue(row[iAcol]);
+    if (!received) return false;              // 아직 실입고 안 됨 → 유지
+    return !withinGrace(normalizeDate(row[dCol])); // 실입고 됨 → 유예 지났으면 제외
 }
 
 function showLoading(text) {
@@ -564,6 +580,20 @@ function updateRuleCheck() {
 function applyFromBuilder() { applyAndSaveFormula(buildRuleFormula(), '✔ 규칙 적용됨'); }
 
 // ---------------------------------------------------------
+// [Ver 8.4] 출고일 유예 일수 설정 (실입고 표시돼도 출고일+N일까지 목록/표/스캐너 유지)
+async function openGraceSetting() {
+    closeAllMenus();
+    const v = prompt('출고일 유예 일수\n\n실입고가 CSV에 먼저 찍혀도, "출고일 + 이 일수" 까지는\n목록·표·스캐너(입고앱)에 그대로 남겨서 입고작업을 할 수 있게 합니다.\n\n예) 1 = 출고일 다음날까지 유지', String(graceDays));
+    if (v === null) return;
+    const n = parseInt(v);
+    if (isNaN(n) || n < 0) { alert('0 이상의 숫자를 입력하세요.'); return; }
+    graceDays = n;
+    try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { graceDays, updatedAt: new Date() }, { merge: true }); } catch (e) {}
+    extractShipDates();                       // 출고일 목록 갱신
+    if (savedDates.length > 0) applyDates();  // 표/스캐너 재계산
+    showToast(`✅ 출고일 유예 ${n}일 저장됨`);
+}
+
 // [Ver 5.4] 적재량 구역별 일괄 설정 모달
 // ---------------------------------------------------------
 function openZoneCapModal() {
@@ -997,7 +1027,7 @@ function extractShipDates() {
     const process = (rows) => {
         rows.forEach(row => {
             dCols.forEach((dc, idx) => {
-                if (hasValue(row[iQCols[idx]]) || hasValue(row[iACols[idx]])) return;
+                if (isRoundExpired(row, iQCols[idx], iACols[idx], dCols[idx])) return; // [Ver 8.4] 실입고+유예경과만 제외
                 const norm = normalizeDate(row[dc]);
                 if (!norm || norm.length < 10) return;
                 if (!dateMap[norm]) dateMap[norm] = { qty: 0, skus: new Set() };
@@ -1080,7 +1110,7 @@ function applyDates(opts) {
             const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim(); if (!code) return;
             let matched = false, totalQty = 0;
             dCols.forEach((dc, idx) => {
-                if (hasValue(row[iQCols[idx]]) || hasValue(row[iACols[idx]])) return;
+                if (isRoundExpired(row, iQCols[idx], iACols[idx], dCols[idx])) return; // [Ver 8.4] 실입고+유예경과만 제외
                 const rd = normalizeDate(row[dc]);
                 if (rd && savedDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qCols[idx]]) || 0); }
             });
@@ -1337,7 +1367,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.3';
+const WEB_VERSION = '8.4';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1382,7 +1412,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; } }
 async function saveConfig() { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -1524,6 +1554,7 @@ function setupEventListeners() {
     document.querySelector('#mibal-formula-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
     // [Ver 5.4] 적재량 구역별 일괄 설정 모달
+    document.getElementById('btn-open-grace')?.addEventListener('click', () => openGraceSetting()); // [Ver 8.4] 출고일 유예
     document.getElementById('btn-open-zone-cap')?.addEventListener('click', () => openZoneCapModal());
     document.getElementById('btn-zone-cancel')?.addEventListener('click', () => closeZoneCapModal());
     document.getElementById('btn-zone-save')?.addEventListener('click', () => saveZoneCap());
