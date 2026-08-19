@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.9 (규칙 조립: 임의값 자동 완성 예시로 결과 표시)
+// 중국제작 미발계산기 Ver 8.10 (출고일 선택 모드별 분리: 미발계산기 ↔ 위치지정모드)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -19,7 +19,9 @@ let inboundMap = {};
 let sortConfig = { key: '', direction: 'asc' };
 let csvUrlOrder = '';
 let csvUrlBuy = '';
-let savedDates = [];
+let savedDates = [];       // 활성(현재 모드)의 출고일 선택
+let savedDatesMibal = [];  // [Ver 8.10] 미발계산기 모드 출고일 선택
+let savedDatesLoc = [];    // [Ver 8.10] 위치지정모드 출고일 선택 (모드별 분리)
 let graceDays = 1; // [Ver 8.6] 본사도착 유예: 본사도착일 + graceDays 까지 목록/표/스캐너에 유지
 let shipDateByArrival = {}; // [Ver 8.7] 본사도착일 → 출고일(들) : 표시용(로직은 본사도착일, 사용자에겐 출고일 표기)
 let saveTimeout = null;
@@ -1056,8 +1058,20 @@ function extractShipDates() {
     checklistContainer.querySelectorAll('.date-check').forEach(ck => { ck.addEventListener('change', () => { updateSavedDatesFromCheckboxes(); renderSelectedTags(); }); });
 }
 
+// [Ver 8.10] 현재 모드의 출고일 선택을 모드별 저장소에 반영
+function persistActiveDates() { if (viewMode === 'location') savedDatesLoc = [...savedDates]; else savedDatesMibal = [...savedDates]; }
+// [Ver 8.10] 모드 전환 시 해당 모드의 출고일 선택으로 날짜 UI/표 갱신
+function refreshDatesUI() {
+    extractShipDates();      // 체크리스트(선택상태 반영)
+    renderSelectedTags();    // 선택 태그
+    const btn = document.getElementById('btn-date-dropdown');
+    if (btn) btn.innerText = savedDates.length > 0 ? `▼ ${savedDates.length}개 선택됨` : `▼ 출고일 선택`;
+    if (savedDates.length > 0) applyDates();
+    else { tableData = []; filteredData = []; renderTable(); updateSummary(); }
+}
 function updateSavedDatesFromCheckboxes() {
     savedDates = Array.from(document.querySelectorAll('.date-check:checked')).map(c => c.value);
+    persistActiveDates(); // [Ver 8.10] 모드별 저장소 동기화
     const btn = document.getElementById('btn-date-dropdown');
     btn.innerText = savedDates.length > 0 ? `▼ ${savedDates.length}개 선택됨` : `▼ 출고일 선택`;
 }
@@ -1153,7 +1167,7 @@ function applyDates(opts) {
     filteredData = [...tableData]; renderTable(); updateSummary();
     // [Ver 2.8] 표 갱신 시 앱용 스캔DB 자동 동기화
     // (앱 입고 이벤트로 인한 갱신은 앱이 이미 차감했으므로 skipSync로 생략)
-    if (!(opts && opts.skipSync)) scheduleScanDBSync();
+    if (viewMode !== 'location' && !(opts && opts.skipSync)) scheduleScanDBSync(); // [Ver 8.10] ScanDB는 미발계산기 선택 기준으로만 동기화
 }
 
 // [Ver 5.4] 셀 편집 시 해당 상품 한 줄만 미발수량 재계산 + 화면 갱신
@@ -1233,10 +1247,13 @@ function downloadLocByView() { if (locSubView === 'existing') downloadLocMove();
 function openModeSelect() { document.getElementById('mode-select-modal').style.display = 'flex'; }
 function closeModeSelect() { document.getElementById('mode-select-modal').style.display = 'none'; }
 function setViewMode(m) {
+    persistActiveDates();                       // [Ver 8.10] 현재 모드 출고일 저장 (viewMode 아직 이전값)
     viewMode = (m === 'location') ? 'location' : 'mibal';
     localStorage.setItem('csgViewMode', viewMode);
+    savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; // 새 모드 출고일 로드
     closeModeSelect();
     applyViewMode();
+    refreshDatesUI();                           // 날짜 UI/표를 새 모드 선택으로 갱신
 }
 function colLabel(key) {
     if (BUILTIN_COLS[key]) return BUILTIN_COLS[key].label;
@@ -1373,7 +1390,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.9';
+const WEB_VERSION = '8.10';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1418,8 +1435,8 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; } }
-async function saveConfig() { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDatesMibal = Array.isArray(c.savedDatesMibal) ? c.savedDatesMibal : (Array.isArray(c.savedDates) ? c.savedDates : []); savedDatesLoc = Array.isArray(c.savedDatesLoc) ? c.savedDatesLoc : []; savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; } }
+async function saveConfig() { persistActiveDates(); await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDatesMibal, savedDatesLoc, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
 async function loadStockLogFromFirebase() { const snap = await getDocs(collection(db, CHINA_COLLECTION + '_StockLog')); snap.forEach(d => { if(d.data().dataStr) JSON.parse(d.data().dataStr).forEach(r => { const c = (r['상품코드']||'').trim(); if(c) stockLogData[c] = r; }); }); }
