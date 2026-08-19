@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.5</div>
+            <div class="version-badge">🚀 Ver 8.6</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -98,7 +98,7 @@
                 <button class="btn-main-upload" id="btn-toggle-menu" style="padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">⚙️ 환경설정 ▼</button>
                 <div class="upload-menu" id="main-tools-menu" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 10001; width: 280px;">
                     <div class="mode-mibal" style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a;">⚙️ 설정</div>
-                    <div class="menu-item mode-mibal" id="btn-open-grace" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#2e7d32;">📅 출고일 유예 일수 (실입고 후 유지)</div>
+                    <div class="menu-item mode-mibal" id="btn-open-grace" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#2e7d32;">📅 본사도착 유예 일수</div>
                     <div class="menu-item mode-mibal" id="btn-open-sheet-settings" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#607d8b;">📎 CSV 시트 링크 설정</div>
                     <div class="menu-item mode-mibal" id="btn-open-mibal-formula" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#e65100;">🧮 미발수량 공식 설정</div>
                     <div class="menu-item mode-mibal" id="btn-open-zone-cap" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#1565c0;">📦 적재량 구역별 일괄 설정</div>
@@ -111,9 +111,9 @@
     </div>
 
     <div class="date-bar">
-        <label style="font-size: 13px; font-weight: bold; color: #555; white-space: nowrap;">📅 출고일 선택:</label>
+        <label style="font-size: 13px; font-weight: bold; color: #555; white-space: nowrap;">📅 본사도착일 선택:</label>
         <div class="date-dropdown-container" style="position: relative;">
-            <button class="btn-date-dropdown" id="btn-date-dropdown">▼ 출고일 선택</button>
+            <button class="btn-date-dropdown" id="btn-date-dropdown">▼ 본사도착일 선택</button>
             <div class="date-dropdown-popup" id="date-dropdown-popup">
                 <div style="display: flex; gap: 5px; padding-bottom: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px;">
                     <button id="btn-date-all" style="padding: 3px 8px; font-size: 11px; cursor: pointer; background: #f0f0f0; border: 1px solid #ccc; border-radius: 3px;">전체선택</button>
@@ -123,11 +123,8 @@
             </div>
         </div>
         <div class="selected-date-tags" id="date-tags-container">
-            <span class="no-selection-text">선택된 출고일 없음</span>
+            <span class="no-selection-text">선택된 본사도착일 없음</span>
         </div>
-        <label class="mode-mibal" title="켜면 실입고(입고완료)로 표시된 것도 출고일과 무관하게 목록·표·스캐너에 나옵니다 (입고작업용)" style="display:flex; align-items:center; gap:5px; font-size:12px; font-weight:bold; color:#e65100; white-space:nowrap; cursor:pointer; background:#fff3e0; border:1px solid #ffcc80; border-radius:6px; padding:5px 10px;">
-            <input type="checkbox" id="chk-show-received" style="width:16px; height:16px; cursor:pointer;"> 🔄 실입고 완료분 포함
-        </label>
         <div class="date-actions">
             <button id="btn-date-clear" style="padding: 5px 12px; background: #d32f2f; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">🗑️ 전체 초기화</button>
         </div>
@@ -169,7 +166,7 @@
                 </tr>
             </thead>
             <tbody id="table-body">
-                <tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>
+                <tr><td colspan="13" style="text-align:center; padding:50px; color:#888;">본사도착일을 선택하세요.</td></tr>
             </tbody>
         </table>
     </div>
@@ -359,6 +356,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.5"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.6"></script>
 </body>
 </html>

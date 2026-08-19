@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.5 (실입고 완료분 포함 토글: 출고일 무관하게 입고작업 표시)
+// 중국제작 미발계산기 Ver 8.6 (기준을 본사도착일로 변경 + 본사도착 유예일 / 실입고 의존 제거)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -20,8 +20,7 @@ let sortConfig = { key: '', direction: 'asc' };
 let csvUrlOrder = '';
 let csvUrlBuy = '';
 let savedDates = [];
-let graceDays = 1; // [Ver 8.4] 출고일 유예: 실입고 표시돼도 (출고일+graceDays)까지는 목록/표/스캐너에 유지
-let showReceived = false; // [Ver 8.5] 실입고 완료분 포함(입고작업용): 켜면 출고일 무관하게 실입고분도 표시
+let graceDays = 1; // [Ver 8.6] 본사도착 유예: 본사도착일 + graceDays 까지 목록/표/스캐너에 유지
 let saveTimeout = null;
 
 // 유틸리티
@@ -56,21 +55,14 @@ function normalizeDate(dateStr) {
     }
     return s;
 }
-// [Ver 8.4] 출고일 유예: 출고일 + graceDays 가 '오늘' 이후(포함)면 아직 유예 안 지남 → 유지
-function withinGrace(shipDateStr) {
-    if (!shipDateStr || shipDateStr.length < 10) return false;
-    const d = new Date(shipDateStr + 'T00:00:00');
+// [Ver 8.6] 본사도착 유예: (본사도착일 + graceDays) 가 '오늘' 이후(포함)면 아직 유예 안 지남 → 유지
+function withinGrace(arrivalDateStr) {
+    if (!arrivalDateStr || arrivalDateStr.length < 10) return false;
+    const d = new Date(arrivalDateStr + 'T00:00:00');
     if (isNaN(d.getTime())) return false;
     d.setDate(d.getDate() + (parseInt(graceDays) || 0));
     const today = new Date(); today.setHours(0, 0, 0, 0);
     return d.getTime() >= today.getTime();
-}
-// 한 회차를 목록/표에서 제외할지: 미실입고=유지, 실입고=유예 지났으면 제외
-function isRoundExpired(row, iQcol, iAcol, dCol) {
-    const received = hasValue(row[iQcol]) || hasValue(row[iAcol]);
-    if (!received) return false;              // 아직 실입고 안 됨 → 유지
-    if (showReceived) return false;           // [Ver 8.5] '실입고 완료분 포함' ON → 출고일 무관 유지
-    return !withinGrace(normalizeDate(row[dCol])); // 실입고 됨 → 유예 지났으면 제외
 }
 
 function showLoading(text) {
@@ -585,23 +577,15 @@ function applyFromBuilder() { applyAndSaveFormula(buildRuleFormula(), '✔ 규�
 // [Ver 8.4] 출고일 유예 일수 설정 (실입고 표시돼도 출고일+N일까지 목록/표/스캐너 유지)
 async function openGraceSetting() {
     closeAllMenus();
-    const v = prompt('출고일 유예 일수\n\n실입고가 CSV에 먼저 찍혀도, "출고일 + 이 일수" 까지는\n목록·표·스캐너(입고앱)에 그대로 남겨서 입고작업을 할 수 있게 합니다.\n\n예) 1 = 출고일 다음날까지 유지', String(graceDays));
+    const v = prompt('본사도착 유예 일수\n\n"본사도착일 + 이 일수" 까지는 목록·표·스캐너(입고앱)에\n그대로 남겨서 입고작업을 할 수 있게 합니다.\n\n예) 1 = 본사도착 다음날까지 유지 / 3 = 3일까지 유지', String(graceDays));
     if (v === null) return;
     const n = parseInt(v);
     if (isNaN(n) || n < 0) { alert('0 이상의 숫자를 입력하세요.'); return; }
     graceDays = n;
     try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { graceDays, updatedAt: new Date() }, { merge: true }); } catch (e) {}
-    extractShipDates();                       // 출고일 목록 갱신
+    extractShipDates();                       // 본사도착일 목록 갱신
     if (savedDates.length > 0) applyDates();  // 표/스캐너 재계산
-    showToast(`✅ 출고일 유예 ${n}일 저장됨`);
-}
-// [Ver 8.5] 실입고 완료분 포함 토글 (입고작업용): 켜면 출고일 무관하게 실입고분도 목록/표/스캐너에 표시
-async function toggleShowReceived() {
-    showReceived = !!document.getElementById('chk-show-received')?.checked;
-    try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { showReceived, updatedAt: new Date() }, { merge: true }); } catch (e) {}
-    extractShipDates();
-    if (savedDates.length > 0) applyDates();
-    showToast(showReceived ? '✅ 실입고 완료분 포함 (입고작업용)' : '✅ 실입고 완료분 제외 (미발 기준)');
+    showToast(`✅ 본사도착 유예 ${n}일 저장됨`);
 }
 
 // [Ver 5.4] 적재량 구역별 일괄 설정 모달
@@ -621,7 +605,7 @@ function buildZoneCapRows() {
     Object.keys(zoneCapacity).forEach(z => zones.add(z));
     const list = [...zones].sort();
     if (!list.length) {
-        tb.innerHTML = '<tr><td colspan="3" style="padding:20px; color:#888;">표시할 구역이 없습니다.<br>출고일 선택 + 재고로그 업로드 후 이용하세요.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="3" style="padding:20px; color:#888;">표시할 구역이 없습니다.<br>본사도착일 선택 + 재고로그 업로드 후 이용하세요.</td></tr>';
         return;
     }
     tb.innerHTML = list.map(z => `<tr>
@@ -1029,17 +1013,15 @@ function extractShipDates() {
     const checklistContainer = document.getElementById('date-checklist-container');
     if (!checklistContainer) return;
     const dateMap = {};
-    const dCols = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
+    const dCols = ['1차본사도착일','2차본사도착일','3차본사도착일','4차본사도착일','5차본사도착일','6차본사도착일']; // [Ver 8.6] 본사도착일 기준
     const qCols = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
-    const iQCols = ['1차실입고수량','2차실입고수량','3차실입고수량','4차실입고수량','5차실입고수량','6차실입고수량'];
-    const iACols = ['1차실입고금액','2차실입고금액','3차실입고금액','4차실입고금액','5차실입고금액','6차실입고금액'];
-    
+
     const process = (rows) => {
         rows.forEach(row => {
             dCols.forEach((dc, idx) => {
-                if (isRoundExpired(row, iQCols[idx], iACols[idx], dCols[idx])) return; // [Ver 8.4] 실입고+유예경과만 제외
                 const norm = normalizeDate(row[dc]);
-                if (!norm || norm.length < 10) return;
+                if (!norm || norm.length < 10) return;   // 본사도착일 없음 → 제외
+                if (!withinGrace(norm)) return;           // [Ver 8.6] 본사도착일+유예 지남 → 제외
                 if (!dateMap[norm]) dateMap[norm] = { qty: 0, skus: new Set() };
                 dateMap[norm].qty += (parseInt(row[qCols[idx]]) || 0);
                 dateMap[norm].skus.add(row['상품코드'] || row['어드민상품코드']);
@@ -1048,7 +1030,7 @@ function extractShipDates() {
     };
     process(orderDataOriginal); process(orderDataBuy);
     const sorted = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0]));
-    if (sorted.length === 0) { checklistContainer.innerHTML = '미입고 데이터 없음'; return; }
+    if (sorted.length === 0) { checklistContainer.innerHTML = '본사도착 데이터 없음'; return; }
     let html = '';
     sorted.forEach(([date, info]) => {
         const isChecked = savedDates.includes(date) ? 'checked' : '';
@@ -1062,7 +1044,7 @@ function extractShipDates() {
 function updateSavedDatesFromCheckboxes() {
     savedDates = Array.from(document.querySelectorAll('.date-check:checked')).map(c => c.value);
     const btn = document.getElementById('btn-date-dropdown');
-    btn.innerText = savedDates.length > 0 ? `▼ ${savedDates.length}개 선택됨` : `▼ 출고일 선택`;
+    btn.innerText = savedDates.length > 0 ? `▼ ${savedDates.length}개 선택됨` : `▼ 본사도착일 선택`;
 }
 
 function renderSelectedTags() {
@@ -1109,20 +1091,19 @@ function autoApplyDates() {
 function applyDates(opts) {
     if (savedDates.length === 0) return;
     saveConfig();
-    const dCols = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일'];
+    const dCols = ['1차본사도착일','2차본사도착일','3차본사도착일','4차본사도착일','5차본사도착일','6차본사도착일']; // [Ver 8.6] 본사도착일 기준
     const qCols = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
-    const iQCols = ['1차실입고수량','2차실입고수량','3차실입고수량','4차실입고수량','5차실입고수량','6차실입고수량'];
-    const iACols = ['1차실입고금액','2차실입고금액','3차실입고금액','4차실입고금액','5차실입고금액','6차실입고금액'];
-    
+
     let resultMap = {};
     const match = (rows) => {
         rows.forEach(row => {
             const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim(); if (!code) return;
             let matched = false, totalQty = 0;
             dCols.forEach((dc, idx) => {
-                if (isRoundExpired(row, iQCols[idx], iACols[idx], dCols[idx])) return; // [Ver 8.4] 실입고+유예경과만 제외
                 const rd = normalizeDate(row[dc]);
-                if (rd && savedDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qCols[idx]]) || 0); }
+                if (!rd || rd.length < 10) return;        // 본사도착일 없음 → 제외
+                if (!withinGrace(rd)) return;             // [Ver 8.6] 본사도착일+유예 지남 → 제외
+                if (savedDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qCols[idx]]) || 0); }
             });
             if (matched) {
                 if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
@@ -1276,7 +1257,7 @@ function renderTable() {
     const cols = getActiveColumns();
     renderTableHeader(cols);
     const tbody = document.getElementById('table-body');
-    if (!filteredData.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>`; return; }
+    if (!filteredData.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center; padding:50px; color:#888;">본사도착일을 선택하세요.</td></tr>`; return; }
     let html = '';
     filteredData.forEach((row, idx) => {
         const isFromApp = inboundMap[row.code] !== undefined;
@@ -1377,7 +1358,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.5';
+const WEB_VERSION = '8.6';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1422,7 +1403,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; showReceived = !!c.showReceived; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; } }
 async function saveConfig() { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -1564,8 +1545,7 @@ function setupEventListeners() {
     document.querySelector('#mibal-formula-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
     // [Ver 5.4] 적재량 구역별 일괄 설정 모달
-    document.getElementById('btn-open-grace')?.addEventListener('click', () => openGraceSetting()); // [Ver 8.4] 출고일 유예
-    document.getElementById('chk-show-received')?.addEventListener('change', () => toggleShowReceived()); // [Ver 8.5] 실입고 완료분 포함
+    document.getElementById('btn-open-grace')?.addEventListener('click', () => openGraceSetting()); // [Ver 8.6] 본사도착 유예
     document.getElementById('btn-open-zone-cap')?.addEventListener('click', () => openZoneCapModal());
     document.getElementById('btn-zone-cancel')?.addEventListener('click', () => closeZoneCapModal());
     document.getElementById('btn-zone-save')?.addEventListener('click', () => saveZoneCap());
@@ -1644,7 +1624,6 @@ async function init() {
     window.addEventListener('focus', () => checkVersion(false));
     try {
         await loadConfig();
-        const chkR = document.getElementById('chk-show-received'); if (chkR) chkR.checked = showReceived; // [Ver 8.5] 저장된 토글 반영
         renderTable(); // [Ver 5.5] 저장된 열 순서로 헤더 먼저 반영
         await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true)]);
         if(savedDates.length > 0) {
