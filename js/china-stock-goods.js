@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.6 (기준을 본사도착일로 변경 + 본사도착 유예일 / 실입고 의존 제거)
+// 중국제작 미발계산기 Ver 8.7 (로직=본사도착일 유지, 표시는 '8.11 출고 → 8.19 도착')
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -21,6 +21,7 @@ let csvUrlOrder = '';
 let csvUrlBuy = '';
 let savedDates = [];
 let graceDays = 1; // [Ver 8.6] 본사도착 유예: 본사도착일 + graceDays 까지 목록/표/스캐너에 유지
+let shipDateByArrival = {}; // [Ver 8.7] 본사도착일 → 출고일(들) : 표시용(로직은 본사도착일, 사용자에겐 출고일 표기)
 let saveTimeout = null;
 
 // 유틸리티
@@ -605,7 +606,7 @@ function buildZoneCapRows() {
     Object.keys(zoneCapacity).forEach(z => zones.add(z));
     const list = [...zones].sort();
     if (!list.length) {
-        tb.innerHTML = '<tr><td colspan="3" style="padding:20px; color:#888;">표시할 구역이 없습니다.<br>본사도착일 선택 + 재고로그 업로드 후 이용하세요.</td></tr>';
+        tb.innerHTML = '<tr><td colspan="3" style="padding:20px; color:#888;">표시할 구역이 없습니다.<br>출고일 선택 + 재고로그 업로드 후 이용하세요.</td></tr>';
         return;
     }
     tb.innerHTML = list.map(z => `<tr>
@@ -1009,11 +1010,19 @@ async function clearLocationData() {
 // ---------------------------------------------------------
 // 비즈니스 로직 (매칭 및 렌더링)
 // ---------------------------------------------------------
+// [Ver 8.7] 날짜 표시: YYYY-MM-DD → M.D, 그리고 '8.11 출고 → 8.19 도착' 라벨(로직은 본사도착일)
+function fmtMD(d) { const p = (d || '').split('-'); return p.length === 3 ? `${+p[1]}.${+p[2]}` : d; }
+function dateDisplayLabel(arrival) {
+    const ships = (shipDateByArrival[arrival] || []).filter(Boolean);
+    const shipTxt = ships.length ? ships.map(fmtMD).join(',') + ' 출고 → ' : '';
+    return `${shipTxt}${fmtMD(arrival)} 도착`;
+}
 function extractShipDates() {
     const checklistContainer = document.getElementById('date-checklist-container');
     if (!checklistContainer) return;
     const dateMap = {};
-    const dCols = ['1차본사도착일','2차본사도착일','3차본사도착일','4차본사도착일','5차본사도착일','6차본사도착일']; // [Ver 8.6] 본사도착일 기준
+    const dCols = ['1차본사도착일','2차본사도착일','3차본사도착일','4차본사도착일','5차본사도착일','6차본사도착일']; // [Ver 8.6] 본사도착일 기준(로직)
+    const oCols = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일']; // 출고일(표시용)
     const qCols = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
 
     const process = (rows) => {
@@ -1022,19 +1031,23 @@ function extractShipDates() {
                 const norm = normalizeDate(row[dc]);
                 if (!norm || norm.length < 10) return;   // 본사도착일 없음 → 제외
                 if (!withinGrace(norm)) return;           // [Ver 8.6] 본사도착일+유예 지남 → 제외
-                if (!dateMap[norm]) dateMap[norm] = { qty: 0, skus: new Set() };
+                if (!dateMap[norm]) dateMap[norm] = { qty: 0, skus: new Set(), ships: new Set() };
                 dateMap[norm].qty += (parseInt(row[qCols[idx]]) || 0);
                 dateMap[norm].skus.add(row['상품코드'] || row['어드민상품코드']);
+                const sd = normalizeDate(row[oCols[idx]]);
+                if (sd && sd.length >= 10) dateMap[norm].ships.add(sd);
             });
         });
     };
     process(orderDataOriginal); process(orderDataBuy);
+    shipDateByArrival = {};
+    Object.entries(dateMap).forEach(([arr, info]) => { shipDateByArrival[arr] = [...info.ships].sort(); });
     const sorted = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0]));
-    if (sorted.length === 0) { checklistContainer.innerHTML = '본사도착 데이터 없음'; return; }
+    if (sorted.length === 0) { checklistContainer.innerHTML = '출고 데이터 없음'; return; }
     let html = '';
     sorted.forEach(([date, info]) => {
         const isChecked = savedDates.includes(date) ? 'checked' : '';
-        html += `<label class="date-item"><input type="checkbox" class="date-check" value="${date}" ${isChecked}><span>${date} (${info.skus.size}종 / ${info.qty.toLocaleString()}장)</span></label>`;
+        html += `<label class="date-item"><input type="checkbox" class="date-check" value="${date}" ${isChecked}><span>${dateDisplayLabel(date)} (${info.skus.size}종 / ${info.qty.toLocaleString()}장)</span></label>`;
     });
     checklistContainer.innerHTML = html;
     // [Ver 3.1] 팝업 안에서는 선택만 반영(태그 갱신), 적용은 팝업이 닫힐 때
@@ -1044,7 +1057,7 @@ function extractShipDates() {
 function updateSavedDatesFromCheckboxes() {
     savedDates = Array.from(document.querySelectorAll('.date-check:checked')).map(c => c.value);
     const btn = document.getElementById('btn-date-dropdown');
-    btn.innerText = savedDates.length > 0 ? `▼ ${savedDates.length}개 선택됨` : `▼ 본사도착일 선택`;
+    btn.innerText = savedDates.length > 0 ? `▼ ${savedDates.length}개 선택됨` : `▼ 출고일 선택`;
 }
 
 function renderSelectedTags() {
@@ -1052,7 +1065,7 @@ function renderSelectedTags() {
     if (savedDates.length === 0) { container.innerHTML = '선택된 출고일 없음'; return; }
     let html = '';
     [...savedDates].sort((a,b)=>b.localeCompare(a)).forEach(d => {
-        html += `<div class="date-tag">${d} <span class="remove-btn" data-date="${d}">✕</span></div>`;
+        html += `<div class="date-tag">${dateDisplayLabel(d)} <span class="remove-btn" data-date="${d}">✕</span></div>`;
     });
     container.innerHTML = html;
     container.querySelectorAll('.remove-btn').forEach(b => b.addEventListener('click', () => {
@@ -1257,7 +1270,7 @@ function renderTable() {
     const cols = getActiveColumns();
     renderTableHeader(cols);
     const tbody = document.getElementById('table-body');
-    if (!filteredData.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center; padding:50px; color:#888;">본사도착일을 선택하세요.</td></tr>`; return; }
+    if (!filteredData.length) { tbody.innerHTML = `<tr><td colspan="${cols.length}" style="text-align:center; padding:50px; color:#888;">출고일을 선택하세요.</td></tr>`; return; }
     let html = '';
     filteredData.forEach((row, idx) => {
         const isFromApp = inboundMap[row.code] !== undefined;
@@ -1358,7 +1371,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.6';
+const WEB_VERSION = '8.7';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
