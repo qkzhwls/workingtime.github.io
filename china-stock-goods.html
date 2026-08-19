@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.7</div>
+            <div class="version-badge">🚀 Ver 8.8</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -232,30 +232,8 @@
 
             <!-- 모드 선택 탭 -->
             <div style="display:flex; gap:6px; margin-bottom:14px;">
-                <button class="fmode-tab" data-mode="example" style="flex:1; padding:9px 4px; border:2px solid #ccc; background:#fff; border-radius:8px; cursor:pointer; font-weight:800; font-size:13px;">😊 예시로 만들기</button>
                 <button class="fmode-tab" data-mode="builder" style="flex:1; padding:9px 4px; border:2px solid #ccc; background:#fff; border-radius:8px; cursor:pointer; font-weight:800; font-size:13px;">🧩 규칙 조립</button>
                 <button class="fmode-tab" data-mode="advanced" style="flex:1; padding:9px 4px; border:2px solid #ccc; background:#fff; border-radius:8px; cursor:pointer; font-weight:800; font-size:13px;">⚙️ 직접 입력</button>
-            </div>
-
-            <!-- ① 예시 모드 -->
-            <div id="fmode-example">
-                <div style="font-size:12px; color:#555; background:#e8f5e9; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
-                    각 상황에서 <b style="color:#e65100;">원하는 미발수량</b>만 채우고 아래 <b>[이 예시로 규칙 적용]</b>을 누르세요.<br>규칙(수식)은 자동으로 만들어집니다. 오른쪽 <b>지금 결과</b>는 현재 규칙이 내는 값이에요.
-                </div>
-                <div style="overflow-x:auto;">
-                    <table style="width:100%; border-collapse:collapse; font-size:11px; text-align:center; min-width:440px;">
-                        <thead><tr style="background:#eceff1; color:#546e7a;">
-                            <th style="padding:5px;">총재고</th><th>적재량</th><th>부족수량</th><th>직진배송</th>
-                            <th style="color:#e65100;">원하는<br>미발수량</th><th style="color:#888;">지금<br>결과</th><th></th>
-                        </tr></thead>
-                        <tbody id="ex-tbody"></tbody>
-                    </table>
-                </div>
-                <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
-                    <button id="btn-ex-add" style="padding:6px 12px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">+ 상황 추가</button>
-                    <button id="btn-ex-copy" style="padding:6px 12px; border:1px solid #90a4ae; background:#fff; color:#455a64; border-radius:4px; cursor:pointer; font-size:12px;">📋 예시 복사</button>
-                </div>
-                <button id="btn-example-apply" style="width:100%; margin-top:12px; padding:13px; border:none; background:#2e7d32; color:#fff; border-radius:8px; font-size:16px; font-weight:800; cursor:pointer;">✨ 이 예시로 규칙 적용</button>
             </div>
 
             <!-- ② 규칙 조립 모드 -->
@@ -269,7 +247,13 @@
                     <select id="rule-else" style="padding:5px; border:1px solid #ccc; border-radius:4px;"></select>
                 </div>
                 <button id="btn-rule-add" style="margin-top:8px; padding:6px 12px; border:1px solid #1976d2; background:#fff; color:#1976d2; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">+ 조건 추가</button>
-                <div id="rule-check" style="margin-top:10px; font-size:12px; color:#555; background:#fafafa; border:1px dashed #ddd; border-radius:6px; padding:8px;">확인 중…</div>
+                <!-- [Ver 8.8] 규칙 테스트: 값을 넣으면 내가 만든 규칙의 결과가 나옴 -->
+                <div style="margin-top:12px; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; padding:10px;">
+                    <div style="font-weight:bold; font-size:12px; color:#e65100; margin-bottom:8px;">🧪 규칙 테스트 — 값을 넣으면 위에서 만든 규칙의 결과가 나옵니다</div>
+                    <div id="rule-test-inputs" style="display:flex; flex-wrap:wrap; gap:8px;"></div>
+                    <div style="margin-top:10px; font-size:14px; font-weight:bold;">→ 미발수량 = <span id="rule-test-result" style="color:#e65100; font-size:19px;">0</span></div>
+                    <div id="rule-test-warn" style="font-size:11px; color:#d32f2f; margin-top:4px;"></div>
+                </div>
                 <button id="btn-builder-apply" style="width:100%; margin-top:12px; padding:13px; border:none; background:#1976d2; color:#fff; border-radius:8px; font-size:16px; font-weight:800; cursor:pointer;">✔ 이 규칙 적용</button>
             </div>
 
@@ -356,6 +340,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.7"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.8"></script>
 </body>
 </html>

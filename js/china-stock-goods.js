@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.7 (로직=본사도착일 유지, 표시는 '8.11 출고 → 8.19 도착')
+// 중국제작 미발계산기 Ver 8.8 (미발 규칙: 예시모드 삭제 + 규칙 조립 값입력 테스터)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -345,7 +345,7 @@ function openMibalFormulaModal() {
     closeAllMenus();
     document.getElementById('mibal-formula-input').value = mibalFormula;
     renderMibalVars(); // [Ver 7.5] 규칙 변수(재고로그 헤더) 목록/선택지 갱신
-    setFormulaMode('example');
+    setFormulaMode('builder'); // [Ver 8.8] 예시 모드 제거 → 규칙 조립 기본
     document.getElementById('mibal-formula-modal').style.display = 'flex';
 }
 function closeMibalFormulaModal() {
@@ -363,8 +363,7 @@ function setFormulaMode(mode) {
         t.style.background = on ? '#e3f2fd' : '#fff';
         t.style.color = on ? '#0d47a1' : '#555';
     });
-    if (mode === 'example') buildExampleRows();
-    else if (mode === 'builder') renderRuleRows();
+    if (mode === 'builder') renderRuleRows();
     else if (mode === 'advanced') document.getElementById('mibal-formula-input').value = mibalFormula;
 }
 
@@ -558,20 +557,28 @@ function buildRuleFormula() {
     }
     return expr;
 }
-function updateRuleCheck() {
-    const el = document.getElementById('rule-check');
-    if (!el) return;
-    const fn = compileMibalFormula(buildRuleFormula());
-    if (!fn) { el.innerHTML = '⚠️ 규칙이 올바르지 않습니다.'; el.style.color = '#d32f2f'; return; }
-    const samples = [[0,20,0,0],[10,20,8,5],[50,40,0,0]];
-    const zeros = mibalVars.map(() => 0); // 미리보기: 추가 변수는 0으로 가정
-    const parts = samples.map(([s,c,sh,d]) => {
-        let v = Math.round(fn(s,c,sh,d, ...zeros)); if (v < 0) v = 0;
-        return `재고${s}·적${c}${sh?'·부'+sh:''}${d?'·직'+d:''} → <b style="color:#e65100;">${v}</b>`;
-    });
-    el.style.color = '#555';
-    el.innerHTML = '확인(예시): ' + parts.join(' &nbsp;/&nbsp; ');
+// [Ver 8.8] 규칙 테스트: 사용자가 값을 입력하면 지금 만든 규칙의 결과가 나옴
+function ruleTestVars() { return [...MIBAL_FIXED_VARS, ...mibalVars]; }
+function renderRuleTestInputs() {
+    const box = document.getElementById('rule-test-inputs'); if (!box) return;
+    const vars = ruleTestVars();
+    const existing = [...box.querySelectorAll('input')].map(i => i.dataset.v);
+    if (existing.length === vars.length && existing.every((v, i) => v === vars[i])) return; // 구성 동일 → 입력값 보존
+    box.innerHTML = vars.map(v => `<label style="display:flex; flex-direction:column; font-size:11px; color:#555; gap:2px;">${v}<input type="number" class="rule-test-in" data-v="${v}" value="0" style="width:74px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;"></label>`).join('');
+    box.querySelectorAll('.rule-test-in').forEach(inp => inp.addEventListener('input', runRuleTest));
 }
+function runRuleTest() {
+    const resEl = document.getElementById('rule-test-result'), warnEl = document.getElementById('rule-test-warn');
+    if (!resEl) return;
+    const fn = compileMibalFormula(buildRuleFormula());
+    if (!fn) { resEl.textContent = '-'; if (warnEl) warnEl.textContent = '⚠️ 규칙이 아직 올바르지 않습니다.'; return; }
+    if (warnEl) warnEl.textContent = '';
+    const vals = ruleTestVars().map(v => { const el = document.querySelector(`.rule-test-in[data-v="${v}"]`); return parseFloat(el && el.value) || 0; });
+    let out; try { out = Math.round(fn(...vals)); } catch (e) { out = NaN; }
+    if (isNaN(out)) out = 0; if (out < 0) out = 0;
+    resEl.textContent = out;
+}
+function updateRuleCheck() { renderRuleTestInputs(); runRuleTest(); } // 규칙 변경 시 테스터 갱신
 function applyFromBuilder() { applyAndSaveFormula(buildRuleFormula(), '✔ 규칙 적용됨'); }
 
 // ---------------------------------------------------------
@@ -1371,7 +1378,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.7';
+const WEB_VERSION = '8.8';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
