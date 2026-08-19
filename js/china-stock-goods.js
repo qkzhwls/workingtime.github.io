@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.4 (출고일 유예 일수 설정 + 미발재고로그 업로드를 파일메뉴로 이동)
+// 중국제작 미발계산기 Ver 8.5 (실입고 완료분 포함 토글: 출고일 무관하게 입고작업 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -21,6 +21,7 @@ let csvUrlOrder = '';
 let csvUrlBuy = '';
 let savedDates = [];
 let graceDays = 1; // [Ver 8.4] 출고일 유예: 실입고 표시돼도 (출고일+graceDays)까지는 목록/표/스캐너에 유지
+let showReceived = false; // [Ver 8.5] 실입고 완료분 포함(입고작업용): 켜면 출고일 무관하게 실입고분도 표시
 let saveTimeout = null;
 
 // 유틸리티
@@ -68,6 +69,7 @@ function withinGrace(shipDateStr) {
 function isRoundExpired(row, iQcol, iAcol, dCol) {
     const received = hasValue(row[iQcol]) || hasValue(row[iAcol]);
     if (!received) return false;              // 아직 실입고 안 됨 → 유지
+    if (showReceived) return false;           // [Ver 8.5] '실입고 완료분 포함' ON → 출고일 무관 유지
     return !withinGrace(normalizeDate(row[dCol])); // 실입고 됨 → 유예 지났으면 제외
 }
 
@@ -592,6 +594,14 @@ async function openGraceSetting() {
     extractShipDates();                       // 출고일 목록 갱신
     if (savedDates.length > 0) applyDates();  // 표/스캐너 재계산
     showToast(`✅ 출고일 유예 ${n}일 저장됨`);
+}
+// [Ver 8.5] 실입고 완료분 포함 토글 (입고작업용): 켜면 출고일 무관하게 실입고분도 목록/표/스캐너에 표시
+async function toggleShowReceived() {
+    showReceived = !!document.getElementById('chk-show-received')?.checked;
+    try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { showReceived, updatedAt: new Date() }, { merge: true }); } catch (e) {}
+    extractShipDates();
+    if (savedDates.length > 0) applyDates();
+    showToast(showReceived ? '✅ 실입고 완료분 포함 (입고작업용)' : '✅ 실입고 완료분 제외 (미발 기준)');
 }
 
 // [Ver 5.4] 적재량 구역별 일괄 설정 모달
@@ -1367,7 +1377,7 @@ function openInScannerApp() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.4';
+const WEB_VERSION = '8.5';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1412,7 +1422,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDates = c.savedDates || []; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; showReceived = !!c.showReceived; } }
 async function saveConfig() { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDates, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -1555,6 +1565,7 @@ function setupEventListeners() {
 
     // [Ver 5.4] 적재량 구역별 일괄 설정 모달
     document.getElementById('btn-open-grace')?.addEventListener('click', () => openGraceSetting()); // [Ver 8.4] 출고일 유예
+    document.getElementById('chk-show-received')?.addEventListener('change', () => toggleShowReceived()); // [Ver 8.5] 실입고 완료분 포함
     document.getElementById('btn-open-zone-cap')?.addEventListener('click', () => openZoneCapModal());
     document.getElementById('btn-zone-cancel')?.addEventListener('click', () => closeZoneCapModal());
     document.getElementById('btn-zone-save')?.addEventListener('click', () => saveZoneCap());
@@ -1633,6 +1644,7 @@ async function init() {
     window.addEventListener('focus', () => checkVersion(false));
     try {
         await loadConfig();
+        const chkR = document.getElementById('chk-show-received'); if (chkR) chkR.checked = showReceived; // [Ver 8.5] 저장된 토글 반영
         renderTable(); // [Ver 5.5] 저장된 열 순서로 헤더 먼저 반영
         await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true)]);
         if(savedDates.length > 0) {
