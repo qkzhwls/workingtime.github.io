@@ -163,13 +163,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.13"></script>
+    <script src="js/location-map.js?v=8.14"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.13'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.14'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -526,30 +526,25 @@
                     byCode.get(it.barcode).locs.push(it.location);
                 });
                 const codes = [...byCode.keys()];
-                // 각 상품의 기존 저장값 읽기 (append 기준 + baseLocation=기준값)
-                //   baseLocation 필드가 없던 기존 문서는 '현재 위치값'을 기준으로 삼음(그 이후 찍는 것만 '새 자리')
-                const existingMap = {};
-                let readError = false; // [Ver 8.13] 기존 위치 조회 실패(한도초과/네트워크) 감지
-                await Promise.all(codes.map(async c => {
-                    try {
-                        const s = await getDoc(doc(db, 'ChinaStockGoods_LocationHistory', c));
-                        const d = s.exists() ? s.data() : {};
-                        const loc = d.location || '';
-                        existingMap[c] = { location: loc, base: (d.baseLocation !== undefined ? d.baseLocation : loc) };
-                    } catch (e) { readError = true; }
-                }));
-                // [Ver 8.13] 하나라도 조회 실패 시: 기존 위치를 모른 채 덮어쓰면 기존 자리가 유실됨 → 전송 중단, 큐 보존
-                if (readError) { throw new Error('READ_FAILED'); }
-                for (let i = 0; i < codes.length; i += 400) {
-                    const batch = writeBatch(db);
-                    codes.slice(i, i + 400).forEach(c => {
-                        const g = byCode.get(c);
-                        batch.set(doc(db, 'ChinaStockGoods_LocationHistory', c), {
-                            barcode: c, location: mergeLocations(existingMap[c].location, g.locs), baseLocation: existingMap[c].base, sub: g.sub, at: serverTimestamp(), worker: 'Scanner_Web'
-                        });
-                    });
-                    await batch.commit();
+                // [Ver 8.14] 위치 데이터는 단일 문서(LOCATION_STATE.map). 문서 1개만 읽어 기존값 확보(읽기 대폭 절감)
+                let stateMap = {};
+                try {
+                    const s = await getDoc(doc(db, 'ChinaStockGoods', 'LOCATION_STATE'));
+                    stateMap = (s.exists() && s.data() && s.data().map) ? s.data().map : {};
+                } catch (e) {
+                    // [Ver 8.13] 기존 위치를 못 읽으면 덮어써서 기존 자리 유실 위험 → 전송 중단, 큐 보존
+                    throw new Error('READ_FAILED');
                 }
+                const now = Date.now();
+                const mapUpdate = {};
+                codes.forEach(c => {
+                    const g = byCode.get(c);
+                    const cur = stateMap[c] || {};
+                    const loc = cur.location || '';
+                    const base = (cur.base !== undefined ? cur.base : loc);
+                    mapUpdate[c] = { location: mergeLocations(loc, g.locs), base: base, sub: g.sub, at: now, worker: 'Scanner_Web' };
+                });
+                await setDoc(doc(db, 'ChinaStockGoods', 'LOCATION_STATE'), { map: mapUpdate, updatedAt: new Date() }, { merge: true });
                 fbOk = true;
             } catch (e) { console.error('위치 Firebase 기록 실패:', e); if (e && e.message === 'READ_FAILED') fbOk = 'READ_FAILED'; }
             // 구글 스크립트 전송(설정된 경우만) - ERP 반영용

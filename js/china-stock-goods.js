@@ -1,8 +1,8 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.13 (스캐너: 기존위치 조회 실패 시 전송 중단 - 기존 자리 유실 방지)
+// 중국제작 미발계산기 Ver 8.14 (위치 데이터 단일 문서 저장 - 읽기 대폭 절감, 3층 방식)
 
 import { initializeFirebase } from './config.js?v=7.9';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
 const CHINA_COLLECTION = 'ChinaStockGoods';
@@ -168,10 +168,10 @@ function closeAllMenus() {
 }
 
 // [Ver 6.2→7.1] 위치 이동 내역(기존재고) — 위치지정모드 '기존재고지정' 서브뷰에 인라인 표시
-function lmAtMs(at) { try { return at && at.toDate ? at.toDate().getTime() : 0; } catch (e) { return 0; } }
+function lmAtMs(at) { try { if (at == null) return 0; if (typeof at === 'number') return at; return at.toDate ? at.toDate().getTime() : 0; } catch (e) { return 0; } }
 function lmFmtAt(at) {
     try {
-        const d = at && at.toDate ? at.toDate() : null;
+        const d = (typeof at === 'number') ? new Date(at) : (at && at.toDate ? at.toDate() : null);
         if (!d) return '';
         const p = n => String(n).padStart(2, '0');
         return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -225,7 +225,7 @@ async function deleteLocMoveRow(code) {
     if (!confirm(`'${code}' 위치 기록을 삭제할까요?\n(이 상품은 목록·다운로드에서 제외됩니다. 되돌릴 수 없습니다)`)) return;
     showLoading('🗑️ 삭제 중...');
     try {
-        await deleteDoc(doc(db, 'ChinaStockGoods_LocationHistory', code));
+        await updateDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { [`map.${code}`]: deleteField() });
         delete locationAssignMap[code];
         renderLocMoveTable();
         if (filteredData.length > 0) renderTable();
@@ -254,10 +254,10 @@ async function saveEditLocMoveRow(code, raw) {
     showLoading('💾 저장 중...');
     try {
         if (!norm) {
-            await deleteDoc(doc(db, 'ChinaStockGoods_LocationHistory', code));
+            await updateDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { [`map.${code}`]: deleteField() });
             delete locationAssignMap[code];
         } else {
-            await setDoc(doc(db, 'ChinaStockGoods_LocationHistory', code), { location: norm, at: new Date() }, { merge: true });
+            await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { map: { [code]: { location: norm, at: Date.now() } } }, { merge: true });
             locationAssignMap[code] = { ...v, location: norm };
         }
         renderLocMoveTable();
@@ -306,15 +306,12 @@ async function resetLocMove() {
     if (!confirm(`기존재고 위치 이동 내역 ${cnt}건을 삭제할까요?\n(당일입고 위치확인은 유지됩니다. 되돌릴 수 없습니다.)`)) return;
     showLoading('🗑️ 기존재고 내역 삭제 중...');
     try {
-        const snap = await getDocs(collection(db, 'ChinaStockGoods_LocationHistory'));
-        const targets = [];
-        snap.forEach(d => { if ((d.data().sub || '') === 'existing') targets.push(d.ref); });
-        for (let i = 0; i < targets.length; i += 400) {
-            const b = writeBatch(db);
-            targets.slice(i, i + 400).forEach(ref => b.delete(ref));
-            await b.commit();
-        }
-        // 로컬 즉시 반영 (onSnapshot도 곧 갱신)
+        // [Ver 8.14] 단일 문서에서 sub=existing 제외한 맵으로 교체(1회 쓰기)
+        const newMap = {};
+        Object.entries(locationAssignMap).forEach(([c, v]) => {
+            if ((v.sub || '') !== 'existing') newMap[c] = { location: v.location || '', base: v.base || '', sub: v.sub || '', worker: v.worker || '', at: v.at || Date.now() };
+        });
+        await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { map: newMap, updatedAt: new Date() });
         Object.keys(locationAssignMap).forEach(k => { if ((locationAssignMap[k].sub || '') === 'existing') delete locationAssignMap[k]; });
         renderLocMoveTable();
         if (filteredData.length > 0) renderTable();
@@ -674,15 +671,15 @@ let locationAssignMap = {};
 // [Ver 7.9] 읽기 절감: 위치 데이터(2천건+)는 위치지정모드에 처음 들어갈 때만 1회 구독
 let locHistSubscribed = false;
 function ensureLocationHistory() { if (!locHistSubscribed) { locHistSubscribed = true; loadLocationHistory(); } }
+// [Ver 8.14] 위치 데이터를 단일 문서(LOCATION_STATE.map)로 저장 → 읽기 대폭 절감 (3층 로케이션 방식)
 function loadLocationHistory() {
-    const q = query(collection(db, 'ChinaStockGoods_LocationHistory'));
-    onSnapshot(q, (snapshot) => {
+    onSnapshot(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), (snap) => {
         locationAssignMap = {};
-        snapshot.forEach((d) => {
-            const data = d.data();
-            const code = (data.barcode || d.id || '').toString().trim();
-            if (code) locationAssignMap[code] = { location: data.location || '', at: data.at, sub: data.sub || '', worker: data.worker || '', base: (data.baseLocation !== undefined ? data.baseLocation : (data.location || '')) };
-        });
+        const map = (snap.exists() && snap.data() && snap.data().map) ? snap.data().map : {};
+        for (const code in map) {
+            const v = map[code] || {};
+            locationAssignMap[code] = { location: v.location || '', at: v.at, sub: v.sub || '', worker: v.worker || '', base: (v.base !== undefined ? v.base : (v.location || '')) };
+        }
         if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
         if (viewMode === 'location' && locSubView === 'existing' && !document.querySelector('.lm-edit-input')) renderLocMoveTable(); // 기존재고 인라인 목록 실시간 갱신(편집 중이면 건너뜀)
     });
@@ -890,13 +887,11 @@ async function handleExistingLocUpload(e) {
             if (code && loc) entries.push([code, loc]);
         }
         if (!entries.length) { hideLoading(); alert('유효한 (상품코드+위치) 행이 없습니다.'); e.target.value = ''; return; }
-        for (let i = 0; i < entries.length; i += 400) {
-            const batch = writeBatch(db);
-            entries.slice(i, i + 400).forEach(([code, loc]) => batch.set(doc(db, 'ChinaStockGoods_LocationHistory', code), {
-                barcode: code, location: loc, baseLocation: loc, sub: 'existing', at: new Date(), worker: 'Seed_Upload'
-            }));
-            await batch.commit();
-        }
+        // [Ver 8.14] 단일 문서(LOCATION_STATE.map)에 한 번에 병합 저장(1회 쓰기)
+        const now = Date.now();
+        const mapUpdate = {};
+        entries.forEach(([code, loc]) => { mapUpdate[code] = { location: loc, base: loc, sub: 'existing', at: now, worker: 'Seed_Upload' }; });
+        await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { map: mapUpdate, updatedAt: new Date() }, { merge: true });
         hideLoading();
         showToast(`✅ 기존재고 위치값 세팅 완료 (${entries.length}건) — 스캐너가 이 값 뒤에 새 자리를 추가합니다`);
     } catch (err) { hideLoading(); alert('기존재고 위치값 처리 실패: ' + err.message); }
@@ -999,7 +994,7 @@ async function clearLocationData() {
     if (!confirm("위치 데이터를 초기화할까요?\n(당일·기존재고 위치 지정 전체 삭제 / 미발 데이터는 유지)")) return;
     showLoading('🗑️ 위치 데이터 초기화 중...');
     try {
-        await deleteAllDocs('ChinaStockGoods_LocationHistory');
+        await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { map: {}, updatedAt: new Date() }); // [Ver 8.14] 맵 비우기(1회 쓰기)
         locationAssignMap = {};
         if (filteredData.length > 0) renderTable(); // 위치확인 열 갱신
         renderLocMoveTable(); // 기존재고 목록 갱신
@@ -1400,7 +1395,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.13';
+const WEB_VERSION = '8.14';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
