@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.15 (위치 데이터 자동 샤딩 - 8개 문서 분산, 크기 한도 자동 회피)
+// 중국제작 미발계산기 Ver 8.16 (위치모드 당일/기존 서브뷰별 옵션추가항목1 다운로드 버튼 분리, 상단 파일다운로드는 미발모드 전용)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1252,7 +1252,6 @@ function setLocSubView(s) {
     applyLocSub();
 }
 // [Ver 7.2] 파일 다운로드 메뉴의 '옵션추가항목1 다운로드' — 현재 서브뷰에 맞춰 당일/기존재고 다운로드
-function downloadLocByView() { if (locSubView === 'existing') downloadLocMove(); else downloadDayLoc(); }
 function openModeSelect() { document.getElementById('mode-select-modal').style.display = 'flex'; }
 function closeModeSelect() { document.getElementById('mode-select-modal').style.display = 'none'; }
 function setViewMode(m) {
@@ -1409,7 +1408,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.15';
+const WEB_VERSION = '8.16';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1527,7 +1526,7 @@ function setupEventListeners() {
         await downloadToDesktop('미발확인파일.xls', blob);
     });
 
-    // 10-3. 옵션추가항목1 다운로드 → 파일 다운로드 메뉴(btn-loc-download-menu)에서 downloadLocByView(서브뷰별 당일/기존)
+    // 10-3. [Ver 8.16] 옵션추가항목1 다운로드는 서브뷰별 인라인 버튼으로 분리 (당일=btn-loc-download-today, 기존=btn-locmove-download)
 
     // [Ver 6.8→7.1] 모드 선택 (제목 클릭) + 위치지정모드 서브탭(당일/기존) + 당일 다운로드
     document.getElementById('app-title')?.addEventListener('click', openModeSelect);
@@ -1535,7 +1534,7 @@ function setupEventListeners() {
     document.getElementById('mode-select-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mode-select-modal') closeModeSelect(); });
     document.querySelectorAll('.mode-card').forEach(c => c.addEventListener('click', () => setViewMode(c.dataset.mode)));
     document.querySelectorAll('.loc-subtab').forEach(b => b.addEventListener('click', () => setLocSubView(b.dataset.sub)));
-    document.getElementById('btn-loc-download-menu')?.addEventListener('click', () => { closeAllMenus(); downloadLocByView(); });
+    document.getElementById('btn-loc-download-today')?.addEventListener('click', () => downloadDayLoc());
     applyViewMode(); // 저장된 모드 초기 적용
 
     // 11. #search-input (검색)
