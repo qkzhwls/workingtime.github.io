@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.14 (위치 데이터 단일 문서 저장 - 읽기 대폭 절감, 3층 방식)
+// 중국제작 미발계산기 Ver 8.15 (위치 데이터 자동 샤딩 - 8개 문서 분산, 크기 한도 자동 회피)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -7,6 +7,9 @@ import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, 
 const { db } = initializeFirebase();
 const CHINA_COLLECTION = 'ChinaStockGoods';
 const CONFIG_DOC = 'CONFIG';
+// [Ver 8.15] 위치 데이터 자동 샤딩: 상품코드 해시로 N개 문서에 분산 (문서당 1MiB 한도 자동 회피)
+const NUM_LOC_SHARDS = 8;
+function locShardId(code) { let h = 0; const s = String(code || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return 'LOC_SHARD_' + (h % NUM_LOC_SHARDS); }
 
 // 전역 상태
 let orderDataOriginal = [];
@@ -225,7 +228,7 @@ async function deleteLocMoveRow(code) {
     if (!confirm(`'${code}' 위치 기록을 삭제할까요?\n(이 상품은 목록·다운로드에서 제외됩니다. 되돌릴 수 없습니다)`)) return;
     showLoading('🗑️ 삭제 중...');
     try {
-        await updateDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { [`map.${code}`]: deleteField() });
+        await updateDoc(doc(db, CHINA_COLLECTION, locShardId(code)), { [`map.${code}`]: deleteField() });
         delete locationAssignMap[code];
         renderLocMoveTable();
         if (filteredData.length > 0) renderTable();
@@ -254,10 +257,10 @@ async function saveEditLocMoveRow(code, raw) {
     showLoading('💾 저장 중...');
     try {
         if (!norm) {
-            await updateDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { [`map.${code}`]: deleteField() });
+            await updateDoc(doc(db, CHINA_COLLECTION, locShardId(code)), { [`map.${code}`]: deleteField() });
             delete locationAssignMap[code];
         } else {
-            await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { map: { [code]: { location: norm, at: Date.now() } } }, { merge: true });
+            await setDoc(doc(db, CHINA_COLLECTION, locShardId(code)), { map: { [code]: { location: norm, at: Date.now() } } }, { merge: true });
             locationAssignMap[code] = { ...v, location: norm };
         }
         renderLocMoveTable();
@@ -306,12 +309,13 @@ async function resetLocMove() {
     if (!confirm(`기존재고 위치 이동 내역 ${cnt}건을 삭제할까요?\n(당일입고 위치확인은 유지됩니다. 되돌릴 수 없습니다.)`)) return;
     showLoading('🗑️ 기존재고 내역 삭제 중...');
     try {
-        // [Ver 8.14] 단일 문서에서 sub=existing 제외한 맵으로 교체(1회 쓰기)
-        const newMap = {};
+        // [Ver 8.15] 샤드별로 sub=existing 제외한 맵으로 교체(샤드당 1회 쓰기)
+        const byShard = {};
+        for (let i = 0; i < NUM_LOC_SHARDS; i++) byShard['LOC_SHARD_' + i] = {};
         Object.entries(locationAssignMap).forEach(([c, v]) => {
-            if ((v.sub || '') !== 'existing') newMap[c] = { location: v.location || '', base: v.base || '', sub: v.sub || '', worker: v.worker || '', at: v.at || Date.now() };
+            if ((v.sub || '') !== 'existing') byShard[locShardId(c)][c] = { location: v.location || '', base: v.base || '', sub: v.sub || '', worker: v.worker || '', at: v.at || Date.now() };
         });
-        await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { map: newMap, updatedAt: new Date() });
+        for (const sid in byShard) await setDoc(doc(db, CHINA_COLLECTION, sid), { map: byShard[sid], updatedAt: new Date() });
         Object.keys(locationAssignMap).forEach(k => { if ((locationAssignMap[k].sub || '') === 'existing') delete locationAssignMap[k]; });
         renderLocMoveTable();
         if (filteredData.length > 0) renderTable();
@@ -671,18 +675,28 @@ let locationAssignMap = {};
 // [Ver 7.9] 읽기 절감: 위치 데이터(2천건+)는 위치지정모드에 처음 들어갈 때만 1회 구독
 let locHistSubscribed = false;
 function ensureLocationHistory() { if (!locHistSubscribed) { locHistSubscribed = true; loadLocationHistory(); } }
-// [Ver 8.14] 위치 데이터를 단일 문서(LOCATION_STATE.map)로 저장 → 읽기 대폭 절감 (3층 로케이션 방식)
-function loadLocationHistory() {
-    onSnapshot(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), (snap) => {
-        locationAssignMap = {};
-        const map = (snap.exists() && snap.data() && snap.data().map) ? snap.data().map : {};
+// [Ver 8.15] 위치 데이터를 N개 샤드 문서(LOC_SHARD_i.map)에 자동 분산 저장 → 읽기 절감 + 크기 한도 자동 회피
+let locShardCache = {}; // shardId → map
+function rebuildLocationAssignMap() {
+    locationAssignMap = {};
+    for (const sid in locShardCache) {
+        const map = locShardCache[sid] || {};
         for (const code in map) {
             const v = map[code] || {};
             locationAssignMap[code] = { location: v.location || '', at: v.at, sub: v.sub || '', worker: v.worker || '', base: (v.base !== undefined ? v.base : (v.location || '')) };
         }
-        if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
-        if (viewMode === 'location' && locSubView === 'existing' && !document.querySelector('.lm-edit-input')) renderLocMoveTable(); // 기존재고 인라인 목록 실시간 갱신(편집 중이면 건너뜀)
-    });
+    }
+    if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
+    if (viewMode === 'location' && locSubView === 'existing' && !document.querySelector('.lm-edit-input')) renderLocMoveTable(); // 기존재고 인라인 목록 실시간 갱신(편집 중이면 건너뜀)
+}
+function loadLocationHistory() {
+    for (let i = 0; i < NUM_LOC_SHARDS; i++) {
+        const sid = 'LOC_SHARD_' + i;
+        onSnapshot(doc(db, CHINA_COLLECTION, sid), (snap) => {
+            locShardCache[sid] = (snap.exists() && snap.data() && snap.data().map) ? snap.data().map : {};
+            rebuildLocationAssignMap();
+        });
+    }
 }
 
 async function syncOrderData(silent = false) {
@@ -887,11 +901,11 @@ async function handleExistingLocUpload(e) {
             if (code && loc) entries.push([code, loc]);
         }
         if (!entries.length) { hideLoading(); alert('유효한 (상품코드+위치) 행이 없습니다.'); e.target.value = ''; return; }
-        // [Ver 8.14] 단일 문서(LOCATION_STATE.map)에 한 번에 병합 저장(1회 쓰기)
+        // [Ver 8.15] 샤드별로 나눠 병합 저장(샤드당 1회 쓰기)
         const now = Date.now();
-        const mapUpdate = {};
-        entries.forEach(([code, loc]) => { mapUpdate[code] = { location: loc, base: loc, sub: 'existing', at: now, worker: 'Seed_Upload' }; });
-        await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { map: mapUpdate, updatedAt: new Date() }, { merge: true });
+        const byShard = {};
+        entries.forEach(([code, loc]) => { const sid = locShardId(code); (byShard[sid] = byShard[sid] || {})[code] = { location: loc, base: loc, sub: 'existing', at: now, worker: 'Seed_Upload' }; });
+        for (const sid in byShard) await setDoc(doc(db, CHINA_COLLECTION, sid), { map: byShard[sid], updatedAt: new Date() }, { merge: true });
         hideLoading();
         showToast(`✅ 기존재고 위치값 세팅 완료 (${entries.length}건) — 스캐너가 이 값 뒤에 새 자리를 추가합니다`);
     } catch (err) { hideLoading(); alert('기존재고 위치값 처리 실패: ' + err.message); }
@@ -994,8 +1008,8 @@ async function clearLocationData() {
     if (!confirm("위치 데이터를 초기화할까요?\n(당일·기존재고 위치 지정 전체 삭제 / 미발 데이터는 유지)")) return;
     showLoading('🗑️ 위치 데이터 초기화 중...');
     try {
-        await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_STATE'), { map: {}, updatedAt: new Date() }); // [Ver 8.14] 맵 비우기(1회 쓰기)
-        locationAssignMap = {};
+        for (let i = 0; i < NUM_LOC_SHARDS; i++) await setDoc(doc(db, CHINA_COLLECTION, 'LOC_SHARD_' + i), { map: {}, updatedAt: new Date() }); // [Ver 8.15] 모든 샤드 비우기
+        locShardCache = {}; locationAssignMap = {};
         if (filteredData.length > 0) renderTable(); // 위치확인 열 갱신
         renderLocMoveTable(); // 기존재고 목록 갱신
         hideLoading();
@@ -1395,7 +1409,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.14';
+const WEB_VERSION = '8.15';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {

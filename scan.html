@@ -163,13 +163,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.14"></script>
+    <script src="js/location-map.js?v=8.15"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.14'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.15'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -213,6 +213,9 @@
             const k = (scanned || '').toString().trim().toUpperCase();
             return barcodeToCode[k] || k; // 바코드로 등록된 값이면 상품코드로, 아니면 그대로
         }
+        // [Ver 8.15] 위치 데이터 샤드 (웹과 동일한 해시여야 함)
+        const NUM_LOC_SHARDS = 8;
+        function locShardId(code) { let h = 0; const s = String(code || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return 'LOC_SHARD_' + (h % NUM_LOC_SHARDS); }
 
         // ---------------- 상태 ----------------
         let mode = localStorage.getItem('scanMode') || 'in';
@@ -526,25 +529,31 @@
                     byCode.get(it.barcode).locs.push(it.location);
                 });
                 const codes = [...byCode.keys()];
-                // [Ver 8.14] 위치 데이터는 단일 문서(LOCATION_STATE.map). 문서 1개만 읽어 기존값 확보(읽기 대폭 절감)
-                let stateMap = {};
+                // [Ver 8.15] 위치 데이터는 샤드 문서(LOC_SHARD_i.map). 찍은 상품이 속한 샤드만 읽고 그 샤드에만 씀
+                const codesByShard = {};
+                codes.forEach(c => { const sid = locShardId(c); (codesByShard[sid] = codesByShard[sid] || []).push(c); });
+                const shardMaps = {};
                 try {
-                    const s = await getDoc(doc(db, 'ChinaStockGoods', 'LOCATION_STATE'));
-                    stateMap = (s.exists() && s.data() && s.data().map) ? s.data().map : {};
+                    await Promise.all(Object.keys(codesByShard).map(async sid => {
+                        const s = await getDoc(doc(db, 'ChinaStockGoods', sid));
+                        shardMaps[sid] = (s.exists() && s.data() && s.data().map) ? s.data().map : {};
+                    }));
                 } catch (e) {
                     // [Ver 8.13] 기존 위치를 못 읽으면 덮어써서 기존 자리 유실 위험 → 전송 중단, 큐 보존
                     throw new Error('READ_FAILED');
                 }
                 const now = Date.now();
-                const mapUpdate = {};
-                codes.forEach(c => {
-                    const g = byCode.get(c);
-                    const cur = stateMap[c] || {};
-                    const loc = cur.location || '';
-                    const base = (cur.base !== undefined ? cur.base : loc);
-                    mapUpdate[c] = { location: mergeLocations(loc, g.locs), base: base, sub: g.sub, at: now, worker: 'Scanner_Web' };
-                });
-                await setDoc(doc(db, 'ChinaStockGoods', 'LOCATION_STATE'), { map: mapUpdate, updatedAt: new Date() }, { merge: true });
+                for (const sid in codesByShard) {
+                    const upd = {};
+                    codesByShard[sid].forEach(c => {
+                        const g = byCode.get(c);
+                        const cur = shardMaps[sid][c] || {};
+                        const loc = cur.location || '';
+                        const base = (cur.base !== undefined ? cur.base : loc);
+                        upd[c] = { location: mergeLocations(loc, g.locs), base: base, sub: g.sub, at: now, worker: 'Scanner_Web' };
+                    });
+                    await setDoc(doc(db, 'ChinaStockGoods', sid), { map: upd, updatedAt: new Date() }, { merge: true });
+                }
                 fbOk = true;
             } catch (e) { console.error('위치 Firebase 기록 실패:', e); if (e && e.message === 'READ_FAILED') fbOk = 'READ_FAILED'; }
             // 구글 스크립트 전송(설정된 경우만) - ERP 반영용
