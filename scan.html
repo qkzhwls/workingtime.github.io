@@ -163,13 +163,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.12"></script>
+    <script src="js/location-map.js?v=8.13"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.12'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.13'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -529,14 +529,17 @@
                 // 각 상품의 기존 저장값 읽기 (append 기준 + baseLocation=기준값)
                 //   baseLocation 필드가 없던 기존 문서는 '현재 위치값'을 기준으로 삼음(그 이후 찍는 것만 '새 자리')
                 const existingMap = {};
+                let readError = false; // [Ver 8.13] 기존 위치 조회 실패(한도초과/네트워크) 감지
                 await Promise.all(codes.map(async c => {
                     try {
                         const s = await getDoc(doc(db, 'ChinaStockGoods_LocationHistory', c));
                         const d = s.exists() ? s.data() : {};
                         const loc = d.location || '';
                         existingMap[c] = { location: loc, base: (d.baseLocation !== undefined ? d.baseLocation : loc) };
-                    } catch (e) { existingMap[c] = { location: '', base: '' }; }
+                    } catch (e) { readError = true; }
                 }));
+                // [Ver 8.13] 하나라도 조회 실패 시: 기존 위치를 모른 채 덮어쓰면 기존 자리가 유실됨 → 전송 중단, 큐 보존
+                if (readError) { throw new Error('READ_FAILED'); }
                 for (let i = 0; i < codes.length; i += 400) {
                     const batch = writeBatch(db);
                     codes.slice(i, i + 400).forEach(c => {
@@ -548,7 +551,7 @@
                     await batch.commit();
                 }
                 fbOk = true;
-            } catch (e) { console.error('위치 Firebase 기록 실패:', e); }
+            } catch (e) { console.error('위치 Firebase 기록 실패:', e); if (e && e.message === 'READ_FAILED') fbOk = 'READ_FAILED'; }
             // 구글 스크립트 전송(설정된 경우만) - ERP 반영용
             let gsOk = true;
             if (gsUrl) {
@@ -564,9 +567,11 @@
                 } catch (e) { gsOk = false; }
             }
             // [Ver 8.0] Firebase 저장이 실제로 성공했을 때만 큐를 비움 (실패 시 큐 보존 → 재시도)
-            if (fbOk) {
+            if (fbOk === true) {
                 locationQueue = []; fixedLocation = null; saveQueues(); renderQueue(); renderLocBanner();
                 speak('전송 완료'); toast(gsUrl && !gsOk ? '✅ 저장됨 (ERP 전송만 실패)' : '✅ 위치 전송 완료');
+            } else if (fbOk === 'READ_FAILED') {
+                showAlert('⚠️ 기존 위치를 불러오지 못해 전송을 중단했습니다.\n(그대로 저장하면 기존 자리가 지워질 수 있어 막았습니다)\n무료 사용량 한도/네트워크를 확인하고 다시 시도하세요.\n스캔 내역은 그대로 보관됩니다.');
             } else {
                 showAlert('전송 실패 — 저장되지 않았습니다.\n큐를 유지하니 다시 [전송하기]를 눌러 재시도하세요.\n(네트워크 또는 무료 사용량 한도 확인)');
             }
