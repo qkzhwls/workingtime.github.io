@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.11</div>
+            <div class="version-badge">🚀 Ver 8.12</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -174,7 +174,7 @@
     <!-- [Ver 7.1] 기존재고지정 패널 (인라인) -->
     <div id="existing-panel" class="loc-existing-only" style="padding:14px 16px;">
         <div style="font-size:12px; color:#555; background:#e0f2f1; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
-            <b>새로 자리가 추가된 상품만</b> 표시됩니다. <b>[📥 기존재고 업로드]</b>로 현재 옵션추가항목1을 세팅 → 스캐너 위치모드 <b>'기존재고'</b>로 새 자리를 추가 → <b>[⬇️ 다운로드]</b>로 받아 이지어드민에 일괄 업로드하세요.<br>
+            <b>스캐너로 전송된 기존재고 상품</b>이 표시됩니다(이미 있던 위치를 다시 찍어도 전송 확인용으로 보임). <b>[📥 기존재고 업로드]</b>로 현재 옵션추가항목1을 세팅 → 스캐너 <b>'기존재고'</b> 모드로 위치 전송 → <b>[⬇️ 다운로드]</b>로 받아 이지어드민에 업로드하세요.<br>
             다운로드 전에 각 행의 <b>✏️</b>로 위치값을 고치거나 <b>🗑️</b>로 목록에서 제외할 수 있습니다.<br>
             <span style="background:#c8e6c9; color:#1b5e20; font-weight:bold; padding:0 5px; border-radius:3px;">초록</span> = 새로 추가된 자리 · 회색 = 기존 자리 · <span style="background:#fff3e0; color:#e65100; border:1px solid #ffcc80; border-radius:3px; padding:0 4px; font-weight:bold;">⚠️ 파일에 없던 상품</span> = 시드에 없어 기존 위치 모름(다운로드 시 주의)
         </div>
@@ -347,6 +347,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.11"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.12"></script>
 </body>
 </html>
