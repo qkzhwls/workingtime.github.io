@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.24 (규칙목록을 파란 작업대에 통합/가시성강화, 숫자 0~9 키패드 입력)
+// 중국제작 미발계산기 Ver 8.25 (기본공식=시트 3조건, [기본공식 불러오기] 버튼, 도착수량 항상 포함)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -125,7 +125,8 @@ function getCapacityByLocation(locStr) {
 //  - 변수: 총재고, 적재량, 부족수량, 직진배송
 //  - 잘못된 수식이면 기본 공식으로 폴백 (앱이 깨지지 않음)
 // ---------------------------------------------------------
-const DEFAULT_MIBAL_FORMULA = '총재고===0 ? 적재량 : (부족수량+직진배송 > 총재고 ? 부족수량+직진배송-총재고 : 0)';
+// [Ver 8.25] 기본공식 = 오더리스트 시트와 동일한 3조건 (헤더명: 총재고=F, 적재량=H, 도착수량=D, 부족수량=J, 직진배송=K)
+const DEFAULT_MIBAL_FORMULA = '총재고===0 ? 적재량 : (도착수량+총재고<=적재량 ? 도착수량 : (부족수량+직진배송>총재고 ? 부족수량+직진배송-총재고 : 0))';
 let mibalFormula = DEFAULT_MIBAL_FORMULA;
 let mibalFn = null;
 let mibalVars = []; // [Ver 7.5] 미발 공식에 추가로 쓸 재고로그 헤더(변수)
@@ -651,7 +652,10 @@ function renderRuleDraft() {
         ? '<span style="color:#9aa7b4; font-weight:normal;">여기(또는 위 팔레트)에서 <b>변수·부등호·숫자</b>를 끌어다 놓거나 클릭하세요.<br>예) 총재고 <b>=</b> 0 <b>→결과</b> 적재량</span>'
         : `<b>만약</b> <span style="color:#4527a0;">${condStr || '…'}</span> <b>이면 → 미발수량 =</b> <span style="color:#e65100;">${resStr || '…'}</span>`;
     zone.innerHTML =
-        `<div style="font-weight:bold; font-size:12px; color:#37474f; margin-bottom:8px; text-align:left;">🧾 내가 만든 규칙 <span style="color:#90a4ae; font-weight:normal;">(위에서부터 순서대로 적용)</span></div>
+        `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
+            <span style="font-weight:bold; font-size:12px; color:#37474f;">🧾 내가 만든 규칙 <span style="color:#90a4ae; font-weight:normal;">(위에서부터 순서대로 적용)</span></span>
+            <button type="button" id="load-default-rule" title="사진 시트와 동일한 3조건 기본공식으로 되돌리기" style="padding:5px 10px; background:#eef4ff; color:#1565c0; border:1px solid #90caf9; border-radius:6px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;">📋 기본공식 불러오기</button>
+         </div>
          ${condLines}${emptyMsg}${elseLine}
          <div style="border-top:2px dashed #90caf9; margin:12px 0 10px;"></div>
          <div style="font-weight:bold; font-size:12px; color:#1565c0; margin-bottom:6px; text-align:left;">🛠 지금 조립 중 <span style="color:#90a4ae; font-weight:normal;">(팔레트를 끌어다 놓거나 클릭)</span></div>
@@ -663,6 +667,8 @@ function renderRuleDraft() {
             <button type="button" id="draft-clear" style="padding:9px 12px; background:#fff; color:#c62828; border:1px solid #ef9a9a; border-radius:7px; cursor:pointer; font-size:13px;">✕ 비우기</button>
          </div>`;
     zone.querySelectorAll('.rl-del').forEach(b => b.onclick = () => { ruleRows2.splice(+b.dataset.i, 1); renderRuleRows(); });
+    const ld = document.getElementById('load-default-rule');
+    if (ld) ld.onclick = loadDefaultRuleFormula;
     document.getElementById('draft-commit').onclick = commitRuleDraft;
     document.getElementById('draft-else').onclick = setRuleDraftAsElse;
     document.getElementById('draft-back').onclick = () => { ruleDraftTokens.pop(); renderRuleDraft(); };
@@ -677,6 +683,15 @@ function setRuleDraftAsElse() {
     ruleDraftTokens = [];
     renderRuleRows();
     showToast('그 외(기본값) = ' + expr);
+}
+// [Ver 8.25] 기본공식(사진 시트 3조건)을 조립 목록으로 불러오기
+function loadDefaultRuleFormula() {
+    if (ruleRows2.length && !confirm('지금 만든 조건을 지우고 기본공식(사진 시트의 3조건)으로 되돌릴까요?')) return;
+    const parsed = parseRuleFormula(DEFAULT_MIBAL_FORMULA);
+    if (parsed && parsed.rows.length) { ruleRows2 = parsed.rows; ruleElse = parsed.elseVal; }
+    ruleDraftTokens = [];
+    renderRuleRows();
+    showToast('기본공식을 불러왔어요. 아래 [✔ 이 규칙 적용]을 눌러 저장하세요.');
 }
 function commitRuleDraft() {
     const { cond, res } = ruleDraftSplit();
@@ -1603,7 +1618,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.24';
+const WEB_VERSION = '8.25';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1648,7 +1663,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDatesMibal = Array.isArray(c.savedDatesMibal) ? c.savedDatesMibal : (Array.isArray(c.savedDates) ? c.savedDates : []); savedDatesLoc = Array.isArray(c.savedDatesLoc) ? c.savedDatesLoc : []; savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDatesMibal = Array.isArray(c.savedDatesMibal) ? c.savedDatesMibal : (Array.isArray(c.savedDates) ? c.savedDates : []); savedDatesLoc = Array.isArray(c.savedDatesLoc) ? c.savedDatesLoc : []; savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); MIBAL_COMPUTED_VARS.forEach(v => { if (!mibalVars.includes(v)) mibalVars.push(v); }); /* [Ver 8.25] 도착수량 등 계산변수는 기본공식에 쓰이므로 항상 포함 */ mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; } }
 async function saveConfig() { persistActiveDates(); await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDatesMibal, savedDatesLoc, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
