@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.31 (당일입고 위치확인→추가위치로 개명, 새로 추가된 자리만 표시)
+// 중국제작 미발계산기 Ver 8.32 (환경설정 오류바코드매칭: 바코드→상품코드 수동 별칭 업로드/추가/삭제, 스캐너 병합)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1099,6 +1099,84 @@ async function handleLocationMapUpload(e) {
     e.target.value = '';
 }
 
+// ---------------------------------------------------------
+// [Ver 8.32] 오류바코드매칭: 스캔 바코드 → 상품코드 수동 별칭 (BARCODE_ALIAS 문서, 미발로그 자동맵과 별개로 보존)
+let barcodeAlias = {};
+function escBa(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+async function loadBarcodeAlias() {
+    try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS')); barcodeAlias = (s.exists() && s.data().map) ? s.data().map : {}; } catch (e) { barcodeAlias = {}; }
+}
+async function saveBarcodeAlias() {
+    try { await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS'), { map: barcodeAlias, count: Object.keys(barcodeAlias).length, updatedAt: new Date() }); } catch (e) { alert('저장 실패: ' + e.message); }
+}
+async function openBarcodeAliasModal() {
+    closeAllMenus();
+    await loadBarcodeAlias();
+    renderBarcodeAliasList();
+    document.getElementById('barcode-alias-modal').style.display = 'flex';
+}
+function closeBarcodeAliasModal() { document.getElementById('barcode-alias-modal').style.display = 'none'; }
+function renderBarcodeAliasList() {
+    const tb = document.getElementById('ba-tbody'); if (!tb) return;
+    const kw = (document.getElementById('ba-search')?.value || '').trim().toUpperCase();
+    let entries = Object.entries(barcodeAlias);
+    if (kw) entries = entries.filter(([b, c]) => b.includes(kw) || String(c || '').toUpperCase().includes(kw));
+    entries.sort((a, b) => a[0].localeCompare(b[0]));
+    const total = Object.keys(barcodeAlias).length;
+    const cnt = document.getElementById('ba-count'); if (cnt) cnt.textContent = `총 ${total}건` + (kw ? ` · 검색 ${entries.length}건` : '');
+    tb.innerHTML = entries.length
+        ? entries.map(([b, c]) => `<tr style="border-bottom:1px solid #eee;"><td style="padding:7px 6px; font-weight:bold; white-space:nowrap;">${escBa(b)}</td><td style="padding:7px 6px; color:#1565c0; font-weight:bold;">${escBa(c)}</td><td style="padding:7px 6px;"><span class="ba-del" data-b="${escBa(b)}" title="삭제" style="cursor:pointer; font-size:15px;">🗑️</span></td></tr>`).join('')
+        : '<tr><td colspan="3" style="padding:22px; color:#999;">등록된 매칭이 없습니다. 파일 업로드 또는 위에서 직접 추가하세요.</td></tr>';
+    tb.querySelectorAll('.ba-del').forEach(x => x.onclick = async () => { delete barcodeAlias[x.dataset.b]; await saveBarcodeAlias(); renderBarcodeAliasList(); });
+}
+async function addBarcodeAliasManual() {
+    const bEl = document.getElementById('ba-barcode'), cEl = document.getElementById('ba-code');
+    const b = (bEl.value || '').trim().toUpperCase(); const c = (cEl.value || '').trim().toUpperCase();
+    if (!b || !c) { alert('바코드와 상품코드를 모두 입력하세요.'); return; }
+    barcodeAlias[b] = c;
+    await saveBarcodeAlias();
+    bEl.value = ''; cEl.value = ''; bEl.focus();
+    renderBarcodeAliasList();
+    showToast('✅ 매칭 추가됨 — 스캐너 즉시 반영');
+}
+// [Ver 8.32] 시트 행 읽기: xlsx/xls는 array, 헤더 못 찾으면 UTF-8 텍스트(csv/html)로 재시도
+async function readSheetRowsAOA(file, need) {
+    const buf = await file.arrayBuffer();
+    const hasHdr = (rs) => (rs || []).slice(0, 20).some(r => { const cl = (r || []).map(cleanKey); return need.every(n => cl.includes(n)); });
+    let rows = [];
+    try { const wb = XLSX.read(new Uint8Array(buf), { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); } catch (e) {}
+    if (!hasHdr(rows)) {
+        try { const t = new TextDecoder('utf-8').decode(buf); const wb2 = XLSX.read(t, { type: 'string' }); const r2 = XLSX.utils.sheet_to_json(wb2.Sheets[wb2.SheetNames[0]], { header: 1, defval: '' }); if (hasHdr(r2)) rows = r2; } catch (e) {}
+    }
+    return rows;
+}
+async function handleBarcodeAliasUpload(e) {
+    const file = e.target.files[0]; if (!file) return;
+    showLoading('📂 오류바코드 매칭 처리 중...');
+    try {
+        const rows = await readSheetRowsAOA(file, ['바코드', '상품코드']);
+        let hi = -1, headers = [];
+        for (let i = 0; i < Math.min(20, rows.length); i++) {
+            const cl = rows[i].map(h => cleanKey(h));
+            if (cl.includes('바코드') && cl.includes('상품코드')) { hi = i; headers = cl; break; }
+        }
+        if (hi < 0) { hideLoading(); alert('바코드/상품코드 두 열을 찾지 못했습니다.'); e.target.value = ''; return; }
+        const bIdx = headers.indexOf('바코드'), cIdx = headers.indexOf('상품코드');
+        let added = 0;
+        for (let i = hi + 1; i < rows.length; i++) {
+            const b = (rows[i][bIdx] || '').toString().trim().toUpperCase();
+            const c = (rows[i][cIdx] || '').toString().trim().toUpperCase();
+            if (b && c) { barcodeAlias[b] = c; added++; }
+        }
+        if (!added) { hideLoading(); alert('유효한 행이 없습니다.'); e.target.value = ''; return; }
+        await saveBarcodeAlias();
+        hideLoading();
+        renderBarcodeAliasList();
+        showToast(`✅ ${added}건 반영 (총 ${Object.keys(barcodeAlias).length}건) — 스캐너 즉시 반영`);
+    } catch (err) { hideLoading(); alert('처리 실패: ' + err.message); }
+    e.target.value = '';
+}
+
 // [Ver 6.5] 기존재고 옵션추가항목1(현재 위치값) 시드 업로드 → LocationHistory(sub=existing)에 세팅
 //  - 파일: 상품코드 + 옵션추가항목1(콤마 다중 위치) → 스캐너가 이 값 뒤에 새 자리를 append 함
 //  - 해당 상품의 기존재고 위치값을 파일 값으로 '덮어쓰기'(ERP 기준값 재세팅). 스캔 전에 먼저 올리세요.
@@ -1638,7 +1716,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.31';
+const WEB_VERSION = '8.32';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1724,6 +1802,16 @@ function setupEventListeners() {
     document.getElementById('upload-stock-log')?.addEventListener('change', (e) => handleStockLogUpload(e));
     // 7-2. #upload-location-map (위치 매핑 업로드 - Ver 5.8)
     document.getElementById('upload-location-map')?.addEventListener('change', (e) => handleLocationMapUpload(e));
+    // [Ver 8.32] 오류바코드매칭
+    document.getElementById('btn-open-barcode-alias')?.addEventListener('click', () => openBarcodeAliasModal());
+    document.getElementById('btn-barcode-alias-close')?.addEventListener('click', () => closeBarcodeAliasModal());
+    document.getElementById('barcode-alias-modal')?.addEventListener('click', (e) => { if (e.target.id === 'barcode-alias-modal') closeBarcodeAliasModal(); });
+    document.getElementById('upload-barcode-alias')?.addEventListener('change', (e) => handleBarcodeAliasUpload(e));
+    document.getElementById('btn-ba-add')?.addEventListener('click', () => addBarcodeAliasManual());
+    document.getElementById('ba-search')?.addEventListener('input', () => renderBarcodeAliasList());
+    document.getElementById('ba-barcode')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('ba-code')?.focus(); });
+    document.getElementById('ba-code')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBarcodeAliasManual(); });
+    document.getElementById('btn-barcode-alias-clear')?.addEventListener('click', async () => { if (Object.keys(barcodeAlias).length && confirm('오류바코드매칭을 전부 삭제할까요? (되돌릴 수 없습니다)')) { barcodeAlias = {}; await saveBarcodeAlias(); renderBarcodeAliasList(); showToast('🗑️ 전체 삭제됨'); } });
     // 7-3. #upload-existing-loc (기존재고 옵션추가항목1 시드 업로드 - Ver 6.5)
     document.getElementById('upload-existing-loc')?.addEventListener('change', (e) => handleExistingLocUpload(e));
 
