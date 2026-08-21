@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.30 (위치지정모드 당일입고 표에 옵션추가항목1 열 추가 - 미발재고로그 헤더값)
+// 중국제작 미발계산기 Ver 8.31 (당일입고 위치확인→추가위치로 개명, 새로 추가된 자리만 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -194,6 +194,13 @@ function renderLocList(location, base) {
         ? `<span style="color:#555;">${p}</span>`
         : `<span style="background:#c8e6c9; color:#1b5e20; font-weight:bold; padding:0 5px; border-radius:3px;">${p}</span>`
     ).join(', ');
+}
+// [Ver 8.31] 추가위치: base(기존자리)에 없던 '새로 추가된 자리'만 표시
+function renderNewLocOnly(location, base) {
+    const b = new Set(locPartsArr(base));
+    const news = locPartsArr(location).filter(p => !b.has(p));
+    if (!news.length) return '';
+    return news.map(p => `<span style="background:#c8e6c9; color:#1b5e20; font-weight:bold; padding:0 5px; border-radius:3px;">${p}</span>`).join(', ');
 }
 // [Ver 8.12] 기존재고 중 '스캐너로 전송된 상품'(worker=Scanner_Web)만 표시 — 새 자리 없어도 전송 확인 가능
 function lmExistingRows() {
@@ -1436,7 +1443,7 @@ const BUILTIN_COLS = {
     shortage:  { label:'부족수량', edit:'shortage', width:'70px' },
     directShip:{ label:'직진배송', edit:'directShip', width:'75px' },
     memo:      { label:'비고', edit:'memo' },
-    locCheck:  { label:'위치확인', width:'110px' }   // [Ver 5.6] 앱이 지정한 위치 / 미지정 표시
+    locCheck:  { label:'추가위치', width:'110px' }   // [Ver 8.31] 새로 추가된 자리만 표시
 };
 let columnConfig = null; // null = 기본 순서, 아니면 열 key 배열
 // [Ver 7.0] 미발계산기 열: locCheck(위치확인)는 위치지정모드 전용이므로 미발 열에서 제외
@@ -1492,9 +1499,10 @@ function colLabel(key) {
 }
 function colValue(key, row, idx) {
     if (key === 'no') return idx + 1;
-    if (key === 'locCheck') { // [Ver 5.6→7.3] 앱이 '당일 입고분' 모드로 지정한 위치 (새 자리는 초록 강조, 없으면 미지정)
+    if (key === 'locCheck') { // [Ver 8.31] 추가위치: 앱이 '당일 입고분'으로 지정한 자리 중 새로 추가된 것만 표시
         const a = locationAssignMap[row.code];
-        return (a && a.location && (a.sub || '') === 'today') ? renderLocList(a.location, a.base) : '<span style="color:#d32f2f; font-weight:bold;">⚠️ 미지정</span>';
+        const news = (a && a.location && (a.sub || '') === 'today') ? renderNewLocOnly(a.location, a.base) : '';
+        return news || '<span style="color:#d32f2f; font-weight:bold;">⚠️ 미지정</span>';
     }
     if (BUILTIN_COLS[key]) return (row[key] !== undefined && row[key] !== null) ? row[key] : '';
     if (key.startsWith('log:')) { const log = stockLogData[row.code] || {}; const v = log[key.slice(4)]; return (v !== undefined && v !== null) ? v : ''; }
@@ -1630,7 +1638,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.30';
+const WEB_VERSION = '8.31';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
