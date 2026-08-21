@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.23 (조건 줄 입력칸 제거 → 읽기전용 문장 목록, 그 외 값도 작업대에서 설정)
+// 중국제작 미발계산기 Ver 8.24 (규칙목록을 파란 작업대에 통합/가시성강화, 숫자 0~9 키패드 입력)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -564,19 +564,62 @@ function renderRulePalette() {
     const chip = (tok, label, bg, fg, bd) =>
         `<span class="rule-tok" draggable="true" data-token="${ruleEscAttr(tok)}" title="드롭존으로 끌어다 놓거나 클릭" style="cursor:grab; user-select:none; background:${bg}; color:${fg}; border:1px solid ${bd}; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:bold;">${label}</span>`;
     const vars = [...RULE_VARS, ...mibalVars].map(v => chip(v, v, '#ede7f6', '#4527a0', '#b39ddb')).join('');
-    const nums = ['0','1'].map(n => chip(n, n, '#eceff1', '#37474f', '#b0bec5')).join('');
+    // [Ver 8.24] 숫자는 0~9 키패드로 입력(여러 자리 가능)
+    const numBtn = `<span id="rule-numpad-open" title="숫자 키패드 열기" style="cursor:pointer; user-select:none; background:#eceff1; color:#37474f; border:1px solid #b0bec5; padding:4px 12px; border-radius:12px; font-size:12px; font-weight:bold;">🔢 숫자 입력</span>`;
     const arith = [['+','+'],['-','−'],['*','×'],['/','÷'],['(','('],[')',')']].map(([t,l]) => chip(t, l, '#fff3e0', '#e65100', '#ffcc80')).join('');
     const cmp = [['===','='],['!==','≠'],['>','&gt;'],['>=','≥'],['<','&lt;'],['<=','≤']].map(([t,l]) => chip(t, l, '#e3f2fd', '#0d47a1', '#90caf9')).join('');
     const sep = chip('→', '→ 결과(미발수량 =)', '#e8f5e9', '#1b5e20', '#a5d6a7');
     box.innerHTML =
-        `<div style="font-size:11px; color:#777; margin-bottom:6px;">🧩 아래를 <b>맨 밑 드롭존으로 끌어다 놓거나 클릭</b>하면 순서대로 식이 쌓입니다</div>
-         <div style="margin-bottom:5px;"><span style="font-size:10px; color:#999;">변수 · 숫자</span><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:2px;">${vars} ${nums}</div></div>
+        `<div style="font-size:11px; color:#777; margin-bottom:6px;">🧩 아래를 <b>드롭존으로 끌어다 놓거나 클릭</b>하면 순서대로 식이 쌓입니다</div>
+         <div style="margin-bottom:5px;"><span style="font-size:10px; color:#999;">변수 · 숫자</span><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:2px;">${vars} ${numBtn}</div></div>
          <div style="margin-bottom:5px;"><span style="font-size:10px; color:#999;">사칙연산 · 괄호</span><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:2px;">${arith}</div></div>
          <div><span style="font-size:10px; color:#999;">비교(부등호) · 결과구분</span><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:2px;">${cmp} ${sep}</div></div>`;
     box.querySelectorAll('.rule-tok').forEach(el => {
         el.addEventListener('click', () => addDraftToken(el.dataset.token));
         el.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', el.dataset.token); e.dataTransfer.effectAllowed = 'copy'; });
     });
+    const npOpen = document.getElementById('rule-numpad-open');
+    if (npOpen) npOpen.addEventListener('click', openRuleNumpad);
+}
+// [Ver 8.24] 숫자 키패드 팝업 (0~9, 여러 자리 입력 후 작업대에 한 토큰으로 추가)
+let numpadValue = '';
+function openRuleNumpad() {
+    numpadValue = '';
+    let pad = document.getElementById('rule-numpad');
+    if (!pad) {
+        pad = document.createElement('div');
+        pad.id = 'rule-numpad';
+        pad.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:10050; display:flex; justify-content:center; align-items:center;';
+        document.body.appendChild(pad);
+    }
+    pad.style.display = 'flex';
+    renderRuleNumpad();
+}
+function closeRuleNumpad() { const p = document.getElementById('rule-numpad'); if (p) p.style.display = 'none'; }
+function renderRuleNumpad() {
+    const pad = document.getElementById('rule-numpad');
+    if (!pad) return;
+    const keys = ['1','2','3','4','5','6','7','8','9','⌫','0','확인'];
+    pad.innerHTML =
+        `<div id="numpad-card" style="background:#fff; border-radius:14px; padding:18px; width:250px; box-shadow:0 10px 34px rgba(0,0,0,.3);">
+            <div style="font-size:12px; color:#666; font-weight:bold; margin-bottom:6px;">숫자 입력 후 [확인]</div>
+            <div style="border:2px solid #1976d2; border-radius:8px; padding:10px 12px; font-size:28px; font-weight:900; text-align:right; min-height:32px; margin-bottom:12px;">${numpadValue || '0'}</div>
+            <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:7px;">
+              ${keys.map(k => `<button type="button" class="np-key" data-k="${k}" style="height:50px; font-size:20px; font-weight:800; border:1px solid #ddd; border-radius:9px; background:${k === '확인' ? '#1976d2' : (k === '⌫' ? '#fff3e0' : '#fafafa')}; color:${k === '확인' ? '#fff' : '#333'}; cursor:pointer;">${k}</button>`).join('')}
+            </div>
+            <button type="button" id="numpad-cancel" style="width:100%; margin-top:9px; height:42px; border:1px solid #ccc; border-radius:9px; background:#fff; color:#555; cursor:pointer; font-weight:bold;">취소</button>
+         </div>`;
+    pad.onclick = closeRuleNumpad;
+    document.getElementById('numpad-card').onclick = e => e.stopPropagation();
+    pad.querySelectorAll('.np-key').forEach(b => b.onclick = () => numpadKey(b.dataset.k));
+    document.getElementById('numpad-cancel').onclick = closeRuleNumpad;
+}
+function numpadKey(k) {
+    if (k === '⌫') { numpadValue = numpadValue.slice(0, -1); renderRuleNumpad(); return; }
+    if (k === '확인') { addDraftToken(numpadValue || '0'); closeRuleNumpad(); return; }
+    numpadValue = (numpadValue === '0') ? k : (numpadValue + k); // 앞자리 0 방지
+    if (numpadValue.length > 9) numpadValue = numpadValue.slice(0, 9);
+    renderRuleNumpad();
 }
 function addDraftToken(tok) { if (!tok) return; ruleDraftTokens.push(tok); renderRuleDraft(); }
 function ruleDraftSplit() {
@@ -584,24 +627,42 @@ function ruleDraftSplit() {
     if (sep === -1) return { cond: ruleDraftTokens.slice(), res: [] };
     return { cond: ruleDraftTokens.slice(0, sep), res: ruleDraftTokens.slice(sep + 1) };
 }
-// 드롭존(작업대) 렌더: 현재까지 쌓인 식을 문장으로 미리보기 + [조건 넣기]/[뒤로]/[비우기]
+// [Ver 8.24] 파란 작업대 패널 = 내가 만든 규칙 목록 + 그 외 + 지금 조립 중 + 버튼 (한 곳에 통합, 가시성 강화)
 function renderRuleDraft() {
     const zone = document.getElementById('rule-add-zone');
     if (!zone) return;
+    // (A) 내가 만든 규칙 목록
+    const condLines = ruleRows2.map((r, i) => `
+      <div style="display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #dfe6ee; padding:9px 10px; border-radius:8px; margin-bottom:6px; font-size:13px;">
+        <span style="background:#1976d2; color:#fff; border-radius:11px; padding:2px 9px; font-size:11px; font-weight:bold; flex:none;">${i + 1}</span>
+        <span style="flex:1; line-height:1.55; text-align:left;"><b>만약</b> <span style="color:#4527a0; font-weight:bold;">${ruleEscAttr(r.L)} ${ruleTokLabel(r.op)} ${ruleEscAttr(r.R)}</span> <b>이면 → 미발수량 =</b> <span style="color:#e65100; font-weight:bold;">${ruleEscAttr(r.result)}</span></span>
+        <button class="rl-del" data-i="${i}" title="이 조건 삭제" style="border:none; background:none; color:#d32f2f; cursor:pointer; font-size:17px; flex:none;">✕</button>
+      </div>`).join('');
+    const emptyMsg = ruleRows2.length ? '' : '<div style="color:#90a4ae; font-size:12px; padding:6px 2px; text-align:left;">아직 만든 조건이 없어요. 아래에서 식을 만들어 <b>[조건 넣기]</b> 하세요.</div>';
+    const elseLine = `
+      <div style="display:flex; align-items:center; gap:8px; background:#eceff1; padding:9px 10px; border-radius:8px; font-size:13px; text-align:left;">
+        <span style="color:#546e7a; font-weight:bold; flex:none;">그 외</span><span style="flex:1;">위 조건에 다 안 맞으면 <b>→ 미발수량 =</b> <b style="color:#333;">${ruleEscAttr(ruleElse)}</b></span>
+      </div>`;
+    // (B) 지금 조립 중
     const { cond, res } = ruleDraftSplit();
     const condStr = cond.map(ruleTokLabel).join(' ');
     const resStr = res.map(ruleTokLabel).join(' ');
-    const preview = ruleDraftTokens.length === 0
-        ? '<span style="color:#90a4ae; font-weight:normal;">여기에 <b>변수·부등호·사칙연산</b>을 끌어다 놓으세요. 예) 총재고 <b>=</b> 0 <b>→ 결과</b> 적재량</span>'
+    const draftBody = ruleDraftTokens.length === 0
+        ? '<span style="color:#9aa7b4; font-weight:normal;">여기(또는 위 팔레트)에서 <b>변수·부등호·숫자</b>를 끌어다 놓거나 클릭하세요.<br>예) 총재고 <b>=</b> 0 <b>→결과</b> 적재량</span>'
         : `<b>만약</b> <span style="color:#4527a0;">${condStr || '…'}</span> <b>이면 → 미발수량 =</b> <span style="color:#e65100;">${resStr || '…'}</span>`;
     zone.innerHTML =
-        `<div style="font-size:13px; font-weight:bold; margin-bottom:8px; min-height:20px; line-height:1.6;">${preview}</div>
-         <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
-            <button type="button" id="draft-commit" style="padding:7px 16px; background:#1976d2; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">✔ 조건 넣기 (위에 추가)</button>
-            <button type="button" id="draft-else" style="padding:7px 12px; background:#fff; color:#455a64; border:1px solid #90a4ae; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold;">그 외(기본값)으로</button>
-            <button type="button" id="draft-back" style="padding:7px 12px; background:#fff; color:#555; border:1px solid #bbb; border-radius:6px; cursor:pointer; font-size:12px;">⌫ 마지막 빼기</button>
-            <button type="button" id="draft-clear" style="padding:7px 12px; background:#fff; color:#c62828; border:1px solid #ef9a9a; border-radius:6px; cursor:pointer; font-size:12px;">✕ 비우기</button>
+        `<div style="font-weight:bold; font-size:12px; color:#37474f; margin-bottom:8px; text-align:left;">🧾 내가 만든 규칙 <span style="color:#90a4ae; font-weight:normal;">(위에서부터 순서대로 적용)</span></div>
+         ${condLines}${emptyMsg}${elseLine}
+         <div style="border-top:2px dashed #90caf9; margin:12px 0 10px;"></div>
+         <div style="font-weight:bold; font-size:12px; color:#1565c0; margin-bottom:6px; text-align:left;">🛠 지금 조립 중 <span style="color:#90a4ae; font-weight:normal;">(팔레트를 끌어다 놓거나 클릭)</span></div>
+         <div style="background:#fffdf3; border:1px solid #ffe082; border-radius:8px; padding:13px; font-size:15px; font-weight:bold; line-height:1.7; min-height:28px; text-align:left;">${draftBody}</div>
+         <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap; margin-top:10px;">
+            <button type="button" id="draft-commit" style="padding:9px 18px; background:#1976d2; color:#fff; border:none; border-radius:7px; font-weight:bold; cursor:pointer; font-size:14px;">✔ 조건 넣기</button>
+            <button type="button" id="draft-else" style="padding:9px 12px; background:#fff; color:#455a64; border:1px solid #90a4ae; border-radius:7px; cursor:pointer; font-size:13px; font-weight:bold;">그 외(기본값)으로</button>
+            <button type="button" id="draft-back" style="padding:9px 12px; background:#fff; color:#555; border:1px solid #bbb; border-radius:7px; cursor:pointer; font-size:13px;">⌫ 마지막 빼기</button>
+            <button type="button" id="draft-clear" style="padding:9px 12px; background:#fff; color:#c62828; border:1px solid #ef9a9a; border-radius:7px; cursor:pointer; font-size:13px;">✕ 비우기</button>
          </div>`;
+    zone.querySelectorAll('.rl-del').forEach(b => b.onclick = () => { ruleRows2.splice(+b.dataset.i, 1); renderRuleRows(); });
     document.getElementById('draft-commit').onclick = commitRuleDraft;
     document.getElementById('draft-else').onclick = setRuleDraftAsElse;
     document.getElementById('draft-back').onclick = () => { ruleDraftTokens.pop(); renderRuleDraft(); };
@@ -615,7 +676,6 @@ function setRuleDraftAsElse() {
     ruleElse = expr;
     ruleDraftTokens = [];
     renderRuleRows();
-    renderRuleDraft();
     showToast('그 외(기본값) = ' + expr);
 }
 function commitRuleDraft() {
@@ -625,28 +685,14 @@ function commitRuleDraft() {
     if (!pc) { showToast('비교기호(= ≠ > ≥ < ≤)를 넣어 "값 비교 값" 형태로 만드세요'); return; }
     ruleRows2.push({ L: pc.L, op: pc.op, R: pc.R, result: res.join(' ') || '0' });
     ruleDraftTokens = [];
-    renderRuleRows();      // 위에 새 조건 행 표시
-    renderRuleDraft();     // 작업대 비우기
+    renderRuleRows();
 }
-// [Ver 8.23] 조건은 읽기 전용 문장 목록으로만 표시(입력칸 제거) — 만들기는 아래 작업대에서
+// [Ver 8.24] 조건 목록은 파란 작업대 패널 안에서 렌더 → 별도 빨간 블록(#rule-rows) 제거
 function renderRuleRows() {
     const box = document.getElementById('rule-rows');
-    if (!box) return;
-    renderRulePalette(); // 변수/사칙연산/비교 팔레트
-    renderRuleDraft();   // 드롭존 작업대(현재 쌓인 식)
-    const condLines = ruleRows2.map((r, i) => `
-      <div style="display:flex; align-items:center; gap:8px; background:#f5f5f5; padding:9px 10px; border-radius:6px; margin-bottom:6px; font-size:13px;">
-        <span style="background:#1976d2; color:#fff; border-radius:10px; padding:1px 8px; font-size:11px; font-weight:bold;">${i + 1}</span>
-        <span style="flex:1; line-height:1.5;"><b>만약</b> <span style="color:#4527a0; font-weight:bold;">${ruleEscAttr(r.L)} ${ruleTokLabel(r.op)} ${ruleEscAttr(r.R)}</span> <b>이면 → 미발수량 =</b> <span style="color:#e65100; font-weight:bold;">${ruleEscAttr(r.result)}</span></span>
-        <button class="rl-del" data-i="${i}" title="이 조건 삭제" style="border:none; background:none; color:#d32f2f; cursor:pointer; font-size:16px;">✕</button>
-      </div>`).join('');
-    const emptyMsg = ruleRows2.length ? '' : '<div style="color:#999; font-size:12px; padding:8px 2px;">아직 조건이 없습니다. 아래 <b>작업대</b>에서 식을 만들어 [조건 넣기] 하세요.</div>';
-    const elseLine = `
-      <div style="display:flex; align-items:center; gap:8px; background:#eef2f7; padding:9px 10px; border-radius:6px; margin-top:2px; font-size:13px;">
-        <span style="color:#607d8b; font-weight:bold;">그 외(위 조건에 다 안 맞으면)</span> <b>→ 미발수량 =</b> <span style="color:#333; font-weight:bold;">${ruleEscAttr(ruleElse)}</span>
-      </div>`;
-    box.innerHTML = condLines + emptyMsg + elseLine;
-    box.querySelectorAll('.rl-del').forEach(b => b.onclick = () => { ruleRows2.splice(+b.dataset.i, 1); renderRuleRows(); });
+    if (box) box.innerHTML = '';
+    renderRulePalette(); // 변수/숫자/사칙연산/비교 팔레트
+    renderRuleDraft();   // 파란 작업대(규칙 목록 + 그외 + 조립중 + 버튼)
     updateRuleCheck();
 }
 function buildRuleFormula() {
@@ -1557,7 +1603,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.23';
+const WEB_VERSION = '8.24';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
