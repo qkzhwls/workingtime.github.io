@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.17 (미발수량 규칙 변수추가 목록에 계산값 '도착수량' 추가)
+// 중국제작 미발계산기 Ver 8.18 (규칙 조립 좌측 변수에서 '부족수량+직진배송' 합성 항목 제거 - 기본 4개만)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -510,7 +510,7 @@ function applyFromExamples() {
 }
 
 // ===== ② 규칙 조립 모드 =====
-const RULE_VARS = ['총재고','적재량','부족수량','직진배송','부족수량+직진배송'];
+const RULE_VARS = ['총재고','적재량','부족수량','직진배송']; // [Ver 8.18] 좌측 변수는 기본 4개만 (부족수량+직진배송 합성 제거)
 const RULE_OPS = [['=','==='],['≠','!=='],['>','>'],['≥','>='],['<','<'],['≤','<=']];
 const RULE_RIGHT = ['0','총재고','적재량','부족수량','직진배송'];
 const RULE_RESULTS = [
@@ -519,7 +519,7 @@ const RULE_RESULTS = [
 ];
 let ruleRows2 = [
     { L:'총재고', op:'===', R:'0', result:'적재량' },
-    { L:'부족수량+직진배송', op:'>', R:'총재고', result:'부족수량+직진배송-총재고' }
+    { L:'부족수량', op:'>', R:'총재고', result:'부족수량+직진배송-총재고' } // [Ver 8.18] 좌측 변수 기본 4개 정책에 맞춰 단일변수 사용
 ];
 let ruleElse = '0';
 function ruleSelect(cls, i, options, selected) {
@@ -1412,7 +1412,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.17';
+const WEB_VERSION = '8.18';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
