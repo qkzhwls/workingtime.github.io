@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.16 (위치모드 당일/기존 서브뷰별 옵션추가항목1 다운로드 버튼 분리, 상단 파일다운로드는 미발모드 전용)
+// 중국제작 미발계산기 Ver 8.17 (미발수량 규칙 변수추가 목록에 계산값 '도착수량' 추가)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -130,6 +130,8 @@ let mibalFormula = DEFAULT_MIBAL_FORMULA;
 let mibalFn = null;
 let mibalVars = []; // [Ver 7.5] 미발 공식에 추가로 쓸 재고로그 헤더(변수)
 const MIBAL_FIXED_VARS = ['총재고', '적재량', '부족수량', '직진배송'];
+// [Ver 8.17] 재고로그 헤더가 아닌 계산값 변수(오더 데이터에서 산출). 변수추가 목록에 노출하고 eval 시 log에 주입
+const MIBAL_COMPUTED_VARS = ['도착수량'];
 
 function defaultMibal(총재고, 적재량, 부족수량, 직진배송) {
     return (총재고 === 0) ? 적재량 : ((부족수량 + 직진배송 > 총재고) ? (부족수량 + 직진배송 - 총재고) : 0);
@@ -399,7 +401,9 @@ function renderMibalVars() {
     const sel = document.getElementById('mibal-var-select');
     if (sel) {
         const exclude = ['상품코드', '상품명', '옵션', ...MIBAL_FIXED_VARS, ...mibalVars];
-        const avail = logFieldKeys().filter(f => !exclude.includes(f) && isValidVarName(f));
+        // [Ver 8.17] 계산값 변수(도착수량 등)를 목록 맨 앞에 노출 + 재고로그 헤더
+        const computedAvail = MIBAL_COMPUTED_VARS.filter(f => !mibalVars.includes(f));
+        const avail = [...computedAvail, ...logFieldKeys().filter(f => !exclude.includes(f) && isValidVarName(f))];
         sel.innerHTML = avail.length
             ? '<option value="">헤더 선택…</option>' + avail.map(f => `<option value="${f}">${f}</option>`).join('')
             : '<option value="">추가 가능한 헤더 없음 (미발재고로그 업로드 필요)</option>';
@@ -1164,7 +1168,7 @@ function applyDates(opts) {
         // [Ver 4.7] 미발수량 = 설정된 공식으로 계산 (변수: 총재고/적재량/부족수량/직진배송)
         const _short = parseInt(shortageVal) || 0;            // 부족수량
         const _direct = parseInt(directShipVal) || 0;         // 직진배송수량
-        const mibalQty = evalMibal(totalStock, capacity, _short, _direct, log);
+        const mibalQty = evalMibal(totalStock, capacity, _short, _direct, { ...log, 도착수량: item.arrivalQty }); // [Ver 8.17] 도착수량 변수 주입
         return {
             code: item.code, name: item.name, option: item.option, arrivalQty: item.arrivalQty,
             mibalQty, totalStock,
@@ -1191,7 +1195,7 @@ function recomputeRow(code) {
     row.capacity = cap;
     if (ed.shortage !== undefined) row.shortage = ed.shortage;
     if (ed.directShip !== undefined) row.directShip = ed.directShip;
-    row.mibalQty = evalMibal(row.totalStock, cap, short, direct, stockLogData[code] || {});
+    row.mibalQty = evalMibal(row.totalStock, cap, short, direct, { ...(stockLogData[code] || {}), 도착수량: row.arrivalQty }); // [Ver 8.17] 도착수량 변수 주입
     renderTable(); updateSummary();
     scheduleScanDBSync(); // 편집 결과를 앱 스캔DB에도 반영
 }
@@ -1408,7 +1412,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.16';
+const WEB_VERSION = '8.17';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
