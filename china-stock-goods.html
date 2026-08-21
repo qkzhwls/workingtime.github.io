@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.18</div>
+            <div class="version-badge">🚀 Ver 8.19</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -239,12 +239,15 @@
             <!-- ② 규칙 조립 모드 -->
             <div id="fmode-builder" style="display:none;">
                 <div style="font-size:12px; color:#555; background:#e3f2fd; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
-                    <b>"만약 ~이면 → 미발수량 = ~"</b> 문장을 위에서부터 순서대로 조립하세요.<br>위 조건이 맞으면 그 값으로, 아니면 다음 조건으로 넘어가고, 다 아니면 <b>그 외</b> 값이 됩니다.
+                    <b>"만약 ~이면 → 미발수량 = ~"</b> 문장을 위에서부터 순서대로 조립하세요.<br>위 조건이 맞으면 그 값으로, 아니면 다음 조건으로 넘어가고, 다 아니면 <b>그 외</b> 값이 됩니다.<br>
+                    <span style="color:#1565c0;">칸을 클릭하면 변수 목록이 뜨고, <b>직접 식을 입력</b>할 수도 있어요. (예: <code>적재량-총재고</code>)<br>
+                    예) 만약 <code>도착수량</code> <code>&lt;</code> <code>적재량-총재고</code> 이면 → 미발수량 = <code>도착수량</code></span>
                 </div>
+                <datalist id="rule-expr-list"></datalist>
                 <div id="rule-rows"></div>
                 <div style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:13px; font-weight:bold; background:#f5f5f5; padding:8px; border-radius:6px;">
                     <span>그 외에는 → 미발수량 =</span>
-                    <select id="rule-else" style="padding:5px; border:1px solid #ccc; border-radius:4px;"></select>
+                    <input id="rule-else" list="rule-expr-list" spellcheck="false" placeholder="값/식" style="width:132px; padding:5px; border:1px solid #ccc; border-radius:4px; font-size:12px; font-family:monospace;">
                 </div>
                 <button id="btn-rule-add" style="margin-top:8px; padding:6px 12px; border:1px solid #1976d2; background:#fff; color:#1976d2; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">+ 조건 추가</button>
                 <!-- [Ver 8.9] 완성된 예시: 임의 값으로 내가 만든 규칙을 적용한 결과 -->
@@ -347,6 +350,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.18"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.19"></script>
 </body>
 </html>

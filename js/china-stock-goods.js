@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.18 (규칙 조립 좌측 변수에서 '부족수량+직진배송' 합성 항목 제거 - 기본 4개만)
+// 중국제작 미발계산기 Ver 8.19 (규칙 조립을 자유 입력으로 - 좌/우/결과값에 식 직접 입력 + 자동완성 제안)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -431,10 +431,12 @@ async function saveMibalVars() {
     if (formulaMode === 'builder') renderRuleRows(); // 조립모드 드롭다운 갱신
     if (savedDates.length > 0) applyDates();
 }
-// 조립모드 옵션(추가 변수 포함)
-function ruleLeftOpts() { return [...RULE_VARS, ...mibalVars]; }
-function ruleRightOpts() { return [...RULE_RIGHT, ...mibalVars]; }
-function ruleResultOpts() { return [...RULE_RESULTS, ...mibalVars.map(h => [h, h])]; }
+// [Ver 8.19] 규칙 조립을 자유 입력으로 — 좌변/우변/결과값에 식을 직접 쓸 수 있고, 아래 값들은 자동완성 제안으로 제공
+function ruleExprSuggestions() {
+    const vars = [...RULE_VARS, ...mibalVars];                        // 기본 4변수 + 추가한 변수(도착수량 등)
+    const compounds = ['적재량-총재고', '부족수량+직진배송-총재고', '적재량-부족수량', 'Math.max(적재량-총재고,0)', 'Math.max(부족수량+직진배송-총재고,0)'];
+    return [...new Set(['0', ...vars, ...compounds])];
+}
 
 // ===== ① 예시 모드 =====
 let exampleRows = [
@@ -512,11 +514,6 @@ function applyFromExamples() {
 // ===== ② 규칙 조립 모드 =====
 const RULE_VARS = ['총재고','적재량','부족수량','직진배송']; // [Ver 8.18] 좌측 변수는 기본 4개만 (부족수량+직진배송 합성 제거)
 const RULE_OPS = [['=','==='],['≠','!=='],['>','>'],['≥','>='],['<','<'],['≤','<=']];
-const RULE_RIGHT = ['0','총재고','적재량','부족수량','직진배송'];
-const RULE_RESULTS = [
-    ['0 (없음)','0'],['적재량','적재량'],['총재고','총재고'],['부족수량','부족수량'],['직진배송','직진배송'],
-    ['부족수량+직진배송','부족수량+직진배송'],['적재량−총재고','적재량-총재고'],['부족수량+직진배송−총재고','부족수량+직진배송-총재고']
-];
 let ruleRows2 = [
     { L:'총재고', op:'===', R:'0', result:'적재량' },
     { L:'부족수량', op:'>', R:'총재고', result:'부족수량+직진배송-총재고' } // [Ver 8.18] 좌측 변수 기본 4개 정책에 맞춰 단일변수 사용
@@ -529,31 +526,47 @@ function ruleSelect(cls, i, options, selected) {
     }).join('');
     return `<select class="${cls}" data-i="${i}" style="padding:5px; border:1px solid #ccc; border-radius:4px; font-size:12px;">${opts}</select>`;
 }
+// [Ver 8.19] 자유 입력 필드(자동완성 제안 datalist 연결). 변수/식을 직접 타이핑 가능
+function ruleEscAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function ruleField(cls, i, value) {
+    return `<input class="${cls}" data-i="${i}" list="rule-expr-list" value="${ruleEscAttr(value)}" spellcheck="false" placeholder="값/식" style="width:132px; padding:5px; border:1px solid #ccc; border-radius:4px; font-size:12px; font-family:monospace;">`;
+}
 function renderRuleRows() {
     const box = document.getElementById('rule-rows');
     if (!box) return;
+    // [Ver 8.19] 자동완성 제안 목록(datalist) 갱신 — 추가한 변수/합성식 반영
+    const dl = document.getElementById('rule-expr-list');
+    if (dl) dl.innerHTML = ruleExprSuggestions().map(s => `<option value="${ruleEscAttr(s)}"></option>`).join('');
     box.innerHTML = ruleRows2.map((r,i) => `
       <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap; background:#f5f5f5; padding:8px; border-radius:6px; margin-bottom:6px; font-size:13px; font-weight:bold;">
         <span>만약</span>
-        ${ruleSelect('rl-L', i, ruleLeftOpts(), r.L)}
+        ${ruleField('rl-L', i, r.L)}
         ${ruleSelect('rl-op', i, RULE_OPS, r.op)}
-        ${ruleSelect('rl-R', i, ruleRightOpts(), r.R)}
+        ${ruleField('rl-R', i, r.R)}
         <span>이면 → =</span>
-        ${ruleSelect('rl-res', i, ruleResultOpts(), r.result)}
+        ${ruleField('rl-res', i, r.result)}
         <button class="rl-del" data-i="${i}" style="border:none; background:none; color:#d32f2f; cursor:pointer; font-size:15px; margin-left:auto;">✕</button>
       </div>`).join('');
-    const elseSel = document.getElementById('rule-else');
-    if (elseSel) elseSel.innerHTML = ruleResultOpts().map(([label,val]) => `<option value="${val}" ${val === ruleElse ? 'selected' : ''}>${label}</option>`).join('');
-    box.querySelectorAll('select').forEach(sel => sel.onchange = () => {
-        const i = +sel.dataset.i;
-        if (sel.classList.contains('rl-L')) ruleRows2[i].L = sel.value;
-        else if (sel.classList.contains('rl-op')) ruleRows2[i].op = sel.value;
-        else if (sel.classList.contains('rl-R')) ruleRows2[i].R = sel.value;
-        else if (sel.classList.contains('rl-res')) ruleRows2[i].result = sel.value;
+    const elseInput = document.getElementById('rule-else');
+    if (elseInput) elseInput.value = ruleElse;
+    const onFieldChange = (el) => {
+        const i = +el.dataset.i;
+        const v = (el.value || '').trim();
+        if (el.classList.contains('rl-L')) ruleRows2[i].L = v;
+        else if (el.classList.contains('rl-op')) ruleRows2[i].op = v;
+        else if (el.classList.contains('rl-R')) ruleRows2[i].R = v;
+        else if (el.classList.contains('rl-res')) ruleRows2[i].result = v;
         updateRuleCheck();
+    };
+    box.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('input', () => onFieldChange(el));
+        el.addEventListener('change', () => onFieldChange(el));
     });
     box.querySelectorAll('.rl-del').forEach(b => b.onclick = () => { ruleRows2.splice(+b.dataset.i, 1); renderRuleRows(); });
-    if (elseSel) elseSel.onchange = () => { ruleElse = elseSel.value; updateRuleCheck(); };
+    if (elseInput) {
+        const eh = () => { ruleElse = (elseInput.value || '').trim(); updateRuleCheck(); };
+        elseInput.oninput = eh; elseInput.onchange = eh;
+    }
     updateRuleCheck();
 }
 function buildRuleFormula() {
@@ -1412,7 +1425,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.18';
+const WEB_VERSION = '8.19';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
