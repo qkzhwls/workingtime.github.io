@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.27 (기본공식 보기 확인창에 시트 원본 수식도 함께 표시)
+// 중국제작 미발계산기 Ver 8.28 (출고일선택 기준=패킹리스트출고일; 도착일 없으면 출고만 표시, 있으면 입고 추가, 도착일+유예 지나면 제거)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -26,7 +26,7 @@ let savedDates = [];       // 활성(현재 모드)의 출고일 선택
 let savedDatesMibal = [];  // [Ver 8.10] 미발계산기 모드 출고일 선택
 let savedDatesLoc = [];    // [Ver 8.10] 위치지정모드 출고일 선택 (모드별 분리)
 let graceDays = 1; // [Ver 8.6] 본사도착 유예: 본사도착일 + graceDays 까지 목록/표/스캐너에 유지
-let shipDateByArrival = {}; // [Ver 8.7] 본사도착일 → 출고일(들) : 표시용(로직은 본사도착일, 사용자에겐 출고일 표기)
+let arrivalByShip = {}; // [Ver 8.28] 패킹리스트출고일 → 본사도착일(들) : 기준=출고일, 도착일은 있으면 표시/유예에만 사용
 let saveTimeout = null;
 
 // 유틸리티
@@ -1243,38 +1243,38 @@ async function clearLocationData() {
 // ---------------------------------------------------------
 // 비즈니스 로직 (매칭 및 렌더링)
 // ---------------------------------------------------------
-// [Ver 8.7] 날짜 표시: YYYY-MM-DD → M.D, 그리고 '8.11 출고 → 8.19 도착' 라벨(로직은 본사도착일)
+// [Ver 8.28] 날짜 표시: 기준=출고일. 도착일 없으면 '8.11 출고', 있으면 '8.11 출고 → 8.19 입고'
 function fmtMD(d) { const p = (d || '').split('-'); return p.length === 3 ? `${+p[1]}.${+p[2]}` : d; }
-function dateDisplayLabel(arrival) {
-    const ships = (shipDateByArrival[arrival] || []).filter(Boolean);
-    const shipTxt = ships.length ? ships.map(fmtMD).join(',') + ' 출고 → ' : '';
-    return `${shipTxt}${fmtMD(arrival)} 도착`;
+function dateDisplayLabel(ship) {
+    const arrivals = (arrivalByShip[ship] || []).filter(Boolean);
+    const arrTxt = arrivals.length ? ' → ' + arrivals.map(fmtMD).join(',') + ' 입고' : '';
+    return `${fmtMD(ship)} 출고${arrTxt}`;
 }
 function extractShipDates() {
     const checklistContainer = document.getElementById('date-checklist-container');
     if (!checklistContainer) return;
     const dateMap = {};
-    const dCols = ['1차본사도착일','2차본사도착일','3차본사도착일','4차본사도착일','5차본사도착일','6차본사도착일']; // [Ver 8.6] 본사도착일 기준(로직)
-    const oCols = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일']; // 출고일(표시용)
+    const oCols = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일']; // [Ver 8.28] 기준=출고일
+    const dCols = ['1차본사도착일','2차본사도착일','3차본사도착일','4차본사도착일','5차본사도착일','6차본사도착일']; // 도착일(있으면 표시/유예)
     const qCols = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
 
     const process = (rows) => {
         rows.forEach(row => {
-            dCols.forEach((dc, idx) => {
-                const norm = normalizeDate(row[dc]);
-                if (!norm || norm.length < 10) return;   // 본사도착일 없음 → 제외
-                if (!withinGrace(norm)) return;           // [Ver 8.6] 본사도착일+유예 지남 → 제외
-                if (!dateMap[norm]) dateMap[norm] = { qty: 0, skus: new Set(), ships: new Set() };
-                dateMap[norm].qty += (parseInt(row[qCols[idx]]) || 0);
-                dateMap[norm].skus.add(row['상품코드'] || row['어드민상품코드']);
-                const sd = normalizeDate(row[oCols[idx]]);
-                if (sd && sd.length >= 10) dateMap[norm].ships.add(sd);
-            });
+            for (let idx = 0; idx < oCols.length; idx++) {
+                const ship = normalizeDate(row[oCols[idx]]);
+                if (!ship || ship.length < 10) continue;   // [Ver 8.28] 출고일 없음 → 제외
+                const arr = normalizeDate(row[dCols[idx]]);
+                if (arr && arr.length >= 10 && !withinGrace(arr)) continue; // 도착일+유예 지남 → 제외
+                if (!dateMap[ship]) dateMap[ship] = { qty: 0, skus: new Set(), arrivals: new Set() };
+                dateMap[ship].qty += (parseInt(row[qCols[idx]]) || 0);
+                dateMap[ship].skus.add(row['상품코드'] || row['어드민상품코드']);
+                if (arr && arr.length >= 10) dateMap[ship].arrivals.add(arr);
+            }
         });
     };
     process(orderDataOriginal); process(orderDataBuy);
-    shipDateByArrival = {};
-    Object.entries(dateMap).forEach(([arr, info]) => { shipDateByArrival[arr] = [...info.ships].sort(); });
+    arrivalByShip = {};
+    Object.entries(dateMap).forEach(([ship, info]) => { arrivalByShip[ship] = [...info.arrivals].sort(); });
     const sorted = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0]));
     if (sorted.length === 0) { checklistContainer.innerHTML = '출고 데이터 없음'; return; }
     let html = '';
@@ -1349,7 +1349,8 @@ function autoApplyDates() {
 function applyDates(opts) {
     if (savedDates.length === 0) return;
     saveConfig();
-    const dCols = ['1차본사도착일','2차본사도착일','3차본사도착일','4차본사도착일','5차본사도착일','6차본사도착일']; // [Ver 8.6] 본사도착일 기준
+    const oCols = ['1차패킹리스트출고일','2차패킹리스트출고일','3차패킹리스트출고일','4차패킹리스트출고일','5차패킹리스트출고일','6차패킹리스트출고일']; // [Ver 8.28] 기준=출고일
+    const dCols = ['1차본사도착일','2차본사도착일','3차본사도착일','4차본사도착일','5차본사도착일','6차본사도착일']; // 도착일(있으면 유예)
     const qCols = ['1차패킹리스트출고수량','2차패킹리스트출고수량','3차패킹리스트출고수량','4차패킹리스트출고수량','5차패킹리스트출고수량','6차패킹리스트출고수량'];
 
     let resultMap = {};
@@ -1357,12 +1358,13 @@ function applyDates(opts) {
         rows.forEach(row => {
             const code = (row['어드민상품코드'] || row['상품코드'] || '').toString().trim(); if (!code) return;
             let matched = false, totalQty = 0;
-            dCols.forEach((dc, idx) => {
-                const rd = normalizeDate(row[dc]);
-                if (!rd || rd.length < 10) return;        // 본사도착일 없음 → 제외
-                if (!withinGrace(rd)) return;             // [Ver 8.6] 본사도착일+유예 지남 → 제외
-                if (savedDates.includes(rd)) { matched = true; totalQty += (parseInt(row[qCols[idx]]) || 0); }
-            });
+            for (let idx = 0; idx < oCols.length; idx++) {
+                const ship = normalizeDate(row[oCols[idx]]);
+                if (!ship || ship.length < 10) continue;   // [Ver 8.28] 출고일 없음 → 제외
+                const arr = normalizeDate(row[dCols[idx]]);
+                if (arr && arr.length >= 10 && !withinGrace(arr)) continue; // 도착일+유예 지남 → 제외
+                if (savedDates.includes(ship)) { matched = true; totalQty += (parseInt(row[qCols[idx]]) || 0); }
+            }
             if (matched) {
                 if (!resultMap[code]) resultMap[code] = { code, name: getProductName(row), option: row['옵션']||'', arrivalQty: 0, bigoY: row['비고']||'' };
                 resultMap[code].arrivalQty += totalQty;
@@ -1628,7 +1630,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.27';
+const WEB_VERSION = '8.28';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
