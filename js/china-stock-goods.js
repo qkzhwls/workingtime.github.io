@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.25 (기본공식=시트 3조건, [기본공식 불러오기] 버튼, 도착수량 항상 포함)
+// 중국제작 미발계산기 Ver 8.26 (기본공식 보기: 버튼 누르면 3조건 내용을 확인창으로 표시 후 불러오기)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -654,7 +654,7 @@ function renderRuleDraft() {
     zone.innerHTML =
         `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;">
             <span style="font-weight:bold; font-size:12px; color:#37474f;">🧾 내가 만든 규칙 <span style="color:#90a4ae; font-weight:normal;">(위에서부터 순서대로 적용)</span></span>
-            <button type="button" id="load-default-rule" title="사진 시트와 동일한 3조건 기본공식으로 되돌리기" style="padding:5px 10px; background:#eef4ff; color:#1565c0; border:1px solid #90caf9; border-radius:6px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;">📋 기본공식 불러오기</button>
+            <button type="button" id="load-default-rule" title="기본공식(시트 3조건) 내용 보기 · 불러오기" style="padding:5px 10px; background:#eef4ff; color:#1565c0; border:1px solid #90caf9; border-radius:6px; cursor:pointer; font-size:11px; font-weight:bold; white-space:nowrap;">📋 기본공식 보기·불러오기</button>
          </div>
          ${condLines}${emptyMsg}${elseLine}
          <div style="border-top:2px dashed #90caf9; margin:12px 0 10px;"></div>
@@ -684,11 +684,18 @@ function setRuleDraftAsElse() {
     renderRuleRows();
     showToast('그 외(기본값) = ' + expr);
 }
-// [Ver 8.25] 기본공식(사진 시트 3조건)을 조립 목록으로 불러오기
+// [Ver 8.26] 기본공식(사진 시트 3조건)을 내용까지 보여주고, 확인하면 조립 목록으로 불러오기
 function loadDefaultRuleFormula() {
-    if (ruleRows2.length && !confirm('지금 만든 조건을 지우고 기본공식(사진 시트의 3조건)으로 되돌릴까요?')) return;
     const parsed = parseRuleFormula(DEFAULT_MIBAL_FORMULA);
-    if (parsed && parsed.rows.length) { ruleRows2 = parsed.rows; ruleElse = parsed.elseVal; }
+    const rows = (parsed && parsed.rows) ? parsed.rows : [];
+    const elseVal = (parsed && parsed.elseVal) ? parsed.elseVal : '0';
+    const lines = rows.map((r, i) => `${i + 1}) 만약 ${r.L} ${ruleTokLabel(r.op)} ${r.R}  →  미발수량 = ${r.result}`);
+    const msg = '📋 기본공식 (오더리스트 시트와 동일한 3조건)\n\n'
+        + lines.join('\n')
+        + `\n그 외 → 미발수량 = ${elseVal}\n\n`
+        + (ruleRows2.length ? '이 기본공식을 불러올까요? (지금 만든 조건은 사라집니다)' : '이 기본공식을 불러올까요?');
+    if (!confirm(msg)) return;
+    if (rows.length) { ruleRows2 = rows; ruleElse = elseVal; }
     ruleDraftTokens = [];
     renderRuleRows();
     showToast('기본공식을 불러왔어요. 아래 [✔ 이 규칙 적용]을 눌러 저장하세요.');
@@ -1618,7 +1625,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.25';
+const WEB_VERSION = '8.26';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
