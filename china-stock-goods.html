@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.20</div>
+            <div class="version-badge">🚀 Ver 8.21</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -222,7 +222,7 @@
             <!-- [Ver 7.5] 규칙 변수(재고로그 헤더) 관리 -->
             <div style="background:#f3e5f5; border:1px solid #e1bee7; border-radius:8px; padding:10px 12px; margin-bottom:14px;">
                 <div style="font-weight:800; color:#6a1b9a; font-size:13px; margin-bottom:5px;">🏷️ 규칙 변수 (재고로그 헤더 추가)</div>
-                <div style="font-size:11px; color:#777; margin-bottom:8px; line-height:1.5;">기본 변수 <b>총재고 · 적재량 · 부족수량 · 직진배송</b> 외에, 미발재고로그 헤더를 골라 변수로 추가하면 아래 규칙(조립·직접 입력)에서 그 이름 그대로 쓸 수 있습니다.</div>
+                <div style="font-size:11px; color:#777; margin-bottom:8px; line-height:1.5;">기본 변수 <b>총재고 · 적재량 · 부족수량 · 직진배송</b> 외에, 미발재고로그 헤더를 골라 변수로 추가하면 아래 규칙 조립에서 그 이름 그대로 쓸 수 있습니다.</div>
                 <div id="mibal-vars-list" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;"></div>
                 <div style="display:flex; gap:6px;">
                     <select id="mibal-var-select" style="flex:1; min-width:0; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:12px;"></select>
@@ -230,14 +230,8 @@
                 </div>
             </div>
 
-            <!-- 모드 선택 탭 -->
-            <div style="display:flex; gap:6px; margin-bottom:14px;">
-                <button class="fmode-tab" data-mode="builder" style="flex:1; padding:9px 4px; border:2px solid #ccc; background:#fff; border-radius:8px; cursor:pointer; font-weight:800; font-size:13px;">🧩 규칙 조립</button>
-                <button class="fmode-tab" data-mode="advanced" style="flex:1; padding:9px 4px; border:2px solid #ccc; background:#fff; border-radius:8px; cursor:pointer; font-weight:800; font-size:13px;">⚙️ 직접 입력</button>
-            </div>
-
-            <!-- ② 규칙 조립 모드 -->
-            <div id="fmode-builder" style="display:none;">
+            <!-- 규칙 조립 (유일 모드) -->
+            <div id="fmode-builder" style="display:block;">
                 <div style="font-size:12px; color:#555; background:#e3f2fd; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
                     <b>"만약 ~이면 → 미발수량 = ~"</b> 문장을 위에서부터 순서대로 조립하세요.<br>위 조건이 맞으면 그 값으로, 아니면 다음 조건으로 넘어가고, 다 아니면 <b>그 외</b> 값이 됩니다.<br>
                     <span style="color:#1565c0;">칸을 클릭하면 변수 목록이 뜨고, <b>직접 식을 입력</b>할 수도 있어요. (예: <code>적재량-총재고</code>)<br>
@@ -250,25 +244,13 @@
                     <span>그 외에는 → 미발수량 =</span>
                     <input id="rule-else" class="rule-fld" list="rule-expr-list" spellcheck="false" placeholder="값/식" style="width:132px; padding:5px; border:1px solid #ccc; border-radius:4px; font-size:12px; font-family:monospace;">
                 </div>
-                <button id="btn-rule-add" style="margin-top:8px; padding:6px 12px; border:1px solid #1976d2; background:#fff; color:#1976d2; border-radius:4px; cursor:pointer; font-size:12px; font-weight:bold;">+ 조건 추가</button>
+                <div id="rule-add-zone" title="변수를 끌어다 놓거나 클릭" style="margin-top:8px; padding:14px 12px; border:2px dashed #90caf9; border-radius:8px; text-align:center; color:#1976d2; font-size:13px; font-weight:bold; cursor:pointer; background:#f5faff;">➕ 여기에 <span style="text-decoration:underline;">변수를 끌어다 놓으면</span> 새 조건이 추가됩니다 (또는 클릭)</div>
                 <!-- [Ver 8.9] 완성된 예시: 임의 값으로 내가 만든 규칙을 적용한 결과 -->
                 <div style="margin-top:12px; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; padding:10px;">
                     <div style="font-weight:bold; font-size:12px; color:#e65100; margin-bottom:6px;">🧪 완성된 예시 — 임의 값으로 내 규칙을 적용한 결과</div>
                     <div id="rule-examples" style="font-size:12px; color:#444; line-height:1.9;"></div>
                 </div>
                 <button id="btn-builder-apply" style="width:100%; margin-top:12px; padding:13px; border:none; background:#1976d2; color:#fff; border-radius:8px; font-size:16px; font-weight:800; cursor:pointer;">✔ 이 규칙 적용</button>
-            </div>
-
-            <!-- ③ 직접 입력 모드 -->
-            <div id="fmode-advanced" style="display:none;">
-                <div style="font-size:12px; color:#666; line-height:1.7; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; padding:8px 10px;">
-                    변수: <b>총재고 · 적재량 · 부족수량 · 직진배송</b> (+ 위에서 추가한 <b>규칙 변수</b>) / 조건은 <b>조건 ? 참값 : 거짓값</b><br>예: <code>총재고===0 ? 적재량 : 0</code>
-                </div>
-                <textarea id="mibal-formula-input" rows="4" spellcheck="false" style="width:100%; margin-top:10px; padding:10px; border:1px solid #ccc; border-radius:6px; font-family:monospace; font-size:13px; box-sizing:border-box; resize:vertical;"></textarea>
-                <div style="margin-top:10px; display:flex; gap:8px;">
-                    <button id="btn-mibal-reset" style="padding:8px 14px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer; font-size:12px;">기본값 복원</button>
-                    <button id="btn-advanced-apply" style="flex:1; padding:10px; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer; font-weight:bold;">저장</button>
-                </div>
             </div>
 
             <div style="margin-top:16px; text-align:right; border-top:1px solid #eee; padding-top:12px;">
@@ -351,6 +333,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.20"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.21"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.20 (규칙 조립: 변수 드래그&드롭 + 사칙연산/괄호 팔레트)
+// 중국제작 미발계산기 Ver 8.21 (직접입력 탭 제거, 저장수식 조립행 역파싱, +조건추가 드롭존)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -344,32 +344,20 @@ function closeSheetSettingsModal() {
 // ---------------------------------------------------------
 // [Ver 5.1] 미발수량 규칙 설정 모달 (예시 / 규칙 조립 / 직접 입력 3모드)
 // ---------------------------------------------------------
-let formulaMode = 'example';
+let formulaMode = 'builder';
 
 function openMibalFormulaModal() {
     closeAllMenus();
-    document.getElementById('mibal-formula-input').value = mibalFormula;
     renderMibalVars(); // [Ver 7.5] 규칙 변수(재고로그 헤더) 목록/선택지 갱신
-    setFormulaMode('builder'); // [Ver 8.8] 예시 모드 제거 → 규칙 조립 기본
+    // [Ver 8.21] 저장된 수식을 조립 행으로 펼쳐서 지금 적용된 규칙을 그대로 보여줌(파싱 실패 시 기존 행 유지)
+    const parsed = parseRuleFormula(mibalFormula);
+    if (parsed && parsed.rows.length) { ruleRows2 = parsed.rows; ruleElse = parsed.elseVal; }
+    formulaMode = 'builder';
+    renderRuleRows();
     document.getElementById('mibal-formula-modal').style.display = 'flex';
 }
 function closeMibalFormulaModal() {
     document.getElementById('mibal-formula-modal').style.display = 'none';
-}
-function setFormulaMode(mode) {
-    formulaMode = mode;
-    ['example','builder','advanced'].forEach(m => {
-        const sec = document.getElementById('fmode-' + m);
-        if (sec) sec.style.display = (m === mode) ? 'block' : 'none';
-    });
-    document.querySelectorAll('.fmode-tab').forEach(t => {
-        const on = t.dataset.mode === mode;
-        t.style.borderColor = on ? '#1976d2' : '#ccc';
-        t.style.background = on ? '#e3f2fd' : '#fff';
-        t.style.color = on ? '#0d47a1' : '#555';
-    });
-    if (mode === 'builder') renderRuleRows();
-    else if (mode === 'advanced') document.getElementById('mibal-formula-input').value = mibalFormula;
 }
 
 // 공통: 규칙(수식) 검증 → Firebase 저장 → 표 즉시 재계산
@@ -654,6 +642,68 @@ function buildRuleFormula() {
     }
     return expr;
 }
+// [Ver 8.21] 저장된 수식(중첩 삼항)을 조립 행으로 역파싱 — 직접입력 탭 없이도 조립 화면이 실제 규칙을 그대로 보여줌
+function topLevelCharIndex(s, target, from) {
+    let depth = 0;
+    for (let i = (from || 0); i < s.length; i++) {
+        const ch = s[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        else if (depth === 0 && ch === target) return i;
+    }
+    return -1;
+}
+function stripRuleParens(x) {
+    x = (x || '').trim();
+    while (x.length >= 2 && x[0] === '(') {
+        let depth = 0, matchEnd = -1;
+        for (let i = 0; i < x.length; i++) {
+            if (x[i] === '(') depth++;
+            else if (x[i] === ')') { depth--; if (depth === 0) { matchEnd = i; break; } }
+        }
+        if (matchEnd === x.length - 1) x = x.slice(1, -1).trim();
+        else break;
+    }
+    return x;
+}
+function parseRuleCondition(cond) {
+    cond = stripRuleParens(cond);
+    const ops = ['===', '!==', '>=', '<=', '>', '<']; // 긴 연산자 먼저
+    let depth = 0;
+    for (let i = 0; i < cond.length; i++) {
+        const ch = cond[i];
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        else if (depth === 0) {
+            for (const op of ops) {
+                if (cond.startsWith(op, i)) {
+                    const L = cond.slice(0, i).trim(), R = cond.slice(i + op.length).trim();
+                    if (L && R) return { L, op, R };
+                    return null;
+                }
+            }
+        }
+    }
+    return null;
+}
+function parseRuleFormula(expr) {
+    try {
+        const rows = [];
+        let s = (expr || '').trim();
+        for (let g = 0; g < 64; g++) {
+            s = stripRuleParens(s);
+            const q = topLevelCharIndex(s, '?', 0);
+            if (q === -1) return { rows, elseVal: stripRuleParens(s) || '0' };
+            const c = topLevelCharIndex(s, ':', q + 1);
+            if (c === -1) return null;
+            const pc = parseRuleCondition(s.slice(0, q));
+            if (!pc) return null;
+            rows.push({ L: pc.L, op: pc.op, R: pc.R, result: stripRuleParens(s.slice(q + 1, c)) });
+            s = s.slice(c + 1).trim();
+        }
+        return null;
+    } catch (e) { return null; }
+}
 // [Ver 8.9] 완성된 예시: 임의 값을 자동으로 넣어 내가 만든 규칙의 결과를 보여줌
 function updateRuleCheck() {
     const el = document.getElementById('rule-examples'); if (!el) return;
@@ -726,16 +776,6 @@ async function saveZoneCap() {
         showToast('✅ 구역별 적재량 저장됨');
         if (savedDates.length > 0) applyDates(); // 표 재계산
     } catch (e) { alert('저장 실패: ' + e.message); }
-}
-
-// ===== ③ 직접 입력 모드 =====
-function applyFromAdvanced() {
-    const expr = document.getElementById('mibal-formula-input').value.trim();
-    if (!expr) { alert('수식을 입력하세요.'); return; }
-    applyAndSaveFormula(expr, '✅ 미발수량 규칙 저장됨');
-}
-function resetMibalFormulaInput() {
-    document.getElementById('mibal-formula-input').value = DEFAULT_MIBAL_FORMULA;
 }
 
 async function saveSheetSettings() {
@@ -1502,7 +1542,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.20';
+const WEB_VERSION = '8.21';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1672,19 +1712,32 @@ function setupEventListeners() {
     // [Ver 5.1] 미발수량 규칙 설정 모달 (예시 / 규칙 조립 / 직접 입력)
     document.getElementById('btn-open-mibal-formula')?.addEventListener('click', () => openMibalFormulaModal());
     document.getElementById('btn-mibal-cancel')?.addEventListener('click', () => closeMibalFormulaModal());
-    document.querySelectorAll('.fmode-tab').forEach(t => t.addEventListener('click', () => setFormulaMode(t.dataset.mode)));
     // 예시 모드
     document.getElementById('btn-ex-add')?.addEventListener('click', () => { exampleRows.push({ s:0, c:20, sh:0, d:0, want:'' }); buildExampleRows(); });
     document.getElementById('btn-ex-copy')?.addEventListener('click', () => copyExamples());
     document.getElementById('btn-example-apply')?.addEventListener('click', () => applyFromExamples());
     // [Ver 7.5] 규칙 변수(재고로그 헤더) 추가
     document.getElementById('btn-mibal-var-add')?.addEventListener('click', () => addMibalVar());
-    // 규칙 조립 모드
-    document.getElementById('btn-rule-add')?.addEventListener('click', () => { ruleRows2.push({ L:'총재고', op:'===', R:'0', result:'0' }); renderRuleRows(); });
+    // 규칙 조립 모드 — [Ver 8.21] "+조건추가"를 드롭존으로: 변수를 끌어다 놓으면 그 값으로 새 조건 추가
+    const addZone = document.getElementById('rule-add-zone');
+    if (addZone) {
+        const addRow = (Lval) => {
+            ruleRows2.push({ L: Lval || '총재고', op: '===', R: '0', result: '0' });
+            renderRuleRows();
+            const rows = document.getElementById('rule-rows');
+            const lastL = rows && rows.lastElementChild ? rows.lastElementChild.querySelector('input.rl-L') : null;
+            if (lastL) { lastL.focus(); lastRuleField = lastL; }
+        };
+        addZone.addEventListener('click', () => addRow(''));
+        addZone.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; addZone.style.background = '#e3f2fd'; addZone.style.borderColor = '#1976d2'; });
+        addZone.addEventListener('dragleave', () => { addZone.style.background = '#f5faff'; addZone.style.borderColor = '#90caf9'; });
+        addZone.addEventListener('drop', e => {
+            e.preventDefault(); addZone.style.background = '#f5faff'; addZone.style.borderColor = '#90caf9';
+            const t = e.dataTransfer.getData('text/plain');
+            addRow(t || '');
+        });
+    }
     document.getElementById('btn-builder-apply')?.addEventListener('click', () => applyFromBuilder());
-    // 직접 입력 모드
-    document.getElementById('btn-advanced-apply')?.addEventListener('click', () => applyFromAdvanced());
-    document.getElementById('btn-mibal-reset')?.addEventListener('click', () => resetMibalFormulaInput());
     document.getElementById('mibal-formula-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mibal-formula-modal') closeMibalFormulaModal(); });
     document.querySelector('#mibal-formula-modal .modal-content')?.addEventListener('click', (e) => e.stopPropagation());
 
