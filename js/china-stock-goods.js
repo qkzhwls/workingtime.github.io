@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.29 (상단 총 미발수량 카드 = 부족수량 열의 합으로 변경)
+// 중국제작 미발계산기 Ver 8.30 (위치지정모드 당일입고 표에 옵션추가항목1 열 추가 - 미발재고로그 헤더값)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1445,7 +1445,7 @@ function getColumns() { const base = (Array.isArray(columnConfig) && columnConfi
 let viewMode = localStorage.getItem('csgViewMode') || 'mibal';
 // [Ver 7.1] 위치지정모드 서브뷰: 당일입고지정(today) / 기존재고지정(existing)
 let locSubView = localStorage.getItem('csgLocSub') || 'today';
-const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'locCheck']; // 위치 중심 상품표(당일)
+const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'log:옵션추가항목1', 'locCheck']; // [Ver 8.30] 당일입고: 미발재고로그의 옵션추가항목1 헤더값 표시
 function getActiveColumns() { return viewMode === 'location' ? LOCATION_COLUMNS : getColumns(); }
 function applyViewMode() {
     document.body.dataset.view = viewMode;
@@ -1630,7 +1630,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.29';
+const WEB_VERSION = '8.30';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
