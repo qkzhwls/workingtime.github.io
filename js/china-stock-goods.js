@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.21 (직접입력 탭 제거, 저장수식 조립행 역파싱, +조건추가 드롭존)
+// 중국제작 미발계산기 Ver 8.22 (드롭존을 작업대로 - 토큰을 쌓아 한 조건을 만들어 위에 추가)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -352,6 +352,7 @@ function openMibalFormulaModal() {
     // [Ver 8.21] 저장된 수식을 조립 행으로 펼쳐서 지금 적용된 규칙을 그대로 보여줌(파싱 실패 시 기존 행 유지)
     const parsed = parseRuleFormula(mibalFormula);
     if (parsed && parsed.rows.length) { ruleRows2 = parsed.rows; ruleElse = parsed.elseVal; }
+    ruleDraftTokens = []; // [Ver 8.22] 작업대 초기화
     formulaMode = 'builder';
     renderRuleRows();
     document.getElementById('mibal-formula-modal').style.display = 'flex';
@@ -552,33 +553,67 @@ function backspaceRuleField() {
     lastRuleField = el;
     el.dispatchEvent(new Event('input', { bubbles: true }));
 }
-// [Ver 8.20] 변수 칩 + 사칙연산/괄호 팔레트 렌더
+// ===== [Ver 8.22] 드롭존 작업대: 토큰을 순서대로 쌓아 하나의 조건을 만든 뒤 위에 추가 =====
+let ruleDraftTokens = []; // 예: ['도착수량','+','총재고','<=','적재량','→','도착수량']
+const RULE_TOKEN_LABEL = { '===':'=', '!==':'≠', '>=':'≥', '<=':'≤', '>':'>', '<':'<', '*':'×', '/':'÷', '→':'→ =' };
+function ruleTokLabel(t) { return RULE_TOKEN_LABEL[t] || t; }
+// [Ver 8.20→8.22] 변수/사칙연산/비교·결과 팔레트 렌더 — 드롭존으로 끌어다 놓거나 클릭하면 작업대에 쌓임
 function renderRulePalette() {
     const box = document.getElementById('rule-palette');
     if (!box) return;
-    const vars = [...RULE_VARS, ...mibalVars];
-    const varChips = vars.map(v =>
-        `<span class="rule-chip" draggable="true" data-token="${ruleEscAttr(v)}" title="끌어다 놓거나 클릭해서 넣기" style="cursor:grab; user-select:none; background:#ede7f6; color:#4527a0; border:1px solid #b39ddb; padding:4px 10px; border-radius:14px; font-size:12px; font-weight:bold;">${v}</span>`
-    ).join('');
-    const ops = [['+','+'],['−','-'],['×','*'],['÷','/'],['(','('],[')',')']];
-    const opBtns = ops.map(([lab, tok]) =>
-        `<button type="button" class="rule-op-ins" draggable="true" data-token="${ruleEscAttr(tok)}" style="cursor:pointer; background:#fff3e0; color:#e65100; border:1px solid #ffcc80; padding:4px 12px; border-radius:8px; font-size:14px; font-weight:900;">${lab}</button>`
-    ).join('');
+    const chip = (tok, label, bg, fg, bd) =>
+        `<span class="rule-tok" draggable="true" data-token="${ruleEscAttr(tok)}" title="드롭존으로 끌어다 놓거나 클릭" style="cursor:grab; user-select:none; background:${bg}; color:${fg}; border:1px solid ${bd}; padding:4px 10px; border-radius:12px; font-size:12px; font-weight:bold;">${label}</span>`;
+    const vars = [...RULE_VARS, ...mibalVars].map(v => chip(v, v, '#ede7f6', '#4527a0', '#b39ddb')).join('');
+    const nums = ['0','1'].map(n => chip(n, n, '#eceff1', '#37474f', '#b0bec5')).join('');
+    const arith = [['+','+'],['-','−'],['*','×'],['/','÷'],['(','('],[')',')']].map(([t,l]) => chip(t, l, '#fff3e0', '#e65100', '#ffcc80')).join('');
+    const cmp = [['===','='],['!==','≠'],['>','&gt;'],['>=','≥'],['<','&lt;'],['<=','≤']].map(([t,l]) => chip(t, l, '#e3f2fd', '#0d47a1', '#90caf9')).join('');
+    const sep = chip('→', '→ 결과(미발수량 =)', '#e8f5e9', '#1b5e20', '#a5d6a7');
     box.innerHTML =
-        `<div style="font-size:11px; color:#777; margin-bottom:6px;">🧩 변수를 칸으로 <b>끌어다 놓거나</b>, 칸을 클릭한 뒤 아래를 눌러 넣으세요</div>
-         <div style="display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin-bottom:6px;">${varChips}</div>
-         <div style="display:flex; flex-wrap:wrap; gap:5px; align-items:center;">${opBtns}
-            <button type="button" id="rule-backspace" style="cursor:pointer; background:#fff; color:#c62828; border:1px solid #ef9a9a; padding:4px 12px; border-radius:8px; font-size:12px; font-weight:bold;">⌫ 한 글자 지우기</button></div>`;
-    box.querySelectorAll('.rule-chip').forEach(ch => {
-        ch.addEventListener('click', () => insertRuleToken(ch.dataset.token));
-        ch.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', ch.dataset.token); e.dataTransfer.effectAllowed = 'copy'; });
+        `<div style="font-size:11px; color:#777; margin-bottom:6px;">🧩 아래를 <b>맨 밑 드롭존으로 끌어다 놓거나 클릭</b>하면 순서대로 식이 쌓입니다</div>
+         <div style="margin-bottom:5px;"><span style="font-size:10px; color:#999;">변수 · 숫자</span><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:2px;">${vars} ${nums}</div></div>
+         <div style="margin-bottom:5px;"><span style="font-size:10px; color:#999;">사칙연산 · 괄호</span><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:2px;">${arith}</div></div>
+         <div><span style="font-size:10px; color:#999;">비교(부등호) · 결과구분</span><div style="display:flex; flex-wrap:wrap; gap:5px; margin-top:2px;">${cmp} ${sep}</div></div>`;
+    box.querySelectorAll('.rule-tok').forEach(el => {
+        el.addEventListener('click', () => addDraftToken(el.dataset.token));
+        el.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', el.dataset.token); e.dataTransfer.effectAllowed = 'copy'; });
     });
-    box.querySelectorAll('.rule-op-ins').forEach(b => {
-        b.addEventListener('click', () => insertRuleToken(b.dataset.token));
-        b.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', b.dataset.token); e.dataTransfer.effectAllowed = 'copy'; });
-    });
-    const bk = document.getElementById('rule-backspace');
-    if (bk) bk.addEventListener('click', () => backspaceRuleField());
+}
+function addDraftToken(tok) { if (!tok) return; ruleDraftTokens.push(tok); renderRuleDraft(); }
+function ruleDraftSplit() {
+    const sep = ruleDraftTokens.indexOf('→');
+    if (sep === -1) return { cond: ruleDraftTokens.slice(), res: [] };
+    return { cond: ruleDraftTokens.slice(0, sep), res: ruleDraftTokens.slice(sep + 1) };
+}
+// 드롭존(작업대) 렌더: 현재까지 쌓인 식을 문장으로 미리보기 + [조건 넣기]/[뒤로]/[비우기]
+function renderRuleDraft() {
+    const zone = document.getElementById('rule-add-zone');
+    if (!zone) return;
+    const { cond, res } = ruleDraftSplit();
+    const condStr = cond.map(ruleTokLabel).join(' ');
+    const resStr = res.map(ruleTokLabel).join(' ');
+    const preview = ruleDraftTokens.length === 0
+        ? '<span style="color:#90a4ae; font-weight:normal;">여기에 <b>변수·부등호·사칙연산</b>을 끌어다 놓으세요. 예) 총재고 <b>=</b> 0 <b>→ 결과</b> 적재량</span>'
+        : `<b>만약</b> <span style="color:#4527a0;">${condStr || '…'}</span> <b>이면 → 미발수량 =</b> <span style="color:#e65100;">${resStr || '…'}</span>`;
+    zone.innerHTML =
+        `<div style="font-size:13px; font-weight:bold; margin-bottom:8px; min-height:20px; line-height:1.6;">${preview}</div>
+         <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
+            <button type="button" id="draft-commit" style="padding:7px 16px; background:#1976d2; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">✔ 조건 넣기 (위에 추가)</button>
+            <button type="button" id="draft-back" style="padding:7px 12px; background:#fff; color:#555; border:1px solid #bbb; border-radius:6px; cursor:pointer; font-size:12px;">⌫ 마지막 빼기</button>
+            <button type="button" id="draft-clear" style="padding:7px 12px; background:#fff; color:#c62828; border:1px solid #ef9a9a; border-radius:6px; cursor:pointer; font-size:12px;">✕ 비우기</button>
+         </div>`;
+    document.getElementById('draft-commit').onclick = commitRuleDraft;
+    document.getElementById('draft-back').onclick = () => { ruleDraftTokens.pop(); renderRuleDraft(); };
+    document.getElementById('draft-clear').onclick = () => { ruleDraftTokens = []; renderRuleDraft(); };
+}
+function commitRuleDraft() {
+    const { cond, res } = ruleDraftSplit();
+    if (!cond.length) { showToast('먼저 변수·부등호를 끌어다 놓아 조건을 만드세요'); return; }
+    const pc = parseRuleCondition(cond.join(' '));
+    if (!pc) { showToast('비교기호(= ≠ > ≥ < ≤)를 넣어 "값 비교 값" 형태로 만드세요'); return; }
+    ruleRows2.push({ L: pc.L, op: pc.op, R: pc.R, result: res.join(' ') || '0' });
+    ruleDraftTokens = [];
+    renderRuleRows();      // 위에 새 조건 행 표시
+    renderRuleDraft();     // 작업대 비우기
 }
 function renderRuleRows() {
     const box = document.getElementById('rule-rows');
@@ -587,6 +622,7 @@ function renderRuleRows() {
     const dl = document.getElementById('rule-expr-list');
     if (dl) dl.innerHTML = ruleExprSuggestions().map(s => `<option value="${ruleEscAttr(s)}"></option>`).join('');
     renderRulePalette(); // [Ver 8.20] 변수 드래그 칩 + 사칙연산 팔레트
+    renderRuleDraft();   // [Ver 8.22] 드롭존 작업대(현재 쌓인 식) 렌더
     ensureRuleFocusDelegate(); // [Ver 8.20] 마지막 포커스 필드 추적(focusin 위임)
     box.innerHTML = ruleRows2.map((r,i) => `
       <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap; background:#f5f5f5; padding:8px; border-radius:6px; margin-bottom:6px; font-size:13px; font-weight:bold;">
@@ -1542,7 +1578,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.21';
+const WEB_VERSION = '8.22';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1718,23 +1754,14 @@ function setupEventListeners() {
     document.getElementById('btn-example-apply')?.addEventListener('click', () => applyFromExamples());
     // [Ver 7.5] 규칙 변수(재고로그 헤더) 추가
     document.getElementById('btn-mibal-var-add')?.addEventListener('click', () => addMibalVar());
-    // 규칙 조립 모드 — [Ver 8.21] "+조건추가"를 드롭존으로: 변수를 끌어다 놓으면 그 값으로 새 조건 추가
+    // 규칙 조립 모드 — [Ver 8.22] 드롭존은 작업대: 끌어다 놓은 토큰을 순서대로 쌓아 하나의 조건을 만듦
     const addZone = document.getElementById('rule-add-zone');
     if (addZone) {
-        const addRow = (Lval) => {
-            ruleRows2.push({ L: Lval || '총재고', op: '===', R: '0', result: '0' });
-            renderRuleRows();
-            const rows = document.getElementById('rule-rows');
-            const lastL = rows && rows.lastElementChild ? rows.lastElementChild.querySelector('input.rl-L') : null;
-            if (lastL) { lastL.focus(); lastRuleField = lastL; }
-        };
-        addZone.addEventListener('click', () => addRow(''));
         addZone.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; addZone.style.background = '#e3f2fd'; addZone.style.borderColor = '#1976d2'; });
         addZone.addEventListener('dragleave', () => { addZone.style.background = '#f5faff'; addZone.style.borderColor = '#90caf9'; });
         addZone.addEventListener('drop', e => {
             e.preventDefault(); addZone.style.background = '#f5faff'; addZone.style.borderColor = '#90caf9';
-            const t = e.dataTransfer.getData('text/plain');
-            addRow(t || '');
+            addDraftToken(e.dataTransfer.getData('text/plain'));
         });
     }
     document.getElementById('btn-builder-apply')?.addEventListener('click', () => applyFromBuilder());

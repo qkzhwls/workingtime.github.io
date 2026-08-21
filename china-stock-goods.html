@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.21</div>
+            <div class="version-badge">🚀 Ver 8.22</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -233,9 +233,9 @@
             <!-- 규칙 조립 (유일 모드) -->
             <div id="fmode-builder" style="display:block;">
                 <div style="font-size:12px; color:#555; background:#e3f2fd; border-radius:6px; padding:8px 10px; margin-bottom:10px; line-height:1.6;">
-                    <b>"만약 ~이면 → 미발수량 = ~"</b> 문장을 위에서부터 순서대로 조립하세요.<br>위 조건이 맞으면 그 값으로, 아니면 다음 조건으로 넘어가고, 다 아니면 <b>그 외</b> 값이 됩니다.<br>
-                    <span style="color:#1565c0;">칸을 클릭하면 변수 목록이 뜨고, <b>직접 식을 입력</b>할 수도 있어요. (예: <code>적재량-총재고</code>)<br>
-                    예) 만약 <code>도착수량</code> <code>&lt;</code> <code>적재량-총재고</code> 이면 → 미발수량 = <code>도착수량</code></span>
+                    <b>"만약 ~이면 → 미발수량 = ~"</b> 조건을 위에서부터 순서대로 확인합니다. 맞으면 그 값으로, 아니면 다음 조건으로, 다 아니면 <b>그 외</b> 값이 됩니다.<br>
+                    <span style="color:#1565c0;">아래 <b>팔레트</b>에서 변수·부등호·사칙연산을 <b>맨 밑 드롭존으로 끌어다 놓거나 클릭</b>하면 식이 하나씩 쌓입니다. <code>→ 결과</code>로 결과값을 구분하고 <b>[조건 넣기]</b>를 누르면 위에 한 줄로 추가돼요.<br>
+                    예) <code>도착수량</code> <code>+</code> <code>총재고</code> <code>≤</code> <code>적재량</code> <code>→결과</code> <code>도착수량</code></span>
                 </div>
                 <div id="rule-palette" style="background:#faf7ff; border:1px solid #e1d5f5; border-radius:8px; padding:8px 10px; margin-bottom:10px;"></div>
                 <datalist id="rule-expr-list"></datalist>
@@ -333,6 +333,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.21"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.22"></script>
 </body>
 </html>
