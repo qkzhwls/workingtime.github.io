@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.34 (입고앱실행 제거→미발전송 버튼; 출고일별 미발 스냅샷 누적 MIBAL_HISTORY, 평균상승률 표시)
+// 중국제작 미발계산기 Ver 8.35 (미발전송 다중 출고일 허용 - 선택 출고일마다 동일 미발수량 각각 기록)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1743,21 +1743,24 @@ function renderAvgRise() {
 }
 async function sendMibal() {
     if (viewMode === 'location') { alert('미발전송은 미발계산기 모드에서 사용하세요.'); return; }
-    if (savedDates.length !== 1) { alert('미발전송은 출고일을 하나만 선택하고 눌러주세요.\n(패킹 단위로 저장됩니다)'); return; }
+    if (!savedDates.length) { alert('출고일을 하나 이상 선택하세요.'); return; }
     if (!filteredData.length) { alert('표에 데이터가 없습니다. 출고일을 확인하세요.'); return; }
-    const 출고일 = savedDates[0];
-    const 입고일 = (arrivalByShip[출고일] && arrivalByShip[출고일][0]) || '';
     const 미발수량 = filteredData.reduce((s, d) => s + (parseInt(d.shortage) || 0), 0);
     const 전송날짜 = todayISO();
-    const key = `${출고일}|${전송날짜}`;
-    const rec = { 출고일, 입고일, 미발수량, 전송날짜 };
-    const already = !!mibalHistory[key];
-    if (already && !confirm(`오늘(${전송날짜}) 이 출고일은 이미 전송했습니다. 미발수량을 ${mibalHistory[key].미발수량} → ${미발수량} 로 덮어쓸까요?`)) return;
-    mibalHistory[key] = rec;
+    // [Ver 8.35] 선택된 출고일마다 동일 미발수량으로 각각 기록 (같은날 여러 출고일 입고 대응, 제한 없음)
+    const dupes = savedDates.filter(o => mibalHistory[`${o}|${전송날짜}`]);
+    if (dupes.length && !confirm(`오늘(${전송날짜}) 이미 전송한 출고일 ${dupes.length}건이 있습니다.\n미발수량 ${미발수량}(으)로 덮어쓸까요?`)) return;
+    const update = {};
+    savedDates.forEach(출고일 => {
+        const 입고일 = (arrivalByShip[출고일] && arrivalByShip[출고일][0]) || '';
+        const key = `${출고일}|${전송날짜}`;
+        const rec = { 출고일, 입고일, 미발수량, 전송날짜 };
+        mibalHistory[key] = rec; update[key] = rec;
+    });
     try {
-        await setDoc(doc(db, CHINA_COLLECTION, 'MIBAL_HISTORY'), { map: { [key]: rec }, updatedAt: new Date() }, { merge: true });
+        await setDoc(doc(db, CHINA_COLLECTION, 'MIBAL_HISTORY'), { map: update, updatedAt: new Date() }, { merge: true });
         renderAvgRise();
-        showToast(`📤 미발전송 완료 · ${fmtMD(출고일)}출고 미발 ${미발수량}`);
+        showToast(`📤 미발전송 완료 · 출고일 ${savedDates.length}건 · 미발 ${미발수량}`);
     } catch (e) { alert('전송 실패: ' + e.message); }
 }
 
@@ -1777,7 +1780,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.34';
+const WEB_VERSION = '8.35';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
