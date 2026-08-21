@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.32 (환경설정 오류바코드매칭: 바코드→상품코드 수동 별칭 업로드/추가/삭제, 스캐너 병합)
+// 중국제작 미발계산기 Ver 8.33 (오류바코드매칭에 목록 다운로드 버튼 추가)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1150,6 +1150,17 @@ async function readSheetRowsAOA(file, need) {
     }
     return rows;
 }
+async function downloadBarcodeAlias() {
+    const entries = Object.entries(barcodeAlias).sort((a, b) => a[0].localeCompare(b[0]));
+    if (!entries.length) { alert('내려받을 매칭이 없습니다.'); return; }
+    const aoa = [['바코드', '상품코드']];
+    entries.forEach(([b, c]) => aoa.push([b, c]));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
+    const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
+    await downloadToDesktop('오류바코드매칭.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
+}
 async function handleBarcodeAliasUpload(e) {
     const file = e.target.files[0]; if (!file) return;
     showLoading('📂 오류바코드 매칭 처리 중...');
@@ -1716,7 +1727,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.32';
+const WEB_VERSION = '8.33';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1807,6 +1818,7 @@ function setupEventListeners() {
     document.getElementById('btn-barcode-alias-close')?.addEventListener('click', () => closeBarcodeAliasModal());
     document.getElementById('barcode-alias-modal')?.addEventListener('click', (e) => { if (e.target.id === 'barcode-alias-modal') closeBarcodeAliasModal(); });
     document.getElementById('upload-barcode-alias')?.addEventListener('change', (e) => handleBarcodeAliasUpload(e));
+    document.getElementById('btn-barcode-alias-download')?.addEventListener('click', () => downloadBarcodeAlias());
     document.getElementById('btn-ba-add')?.addEventListener('click', () => addBarcodeAliasManual());
     document.getElementById('ba-search')?.addEventListener('input', () => renderBarcodeAliasList());
     document.getElementById('ba-barcode')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('ba-code')?.focus(); });

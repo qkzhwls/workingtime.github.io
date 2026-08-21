@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.32</div>
+            <div class="version-badge">🚀 Ver 8.33</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -337,6 +337,7 @@
             </div>
             <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center;">
                 <label style="padding:8px 14px; background:#00838f; color:#fff; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">📂 파일 업로드<input type="file" id="upload-barcode-alias" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
+                <button id="btn-barcode-alias-download" style="padding:8px 14px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">⬇️ 목록 다운로드</button>
                 <button id="btn-barcode-alias-clear" style="padding:8px 14px; background:#fff; color:#c62828; border:1px solid #c62828; border-radius:5px; cursor:pointer; font-weight:bold; font-size:13px;">🗑️ 전체 삭제</button>
             </div>
             <div style="display:flex; gap:6px; margin-bottom:10px; align-items:center;">
@@ -366,6 +367,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.32"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.33"></script>
 </body>
 </html>
