@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.33 (오류바코드매칭에 목록 다운로드 버튼 추가)
+// 중국제작 미발계산기 Ver 8.34 (입고앱실행 제거→미발전송 버튼; 출고일별 미발 스냅샷 누적 MIBAL_HISTORY, 평균상승률 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1705,10 +1705,60 @@ function sortTable(key) {
 // ---------------------------------------------------------
 const INSTALL_PAGE = new URL('app-install.html', location.href).href;
 
-// [Ver 3.4] 입고앱실행 = 웹 스캐너 페이지 열기 (아이폰/안드로이드 공용, 설치 불필요)
+// [Ver 3.4] 입고앱실행 = 웹 스캐너 페이지 열기 (아이폰/안드로이드 공용, 설치 불필요) — 모바일 게이트에서 사용
 function openInScannerApp() {
     closeAllMenus();
     window.open(new URL('scan.html', location.href).href, '_blank');
+}
+
+// ---------------------------------------------------------
+// [Ver 8.34] 미발전송: 출고일별(패킹) 미발수량 스냅샷 누적 → MIBAL_HISTORY 단일 문서
+//   record 키 "출고일|전송날짜" : {출고일, 입고일, 미발수량, 전송날짜}
+//   평균상승률 = 패킹별 (입고일시점미발 - 출고시점미발)/출고시점미발 의 평균 (화면 계산, 저장 안 함)
+// ---------------------------------------------------------
+let mibalHistory = {};
+function todayISO() { const d = new Date(); const p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }
+async function loadMibalHistory() {
+    try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'MIBAL_HISTORY')); mibalHistory = (s.exists() && s.data().map) ? s.data().map : {}; } catch (e) { mibalHistory = {}; }
+}
+function computeAvgRise() {
+    const byShip = {};
+    Object.values(mibalHistory).forEach(r => { if (r && r.출고일) (byShip[r.출고일] = byShip[r.출고일] || []).push(r); });
+    const rates = [];
+    Object.values(byShip).forEach(recs => {
+        recs.sort((a, b) => String(a.전송날짜).localeCompare(String(b.전송날짜)));
+        const 입고일 = recs[0].입고일 || '';
+        const before = recs.find(r => !입고일 || String(r.전송날짜) < 입고일);       // 출고(입고 전) 시점
+        const arr = 입고일 ? recs.find(r => String(r.전송날짜) >= 입고일) : null;      // 입고일 시점
+        if (!before || !arr) return;
+        const a = parseInt(before.미발수량) || 0, b = parseInt(arr.미발수량) || 0;
+        if (a > 0) rates.push((b - a) / a);
+    });
+    return rates.length ? { avg: rates.reduce((s, x) => s + x, 0) / rates.length, n: rates.length } : null;
+}
+function renderAvgRise() {
+    const el = document.getElementById('avg-rise'); if (!el) return;
+    const r = computeAvgRise();
+    el.textContent = r ? `평균상승률 ${r.avg >= 0 ? '+' : ''}${Math.round(r.avg * 100)}% (${r.n}건)` : '평균상승률 –';
+}
+async function sendMibal() {
+    if (viewMode === 'location') { alert('미발전송은 미발계산기 모드에서 사용하세요.'); return; }
+    if (savedDates.length !== 1) { alert('미발전송은 출고일을 하나만 선택하고 눌러주세요.\n(패킹 단위로 저장됩니다)'); return; }
+    if (!filteredData.length) { alert('표에 데이터가 없습니다. 출고일을 확인하세요.'); return; }
+    const 출고일 = savedDates[0];
+    const 입고일 = (arrivalByShip[출고일] && arrivalByShip[출고일][0]) || '';
+    const 미발수량 = filteredData.reduce((s, d) => s + (parseInt(d.shortage) || 0), 0);
+    const 전송날짜 = todayISO();
+    const key = `${출고일}|${전송날짜}`;
+    const rec = { 출고일, 입고일, 미발수량, 전송날짜 };
+    const already = !!mibalHistory[key];
+    if (already && !confirm(`오늘(${전송날짜}) 이 출고일은 이미 전송했습니다. 미발수량을 ${mibalHistory[key].미발수량} → ${미발수량} 로 덮어쓸까요?`)) return;
+    mibalHistory[key] = rec;
+    try {
+        await setDoc(doc(db, CHINA_COLLECTION, 'MIBAL_HISTORY'), { map: { [key]: rec }, updatedAt: new Date() }, { merge: true });
+        renderAvgRise();
+        showToast(`📤 미발전송 완료 · ${fmtMD(출고일)}출고 미발 ${미발수량}`);
+    } catch (e) { alert('전송 실패: ' + e.message); }
 }
 
 // [Ver 8.11] 모바일 접속 시: 페이지 대신 '입고앱 실행하시겠습니까?' 안내 → 바로 스캐너 열기
@@ -1727,7 +1777,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.33';
+const WEB_VERSION = '8.34';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1976,7 +2026,7 @@ function setupEventListeners() {
     });
 
     // 22. 스캐너 앱 연동 (입고앱실행 / 설치 안내)
-    document.getElementById('btn-open-app')?.addEventListener('click', openInScannerApp);
+    document.getElementById('btn-mibal-send')?.addEventListener('click', () => sendMibal()); // [Ver 8.34]
 
     // ========= 바인딩 체크리스트 =========
     // 1. #btn-toggle-menu [OK]
@@ -2010,7 +2060,8 @@ async function init() {
     try {
         await loadConfig();
         renderTable(); // [Ver 5.5] 저장된 열 순서로 헤더 먼저 반영
-        await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true)]);
+        await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true), loadMibalHistory()]);
+        renderAvgRise(); // [Ver 8.34] 평균상승률 표시
         if(savedDates.length > 0) {
             updateSavedDatesFromCheckboxes(); 
             renderSelectedTags();

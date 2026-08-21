@@ -78,11 +78,11 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.33</div>
+            <div class="version-badge">🚀 Ver 8.34</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
-            <button class="btn-download" id="btn-open-app" style="padding: 8px 15px; background: #6a1b9a; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📱 입고앱실행</button>
+            <button class="mode-mibal" id="btn-mibal-send" style="padding: 8px 15px; background: #00897b; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📤 미발전송</button>
             <div class="upload-dropdown mode-mibal" style="position: relative; display: inline-block;">
                 <button class="btn-main-upload" id="btn-toggle-download" style="padding: 8px 15px; background: #1976d2; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📥 파일 다운로드 ▼</button>
                 <div class="upload-menu" id="download-menu" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 10001; width: 240px;">
@@ -134,7 +134,7 @@
     <div class="summary-bar">
         <div class="summary-card highlight"><span class="label">총 SKU</span><span class="value" id="sum-sku">0</span></div>
         <div class="summary-card highlight"><span class="label">총 도착수량</span><span class="value" id="sum-arrival">0</span></div>
-        <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span></div>
+        <div class="summary-card"><span class="label">총 미발수량</span><span class="value" id="sum-mibal">0</span><span id="avg-rise" style="font-size:11px; color:#5e35b1; font-weight:bold; margin-top:3px;">평균상승률 –</span></div>
     </div>
 
     <!-- [Ver 7.1] 위치지정모드 서브탭: 당일입고지정 / 기존재고지정 -->
@@ -367,6 +367,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.33"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.34"></script>
 </body>
 </html>
