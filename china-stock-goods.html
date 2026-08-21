@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.22</div>
+            <div class="version-badge">🚀 Ver 8.23</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -238,12 +238,7 @@
                     예) <code>도착수량</code> <code>+</code> <code>총재고</code> <code>≤</code> <code>적재량</code> <code>→결과</code> <code>도착수량</code></span>
                 </div>
                 <div id="rule-palette" style="background:#faf7ff; border:1px solid #e1d5f5; border-radius:8px; padding:8px 10px; margin-bottom:10px;"></div>
-                <datalist id="rule-expr-list"></datalist>
                 <div id="rule-rows"></div>
-                <div style="display:flex; align-items:center; gap:6px; margin-top:6px; font-size:13px; font-weight:bold; background:#f5f5f5; padding:8px; border-radius:6px;">
-                    <span>그 외에는 → 미발수량 =</span>
-                    <input id="rule-else" class="rule-fld" list="rule-expr-list" spellcheck="false" placeholder="값/식" style="width:132px; padding:5px; border:1px solid #ccc; border-radius:4px; font-size:12px; font-family:monospace;">
-                </div>
                 <div id="rule-add-zone" title="변수를 끌어다 놓거나 클릭" style="margin-top:8px; padding:14px 12px; border:2px dashed #90caf9; border-radius:8px; text-align:center; color:#1976d2; font-size:13px; font-weight:bold; cursor:pointer; background:#f5faff;">➕ 여기에 <span style="text-decoration:underline;">변수를 끌어다 놓으면</span> 새 조건이 추가됩니다 (또는 클릭)</div>
                 <!-- [Ver 8.9] 완성된 예시: 임의 값으로 내가 만든 규칙을 적용한 결과 -->
                 <div style="margin-top:12px; background:#fff8e1; border:1px solid #ffe082; border-radius:6px; padding:10px;">
@@ -333,6 +328,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.22"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.23"></script>
 </body>
 </html>

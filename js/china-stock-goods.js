@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.22 (드롭존을 작업대로 - 토큰을 쌓아 한 조건을 만들어 위에 추가)
+// 중국제작 미발계산기 Ver 8.23 (조건 줄 입력칸 제거 → 읽기전용 문장 목록, 그 외 값도 작업대에서 설정)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -598,12 +598,25 @@ function renderRuleDraft() {
         `<div style="font-size:13px; font-weight:bold; margin-bottom:8px; min-height:20px; line-height:1.6;">${preview}</div>
          <div style="display:flex; gap:6px; justify-content:center; flex-wrap:wrap;">
             <button type="button" id="draft-commit" style="padding:7px 16px; background:#1976d2; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">✔ 조건 넣기 (위에 추가)</button>
+            <button type="button" id="draft-else" style="padding:7px 12px; background:#fff; color:#455a64; border:1px solid #90a4ae; border-radius:6px; cursor:pointer; font-size:12px; font-weight:bold;">그 외(기본값)으로</button>
             <button type="button" id="draft-back" style="padding:7px 12px; background:#fff; color:#555; border:1px solid #bbb; border-radius:6px; cursor:pointer; font-size:12px;">⌫ 마지막 빼기</button>
             <button type="button" id="draft-clear" style="padding:7px 12px; background:#fff; color:#c62828; border:1px solid #ef9a9a; border-radius:6px; cursor:pointer; font-size:12px;">✕ 비우기</button>
          </div>`;
     document.getElementById('draft-commit').onclick = commitRuleDraft;
+    document.getElementById('draft-else').onclick = setRuleDraftAsElse;
     document.getElementById('draft-back').onclick = () => { ruleDraftTokens.pop(); renderRuleDraft(); };
     document.getElementById('draft-clear').onclick = () => { ruleDraftTokens = []; renderRuleDraft(); };
+}
+// [Ver 8.23] 작업대의 식을 '그 외(기본값)' 값으로 설정 (비교기호 없이 값/식만)
+function setRuleDraftAsElse() {
+    const { cond, res } = ruleDraftSplit();
+    const expr = (res.length ? res : cond).join(' ').trim();
+    if (!expr) { showToast('그 외 값으로 쓸 변수/숫자를 먼저 끌어다 놓으세요'); return; }
+    ruleElse = expr;
+    ruleDraftTokens = [];
+    renderRuleRows();
+    renderRuleDraft();
+    showToast('그 외(기본값) = ' + expr);
 }
 function commitRuleDraft() {
     const { cond, res } = ruleDraftSplit();
@@ -615,59 +628,25 @@ function commitRuleDraft() {
     renderRuleRows();      // 위에 새 조건 행 표시
     renderRuleDraft();     // 작업대 비우기
 }
+// [Ver 8.23] 조건은 읽기 전용 문장 목록으로만 표시(입력칸 제거) — 만들기는 아래 작업대에서
 function renderRuleRows() {
     const box = document.getElementById('rule-rows');
     if (!box) return;
-    // [Ver 8.19] 자동완성 제안 목록(datalist) 갱신 — 추가한 변수/합성식 반영
-    const dl = document.getElementById('rule-expr-list');
-    if (dl) dl.innerHTML = ruleExprSuggestions().map(s => `<option value="${ruleEscAttr(s)}"></option>`).join('');
-    renderRulePalette(); // [Ver 8.20] 변수 드래그 칩 + 사칙연산 팔레트
-    renderRuleDraft();   // [Ver 8.22] 드롭존 작업대(현재 쌓인 식) 렌더
-    ensureRuleFocusDelegate(); // [Ver 8.20] 마지막 포커스 필드 추적(focusin 위임)
-    box.innerHTML = ruleRows2.map((r,i) => `
-      <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap; background:#f5f5f5; padding:8px; border-radius:6px; margin-bottom:6px; font-size:13px; font-weight:bold;">
-        <span>만약</span>
-        ${ruleField('rl-L', i, r.L)}
-        ${ruleSelect('rl-op', i, RULE_OPS, r.op)}
-        ${ruleField('rl-R', i, r.R)}
-        <span>이면 → =</span>
-        ${ruleField('rl-res', i, r.result)}
-        <button class="rl-del" data-i="${i}" style="border:none; background:none; color:#d32f2f; cursor:pointer; font-size:15px; margin-left:auto;">✕</button>
+    renderRulePalette(); // 변수/사칙연산/비교 팔레트
+    renderRuleDraft();   // 드롭존 작업대(현재 쌓인 식)
+    const condLines = ruleRows2.map((r, i) => `
+      <div style="display:flex; align-items:center; gap:8px; background:#f5f5f5; padding:9px 10px; border-radius:6px; margin-bottom:6px; font-size:13px;">
+        <span style="background:#1976d2; color:#fff; border-radius:10px; padding:1px 8px; font-size:11px; font-weight:bold;">${i + 1}</span>
+        <span style="flex:1; line-height:1.5;"><b>만약</b> <span style="color:#4527a0; font-weight:bold;">${ruleEscAttr(r.L)} ${ruleTokLabel(r.op)} ${ruleEscAttr(r.R)}</span> <b>이면 → 미발수량 =</b> <span style="color:#e65100; font-weight:bold;">${ruleEscAttr(r.result)}</span></span>
+        <button class="rl-del" data-i="${i}" title="이 조건 삭제" style="border:none; background:none; color:#d32f2f; cursor:pointer; font-size:16px;">✕</button>
       </div>`).join('');
-    const elseInput = document.getElementById('rule-else');
-    if (elseInput) elseInput.value = ruleElse;
-    const onFieldChange = (el) => {
-        const i = +el.dataset.i;
-        const v = (el.value || '').trim();
-        if (el.classList.contains('rl-L')) ruleRows2[i].L = v;
-        else if (el.classList.contains('rl-op')) ruleRows2[i].op = v;
-        else if (el.classList.contains('rl-R')) ruleRows2[i].R = v;
-        else if (el.classList.contains('rl-res')) ruleRows2[i].result = v;
-        updateRuleCheck();
-    };
-    box.querySelectorAll('input, select').forEach(el => {
-        el.addEventListener('input', () => onFieldChange(el));
-        el.addEventListener('change', () => onFieldChange(el));
-    });
-    // [Ver 8.20] 값/식 입력칸을 드롭 대상 + 마지막 포커스 필드로 등록(드래그&드롭/클릭 삽입용)
-    const wireField = (el) => {
-        el.addEventListener('focus', () => { lastRuleField = el; });
-        el.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
-        el.addEventListener('drop', e => {
-            e.preventDefault();
-            const t = e.dataTransfer.getData('text/plain'); if (!t) return;
-            el.focus();
-            const p = el.value.length; try { el.setSelectionRange(p, p); } catch (_) {}
-            insertRuleToken(t, el);
-        });
-    };
-    box.querySelectorAll('.rule-fld').forEach(wireField);
+    const emptyMsg = ruleRows2.length ? '' : '<div style="color:#999; font-size:12px; padding:8px 2px;">아직 조건이 없습니다. 아래 <b>작업대</b>에서 식을 만들어 [조건 넣기] 하세요.</div>';
+    const elseLine = `
+      <div style="display:flex; align-items:center; gap:8px; background:#eef2f7; padding:9px 10px; border-radius:6px; margin-top:2px; font-size:13px;">
+        <span style="color:#607d8b; font-weight:bold;">그 외(위 조건에 다 안 맞으면)</span> <b>→ 미발수량 =</b> <span style="color:#333; font-weight:bold;">${ruleEscAttr(ruleElse)}</span>
+      </div>`;
+    box.innerHTML = condLines + emptyMsg + elseLine;
     box.querySelectorAll('.rl-del').forEach(b => b.onclick = () => { ruleRows2.splice(+b.dataset.i, 1); renderRuleRows(); });
-    if (elseInput) {
-        const eh = () => { ruleElse = (elseInput.value || '').trim(); updateRuleCheck(); };
-        elseInput.oninput = eh; elseInput.onchange = eh;
-        wireField(elseInput);
-    }
     updateRuleCheck();
 }
 function buildRuleFormula() {
@@ -1578,7 +1557,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.22';
+const WEB_VERSION = '8.23';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
