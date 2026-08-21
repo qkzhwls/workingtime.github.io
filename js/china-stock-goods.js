@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.26 (기본공식 보기: 버튼 누르면 3조건 내용을 확인창으로 표시 후 불러오기)
+// 중국제작 미발계산기 Ver 8.27 (기본공식 보기 확인창에 시트 원본 수식도 함께 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -690,7 +690,10 @@ function loadDefaultRuleFormula() {
     const rows = (parsed && parsed.rows) ? parsed.rows : [];
     const elseVal = (parsed && parsed.elseVal) ? parsed.elseVal : '0';
     const lines = rows.map((r, i) => `${i + 1}) 만약 ${r.L} ${ruleTokLabel(r.op)} ${r.R}  →  미발수량 = ${r.result}`);
-    const msg = '📋 기본공식 (오더리스트 시트와 동일한 3조건)\n\n'
+    const msg = '📋 기본공식 = 오더리스트 시트 E열 수식과 동일\n\n'
+        + '[시트 원본]\n=IFERROR(MAX(IFS(F4=0,H4, D4+F4<=H4,D4, J4+K4>F4,J4+K4-F4)),0)\n'
+        + '(F=총재고 · H=적재량 · D=도착수량 · J=부족수량 · K=직진배송)\n\n'
+        + '[헤더명으로 풀면]\n'
         + lines.join('\n')
         + `\n그 외 → 미발수량 = ${elseVal}\n\n`
         + (ruleRows2.length ? '이 기본공식을 불러올까요? (지금 만든 조건은 사라집니다)' : '이 기본공식을 불러올까요?');
@@ -1625,7 +1628,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.26';
+const WEB_VERSION = '8.27';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
