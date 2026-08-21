@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.28 (출고일선택 기준=패킹리스트출고일; 도착일 없으면 출고만 표시, 있으면 입고 추가, 도착일+유예 지나면 제거)
+// 중국제작 미발계산기 Ver 8.29 (상단 총 미발수량 카드 = 부족수량 열의 합으로 변경)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1580,8 +1580,8 @@ async function saveColumns() {
 function updateSummary() {
     document.getElementById('sum-sku').textContent = filteredData.length;
     document.getElementById('sum-arrival').textContent = filteredData.reduce((s,d)=>s+d.arrivalQty,0);
-    // [Ver 2.9] 총 미발수량 카드가 갱신되지 않던 버그 수정
-    document.getElementById('sum-mibal').textContent = filteredData.reduce((s,d)=>s+(d.mibalQty||0),0);
+    // [Ver 8.29] 총 미발수량 카드 = 부족수량 열의 합
+    document.getElementById('sum-mibal').textContent = filteredData.reduce((s,d)=>s+(parseInt(d.shortage)||0),0);
 }
 
 function applySearch() {
@@ -1630,7 +1630,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.28';
+const WEB_VERSION = '8.29';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
