@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.19 (규칙 조립을 자유 입력으로 - 좌/우/결과값에 식 직접 입력 + 자동완성 제안)
+// 중국제작 미발계산기 Ver 8.20 (규칙 조립: 변수 드래그&드롭 + 사칙연산/괄호 팔레트)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -529,7 +529,68 @@ function ruleSelect(cls, i, options, selected) {
 // [Ver 8.19] 자유 입력 필드(자동완성 제안 datalist 연결). 변수/식을 직접 타이핑 가능
 function ruleEscAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
 function ruleField(cls, i, value) {
-    return `<input class="${cls}" data-i="${i}" list="rule-expr-list" value="${ruleEscAttr(value)}" spellcheck="false" placeholder="값/식" style="width:132px; padding:5px; border:1px solid #ccc; border-radius:4px; font-size:12px; font-family:monospace;">`;
+    return `<input class="rule-fld ${cls}" data-i="${i}" list="rule-expr-list" value="${ruleEscAttr(value)}" spellcheck="false" placeholder="값/식" style="width:132px; padding:5px; border:1px solid #ccc; border-radius:4px; font-size:12px; font-family:monospace;">`;
+}
+// [Ver 8.20] 변수 드래그&드롭 / 클릭 삽입 대상이 되는 마지막 포커스 필드
+let lastRuleField = null;
+let ruleFocusDelegated = false;
+function ensureRuleFocusDelegate() {
+    if (ruleFocusDelegated) return;
+    document.addEventListener('focusin', (e) => {
+        const t = e.target;
+        if (t && t.classList && t.classList.contains('rule-fld')) lastRuleField = t;
+    });
+    ruleFocusDelegated = true;
+}
+function insertRuleToken(token, target) {
+    const el = target || lastRuleField;
+    if (!el || !document.body.contains(el)) { showToast('먼저 넣을 칸을 클릭하세요'); return; }
+    const s = (typeof el.selectionStart === 'number') ? el.selectionStart : el.value.length;
+    const e = (typeof el.selectionEnd === 'number') ? el.selectionEnd : el.value.length;
+    el.value = el.value.slice(0, s) + token + el.value.slice(e);
+    const pos = s + token.length;
+    el.focus(); try { el.setSelectionRange(pos, pos); } catch (_) {}
+    lastRuleField = el;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function backspaceRuleField() {
+    const el = lastRuleField;
+    if (!el || !document.body.contains(el)) { showToast('먼저 넣을 칸을 클릭하세요'); return; }
+    let s = (typeof el.selectionStart === 'number') ? el.selectionStart : el.value.length;
+    let e = (typeof el.selectionEnd === 'number') ? el.selectionEnd : el.value.length;
+    if (s === e && s > 0) s = s - 1;           // 선택 없으면 커서 앞 한 글자 삭제
+    el.value = el.value.slice(0, s) + el.value.slice(e);
+    el.focus(); try { el.setSelectionRange(s, s); } catch (_) {}
+    lastRuleField = el;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+// [Ver 8.20] 변수 칩 + 사칙연산/괄호 팔레트 렌더
+function renderRulePalette() {
+    const box = document.getElementById('rule-palette');
+    if (!box) return;
+    const vars = [...RULE_VARS, ...mibalVars];
+    const varChips = vars.map(v =>
+        `<span class="rule-chip" draggable="true" data-token="${ruleEscAttr(v)}" title="끌어다 놓거나 클릭해서 넣기" style="cursor:grab; user-select:none; background:#ede7f6; color:#4527a0; border:1px solid #b39ddb; padding:4px 10px; border-radius:14px; font-size:12px; font-weight:bold;">${v}</span>`
+    ).join('');
+    const ops = [['+','+'],['−','-'],['×','*'],['÷','/'],['(','('],[')',')']];
+    const opBtns = ops.map(([lab, tok]) =>
+        `<button type="button" class="rule-op-ins" draggable="true" data-token="${ruleEscAttr(tok)}" style="cursor:pointer; background:#fff3e0; color:#e65100; border:1px solid #ffcc80; padding:4px 12px; border-radius:8px; font-size:14px; font-weight:900;">${lab}</button>`
+    ).join('');
+    box.innerHTML =
+        `<div style="font-size:11px; color:#777; margin-bottom:6px;">🧩 변수를 칸으로 <b>끌어다 놓거나</b>, 칸을 클릭한 뒤 아래를 눌러 넣으세요</div>
+         <div style="display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin-bottom:6px;">${varChips}</div>
+         <div style="display:flex; flex-wrap:wrap; gap:5px; align-items:center;">${opBtns}
+            <button type="button" id="rule-backspace" style="cursor:pointer; background:#fff; color:#c62828; border:1px solid #ef9a9a; padding:4px 12px; border-radius:8px; font-size:12px; font-weight:bold;">⌫ 한 글자 지우기</button></div>`;
+    box.querySelectorAll('.rule-chip').forEach(ch => {
+        ch.addEventListener('click', () => insertRuleToken(ch.dataset.token));
+        ch.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', ch.dataset.token); e.dataTransfer.effectAllowed = 'copy'; });
+    });
+    box.querySelectorAll('.rule-op-ins').forEach(b => {
+        b.addEventListener('click', () => insertRuleToken(b.dataset.token));
+        b.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', b.dataset.token); e.dataTransfer.effectAllowed = 'copy'; });
+    });
+    const bk = document.getElementById('rule-backspace');
+    if (bk) bk.addEventListener('click', () => backspaceRuleField());
 }
 function renderRuleRows() {
     const box = document.getElementById('rule-rows');
@@ -537,6 +598,8 @@ function renderRuleRows() {
     // [Ver 8.19] 자동완성 제안 목록(datalist) 갱신 — 추가한 변수/합성식 반영
     const dl = document.getElementById('rule-expr-list');
     if (dl) dl.innerHTML = ruleExprSuggestions().map(s => `<option value="${ruleEscAttr(s)}"></option>`).join('');
+    renderRulePalette(); // [Ver 8.20] 변수 드래그 칩 + 사칙연산 팔레트
+    ensureRuleFocusDelegate(); // [Ver 8.20] 마지막 포커스 필드 추적(focusin 위임)
     box.innerHTML = ruleRows2.map((r,i) => `
       <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap; background:#f5f5f5; padding:8px; border-radius:6px; margin-bottom:6px; font-size:13px; font-weight:bold;">
         <span>만약</span>
@@ -562,10 +625,24 @@ function renderRuleRows() {
         el.addEventListener('input', () => onFieldChange(el));
         el.addEventListener('change', () => onFieldChange(el));
     });
+    // [Ver 8.20] 값/식 입력칸을 드롭 대상 + 마지막 포커스 필드로 등록(드래그&드롭/클릭 삽입용)
+    const wireField = (el) => {
+        el.addEventListener('focus', () => { lastRuleField = el; });
+        el.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+        el.addEventListener('drop', e => {
+            e.preventDefault();
+            const t = e.dataTransfer.getData('text/plain'); if (!t) return;
+            el.focus();
+            const p = el.value.length; try { el.setSelectionRange(p, p); } catch (_) {}
+            insertRuleToken(t, el);
+        });
+    };
+    box.querySelectorAll('.rule-fld').forEach(wireField);
     box.querySelectorAll('.rl-del').forEach(b => b.onclick = () => { ruleRows2.splice(+b.dataset.i, 1); renderRuleRows(); });
     if (elseInput) {
         const eh = () => { ruleElse = (elseInput.value || '').trim(); updateRuleCheck(); };
         elseInput.oninput = eh; elseInput.onchange = eh;
+        wireField(elseInput);
     }
     updateRuleCheck();
 }
@@ -1425,7 +1502,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.19';
+const WEB_VERSION = '8.20';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
