@@ -163,13 +163,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.37"></script>
+    <script src="js/location-map.js?v=8.38"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.37'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.38'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -512,12 +512,18 @@
         }
 
         // [Ver 6.5] 위치 병합: 기존값(콤마 다중) + 새 위치들 → 중복 제거, 새 자리는 끝에 추가
-        function mergeLocations(existing, additions) {
-            const list = [], seen = new Set();
-            const push = v => { v = (v || '').toString().trim(); if (v && !seen.has(v)) { seen.add(v); list.push(v); } };
-            (existing || '').toString().split(',').forEach(push);
-            (additions || []).forEach(push);
-            return list.join(',');
+        // [Ver 8.38] 새 위치를 기존값 앞(front)/뒤(back)에 붙임 (CONFIG.newLocPosition, 웹 기존재고지정에서 설정)
+        let newLocPos = 'back';
+        async function loadNewLocPos() {
+            try { const s = await getDoc(doc(db, 'ChinaStockGoods', 'CONFIG')); const v = s.exists() && s.data() && s.data().newLocPosition; newLocPos = (v === 'front') ? 'front' : 'back'; } catch (e) {}
+        }
+        function mergeLocations(existing, additions, pos) {
+            const ex = (existing || '').toString().split(',').map(v => (v || '').trim()).filter(Boolean);
+            const add = (additions || []).map(v => (v || '').toString().trim()).filter(Boolean);
+            const ordered = (pos === 'front') ? [...add, ...ex] : [...ex, ...add];
+            const out = [], seen = new Set();
+            ordered.forEach(v => { if (!seen.has(v)) { seen.add(v); out.push(v); } });
+            return out.join(',');
         }
         async function sendLocation() {
             if (!locationQueue.length || sending) return;
@@ -556,7 +562,7 @@
                         const cur = shardMaps[sid][c] || {};
                         const loc = cur.location || '';
                         const base = (cur.base !== undefined ? cur.base : loc);
-                        upd[c] = { location: mergeLocations(loc, g.locs), base: base, sub: g.sub, at: now, worker: 'Scanner_Web' };
+                        upd[c] = { location: mergeLocations(loc, g.locs, newLocPos), base: base, sub: g.sub, at: now, worker: 'Scanner_Web' };
                     });
                     await setDoc(doc(db, 'ChinaStockGoods', sid), { map: upd, updatedAt: new Date() }, { merge: true });
                 }
@@ -753,12 +759,13 @@
         // ---------------- 초기화 ----------------
         loadLocationMap(); // [Ver 5.8] 위치 매핑 로드
         loadBarcodeMap(); // [Ver 8.3] 바코드→상품코드 맵 로드
+        loadNewLocPos(); // [Ver 8.38] 새 위치 앞/뒤 설정 로드
         buildNumpad();
         $('status-line').textContent = `v${SCAN_VERSION} · 서버: ${serverLabel}`;
         setLocSubMode(locSubMode); // [Ver 4.1] 저장된 세부 작업 복원
         setMode(mode);
         checkVersion();
-        window.addEventListener('focus', checkVersion);
+        window.addEventListener('focus', () => { checkVersion(); loadNewLocPos(); }); // [Ver 8.38] 창 복귀 시 앞/뒤 설정도 갱신
         setInterval(checkVersion, 10 * 60 * 1000);
     </script>
 </body>

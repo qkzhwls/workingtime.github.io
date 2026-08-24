@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.37 (평균상승률을 1~100% 상승률만 평균 - 시트 AVERAGEIFS와 동일, 이상치 제외)
+// 중국제작 미발계산기 Ver 8.38 (기존재고: 스캐너 새 위치를 기존값 맨앞/맨뒤 선택, CONFIG.newLocPosition)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -26,6 +26,7 @@ let savedDates = [];       // 활성(현재 모드)의 출고일 선택
 let savedDatesMibal = [];  // [Ver 8.10] 미발계산기 모드 출고일 선택
 let savedDatesLoc = [];    // [Ver 8.10] 위치지정모드 출고일 선택 (모드별 분리)
 let graceDays = 1; // [Ver 8.6] 본사도착 유예: 본사도착일 + graceDays 까지 목록/표/스캐너에 유지
+let newLocPosition = 'back'; // [Ver 8.38] 기존재고: 스캐너가 새로 찍은 위치를 기존값 앞(front)/뒤(back)에 붙일지
 let arrivalByShip = {}; // [Ver 8.28] 패킹리스트출고일 → 본사도착일(들) : 기준=출고일, 도착일은 있으면 표시/유예에만 사용
 let saveTimeout = null;
 
@@ -1561,8 +1562,22 @@ function applyLocSub() {
         b.style.color = on ? '#fff' : '#5e35b1';
         b.style.boxShadow = on ? 'none' : 'inset 0 0 0 1px #b39ddb';
     });
-    if (locSubView === 'existing') renderLocMoveTable(); // 기존재고 인라인 목록
+    if (locSubView === 'existing') { renderLocMoveTable(); renderNewLocPosToggle(); } // 기존재고 인라인 목록
     else renderTable(); // 당일입고 상품표(위치확인 열)
+}
+// [Ver 8.38] 새 위치 앞/뒤 토글 (기존재고지정) → CONFIG.newLocPosition 저장, 스캐너가 병합 순서로 사용
+function renderNewLocPosToggle() {
+    document.querySelectorAll('.newloc-pos').forEach(b => {
+        const on = b.dataset.pos === newLocPosition;
+        b.style.background = on ? '#5e35b1' : '#fff';
+        b.style.color = on ? '#fff' : '#5e35b1';
+    });
+}
+async function setNewLocPosition(pos) {
+    newLocPosition = (pos === 'front') ? 'front' : 'back';
+    renderNewLocPosToggle();
+    try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { newLocPosition, updatedAt: new Date() }, { merge: true }); } catch (e) {}
+    showToast(`🆕 새 위치는 기존값 ${newLocPosition === 'front' ? '맨앞' : '맨뒤'}에 추가됩니다 (스캐너 반영)`);
 }
 function setLocSubView(s) {
     locSubView = (s === 'existing') ? 'existing' : 'today';
@@ -1842,7 +1857,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.37';
+const WEB_VERSION = '8.38';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -1887,7 +1902,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDatesMibal = Array.isArray(c.savedDatesMibal) ? c.savedDatesMibal : (Array.isArray(c.savedDates) ? c.savedDates : []); savedDatesLoc = Array.isArray(c.savedDatesLoc) ? c.savedDatesLoc : []; savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); MIBAL_COMPUTED_VARS.forEach(v => { if (!mibalVars.includes(v)) mibalVars.push(v); }); /* [Ver 8.25] 도착수량 등 계산변수는 기본공식에 쓰이므로 항상 포함 */ mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDatesMibal = Array.isArray(c.savedDatesMibal) ? c.savedDatesMibal : (Array.isArray(c.savedDates) ? c.savedDates : []); savedDatesLoc = Array.isArray(c.savedDatesLoc) ? c.savedDatesLoc : []; savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); MIBAL_COMPUTED_VARS.forEach(v => { if (!mibalVars.includes(v)) mibalVars.push(v); }); /* [Ver 8.25] 도착수량 등 계산변수는 기본공식에 쓰이므로 항상 포함 */ mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; newLocPosition = (c.newLocPosition === 'front') ? 'front' : 'back'; } }
 async function saveConfig() { persistActiveDates(); await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDatesMibal, savedDatesLoc, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -2063,6 +2078,7 @@ function setupEventListeners() {
     // [Ver 6.1→7.1] 기존재고지정 인라인 패널 (다운로드/초기화/검색)
     document.getElementById('btn-locmove-download')?.addEventListener('click', () => downloadLocMove());
     document.getElementById('btn-locmove-reset')?.addEventListener('click', () => resetLocMove());
+    document.querySelectorAll('.newloc-pos').forEach(b => b.addEventListener('click', () => setNewLocPosition(b.dataset.pos))); // [Ver 8.38]
     document.getElementById('lm-search')?.addEventListener('input', () => renderLocMoveTable());
 
 
@@ -2133,6 +2149,7 @@ async function init() {
         renderTable(); // [Ver 5.5] 저장된 열 순서로 헤더 먼저 반영
         await Promise.all([loadEditedCells(), loadStockLogFromFirebase(), syncOrderData(true), loadMibalHistory()]);
         renderAvgRise(); // [Ver 8.34] 평균상승률 표시
+        renderNewLocPosToggle(); // [Ver 8.38] 새 위치 앞/뒤 토글 상태 반영
         if(savedDates.length > 0) {
             updateSavedDatesFromCheckboxes(); 
             renderSelectedTags();
