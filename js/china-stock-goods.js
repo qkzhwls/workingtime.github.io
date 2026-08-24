@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.39 (기존재고 맨앞/맨뒤를 스캔이 아닌 옵션추가항목1 다운로드 시 재배치로 변경)
+// 중국제작 미발계산기 Ver 8.40 (기존재고 새 위치: 기본 맨뒤, '맨앞으로' 체크박스로 변경)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1576,11 +1576,8 @@ function applyLocSub() {
 }
 // [Ver 8.38] 새 위치 앞/뒤 토글 (기존재고지정) → CONFIG.newLocPosition 저장, 스캐너가 병합 순서로 사용
 function renderNewLocPosToggle() {
-    document.querySelectorAll('.newloc-pos').forEach(b => {
-        const on = b.dataset.pos === newLocPosition;
-        b.style.background = on ? '#5e35b1' : '#fff';
-        b.style.color = on ? '#fff' : '#5e35b1';
-    });
+    const c = document.getElementById('chk-newloc-front');
+    if (c) c.checked = (newLocPosition === 'front');
 }
 async function setNewLocPosition(pos) {
     newLocPosition = (pos === 'front') ? 'front' : 'back';
@@ -1866,7 +1863,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.39';
+const WEB_VERSION = '8.40';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2087,7 +2084,7 @@ function setupEventListeners() {
     // [Ver 6.1→7.1] 기존재고지정 인라인 패널 (다운로드/초기화/검색)
     document.getElementById('btn-locmove-download')?.addEventListener('click', () => downloadLocMove());
     document.getElementById('btn-locmove-reset')?.addEventListener('click', () => resetLocMove());
-    document.querySelectorAll('.newloc-pos').forEach(b => b.addEventListener('click', () => setNewLocPosition(b.dataset.pos))); // [Ver 8.38]
+    document.getElementById('chk-newloc-front')?.addEventListener('change', (e) => setNewLocPosition(e.target.checked ? 'front' : 'back')); // [Ver 8.40]
     document.getElementById('lm-search')?.addEventListener('input', () => renderLocMoveTable());
 
 
