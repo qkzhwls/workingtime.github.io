@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.40 (기존재고 새 위치: 기본 맨뒤, '맨앞으로' 체크박스로 변경)
+// 중국제작 미발계산기 Ver 8.41 (총 미발수량 카드의 평균상승률 표시 제거 - 미발예측 모달에만 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1863,7 +1863,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.40';
+const WEB_VERSION = '8.41';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
