@@ -78,11 +78,12 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.35</div>
+            <div class="version-badge">🚀 Ver 8.36</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
             <button class="mode-mibal" id="btn-mibal-send" style="padding: 8px 15px; background: #00897b; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📤 미발전송</button>
+            <button class="mode-mibal" id="btn-mibal-predict" style="padding: 8px 15px; background: #5e35b1; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📈 미발예측</button>
             <div class="upload-dropdown mode-mibal" style="position: relative; display: inline-block;">
                 <button class="btn-main-upload" id="btn-toggle-download" style="padding: 8px 15px; background: #1976d2; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📥 파일 다운로드 ▼</button>
                 <div class="upload-menu" id="download-menu" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 10001; width: 240px;">
@@ -364,9 +365,42 @@
         </div>
     </div>
 
+    <!-- [Ver 8.36] 미발예측 데이터 모달 -->
+    <div id="mibal-predict-modal" class="modal-overlay">
+        <div class="modal-content" style="width:760px; max-width:96vw; max-height:90vh; overflow-y:auto;">
+            <h3 style="margin-top:0;">📈 미발 예측 데이터</h3>
+            <div id="mp-summary" style="font-size:13px; color:#333; background:#ede7f6; border:1px solid #d1c4e9; border-radius:8px; padding:10px 12px; margin-bottom:10px; line-height:1.6;"></div>
+            <div style="font-size:11px; color:#888; margin-bottom:8px; line-height:1.5;">
+                · <b>출고미발</b> = 출고 시점(첫 전송) 미발수량 · <b>입고미발</b> = 입고일(도착) 이후 전송 미발수량<br>
+                · <b>상승률</b> = (입고미발 − 출고미발) / 출고미발 · <b>예상미발</b> = 출고미발 × (1 + 평균상승률) — 데이터 없으면 기본 40%
+            </div>
+            <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
+                <button id="btn-mp-download" style="padding:7px 13px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">⬇️ 다운로드</button>
+                <input id="mp-search" placeholder="🔍 출고일/입고일 검색" style="flex:1; min-width:0; padding:7px 10px; border:1px solid #ccc; border-radius:5px; font-size:13px;">
+            </div>
+            <div style="max-height:56vh; overflow:auto; border:1px solid #eee; border-radius:6px;">
+                <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:center; white-space:nowrap;">
+                    <thead><tr>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">출고일</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">입고일</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">출고미발</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">입고미발</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">상승률</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">예상미발</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">예측편차</th>
+                    </tr></thead>
+                    <tbody id="mp-tbody"></tbody>
+                </table>
+            </div>
+            <div style="margin-top:16px; text-align:right; border-top:1px solid #eee; padding-top:12px;">
+                <button id="btn-mibal-predict-close" style="padding:8px 18px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer;">닫기</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.35"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.36"></script>
 </body>
 </html>

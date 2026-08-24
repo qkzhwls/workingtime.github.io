@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.35 (미발전송 다중 출고일 허용 - 선택 출고일마다 동일 미발수량 각각 기록)
+// 중국제작 미발계산기 Ver 8.36 (미발예측 화면: 누적 데이터 표+예상미발/상승률/편차, 평균상승률 자가보정)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1741,6 +1741,66 @@ function renderAvgRise() {
     const r = computeAvgRise();
     el.textContent = r ? `평균상승률 ${r.avg >= 0 ? '+' : ''}${Math.round(r.avg * 100)}% (${r.n}건)` : '평균상승률 –';
 }
+// [Ver 8.36] 누적 데이터 → 패킹(출고일)별 예측 행 생성
+function buildPredictionRows() {
+    const byShip = {};
+    Object.values(mibalHistory).forEach(r => { if (r && r.출고일) (byShip[r.출고일] = byShip[r.출고일] || []).push(r); });
+    const avg = computeAvgRise();
+    const useRate = avg ? avg.avg : 0.4; // 데이터 없으면 기본 40%
+    const rows = [];
+    Object.keys(byShip).forEach(출고일 => {
+        const recs = byShip[출고일].slice().sort((a, b) => String(a.전송날짜).localeCompare(String(b.전송날짜)));
+        const 입고일 = recs[0].입고일 || '';
+        const before = recs.find(r => !입고일 || String(r.전송날짜) < 입고일) || recs[0];
+        const 출고미발 = parseInt(before.미발수량) || 0;
+        const arrRec = 입고일 ? recs.find(r => String(r.전송날짜) >= 입고일) : null;
+        const 입고미발 = arrRec ? (parseInt(arrRec.미발수량) || 0) : null;
+        const 상승률 = (입고미발 !== null && 출고미발 > 0) ? (입고미발 - 출고미발) / 출고미발 : null;
+        const 예상미발 = Math.round(출고미발 * (1 + useRate));
+        const 예측편차 = (입고미발 !== null) ? (입고미발 - 예상미발) : null;
+        rows.push({ 출고일, 입고일, 출고미발, 입고미발, 상승률, 예상미발, 예측편차 });
+    });
+    rows.sort((a, b) => String(b.출고일).localeCompare(String(a.출고일)));
+    return { rows, useRate, avg };
+}
+async function openMibalPredictModal() {
+    closeAllMenus();
+    await loadMibalHistory();
+    renderAvgRise();
+    renderMibalPredict();
+    document.getElementById('mibal-predict-modal').style.display = 'flex';
+}
+function closeMibalPredictModal() { document.getElementById('mibal-predict-modal').style.display = 'none'; }
+function renderMibalPredict() {
+    const { rows, useRate, avg } = buildPredictionRows();
+    const sum = document.getElementById('mp-summary');
+    if (sum) sum.innerHTML = `평균상승률 <b style="color:#4527a0;">${avg ? (avg.avg >= 0 ? '+' : '') + Math.round(avg.avg * 100) + '% (' + avg.n + '건 완료)' : '– (데이터 부족, 기본 40% 적용)'}</b> · 예측 배율 <b>×${(1 + useRate).toFixed(2)}</b> · 누적 패킹 <b>${rows.length}건</b>`;
+    const kw = (document.getElementById('mp-search')?.value || '').trim();
+    const view = kw ? rows.filter(r => (fmtMD(r.출고일).includes(kw) || fmtMD(r.입고일).includes(kw) || r.출고일.includes(kw) || (r.입고일 || '').includes(kw))) : rows;
+    const tb = document.getElementById('mp-tbody'); if (!tb) return;
+    const pct = v => (v === null) ? '–' : `${v >= 0 ? '+' : ''}${Math.round(v * 100)}%`;
+    const dev = v => (v === null) ? '<span style="color:#999;">진행중</span>' : `<span style="color:${v > 0 ? '#c62828' : (v < 0 ? '#1565c0' : '#333')}; font-weight:bold;">${v > 0 ? '+' : ''}${v}</span>`;
+    tb.innerHTML = view.length ? view.map(r => `
+        <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:7px 6px; font-weight:bold;">${fmtMD(r.출고일)}</td>
+            <td style="padding:7px 6px;">${r.입고일 ? fmtMD(r.입고일) : '<span style="color:#999;">미정</span>'}</td>
+            <td style="padding:7px 6px;">${r.출고미발}</td>
+            <td style="padding:7px 6px; font-weight:bold;">${r.입고미발 === null ? '<span style="color:#999;">진행중</span>' : r.입고미발}</td>
+            <td style="padding:7px 6px; color:#e65100; font-weight:bold;">${pct(r.상승률)}</td>
+            <td style="padding:7px 6px; color:#5e35b1; font-weight:bold;">${r.예상미발}</td>
+            <td style="padding:7px 6px;">${dev(r.예측편차)}</td>
+        </tr>`).join('') : '<tr><td colspan="7" style="padding:22px; color:#999;">전송된 미발 데이터가 없습니다. 미발전송을 눌러 쌓으세요.</td></tr>';
+}
+async function downloadMibalPredict() {
+    const { rows } = buildPredictionRows();
+    if (!rows.length) { alert('내려받을 데이터가 없습니다.'); return; }
+    const aoa = [['출고일', '입고일', '출고미발', '입고미발', '상승률', '예상미발', '예측편차']];
+    rows.forEach(r => aoa.push([r.출고일, r.입고일 || '', r.출고미발, (r.입고미발 === null ? '' : r.입고미발), (r.상승률 === null ? '' : Math.round(r.상승률 * 100) + '%'), r.예상미발, (r.예측편차 === null ? '' : r.예측편차)]));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
+    const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
+    await downloadToDesktop('미발예측데이터.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
+}
 async function sendMibal() {
     if (viewMode === 'location') { alert('미발전송은 미발계산기 모드에서 사용하세요.'); return; }
     if (!savedDates.length) { alert('출고일을 하나 이상 선택하세요.'); return; }
@@ -1780,7 +1840,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.35';
+const WEB_VERSION = '8.36';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2030,6 +2090,12 @@ function setupEventListeners() {
 
     // 22. 스캐너 앱 연동 (입고앱실행 / 설치 안내)
     document.getElementById('btn-mibal-send')?.addEventListener('click', () => sendMibal()); // [Ver 8.34]
+    // [Ver 8.36] 미발예측
+    document.getElementById('btn-mibal-predict')?.addEventListener('click', () => openMibalPredictModal());
+    document.getElementById('btn-mibal-predict-close')?.addEventListener('click', () => closeMibalPredictModal());
+    document.getElementById('mibal-predict-modal')?.addEventListener('click', (e) => { if (e.target.id === 'mibal-predict-modal') closeMibalPredictModal(); });
+    document.getElementById('mp-search')?.addEventListener('input', () => renderMibalPredict());
+    document.getElementById('btn-mp-download')?.addEventListener('click', () => downloadMibalPredict());
 
     // ========= 바인딩 체크리스트 =========
     // 1. #btn-toggle-menu [OK]
