@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.43 (2층입고 명칭→비축창고, 다운로드 헤더 '비축창고재고')
+// 중국제작 미발계산기 Ver 8.44 (비축창고 별도 초기화 버튼 제거 → 미발 초기화 시 함께 초기화)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -310,12 +310,6 @@ async function downloadFloor2() {
     XLSX.utils.book_append_sheet(wb, ws, '비축창고재고');
     const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
     await downloadToDesktop('비축창고재고.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
-}
-async function resetFloor2() {
-    closeAllMenus();
-    if (!confirm('비축창고 누적을 초기화할까요?\n(다음 입고 배치를 새로 시작할 때 사용 · 되돌릴 수 없습니다)')) return;
-    try { await setDoc(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'), { map: {}, updatedAt: new Date() }); showToast('🗑️ 비축창고 누적 초기화됨'); }
-    catch (e) { alert('초기화 실패: ' + e.message); }
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
 async function downloadLocMove() {
@@ -1330,12 +1324,13 @@ async function deleteAllDocs(collName) {
 // [Ver 7.4] 전체 초기화 — 현재 모드의 데이터만 초기화 (미발 ↔ 위치 서로 영향 없음)
 async function clearAllData() {
     if (viewMode === 'location') { await clearLocationData(); return; }
-    if (!confirm("미발계산기 데이터를 초기화할까요?\n(수동편집·미발재고로그·앱 입고이력 삭제 / 위치 데이터는 유지)")) return;
+    if (!confirm("미발계산기 데이터를 초기화할까요?\n(수동편집·미발재고로그·앱 입고이력·비축창고 누적 삭제 / 위치 데이터는 유지)")) return;
     showLoading('🗑️ 미발계산기 초기화 중...');
     try {
         await deleteDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'));
         await deleteAllDocs(CHINA_COLLECTION + '_StockLog');
         await deleteAllDocs('ChinaStockGoods_InboundHistory');
+        await setDoc(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'), { map: {}, updatedAt: new Date() }); // [Ver 8.44] 비축창고 누적도 함께 초기화
         orderDataOriginal = [];
         orderDataBuy = [];
         stockLogData = {};
@@ -1352,7 +1347,7 @@ async function clearAllData() {
         await saveConfig(); // 선택 출고일 비운 상태 저장
         await syncOrderData(true); // [Ver 4.4] 초기화 후 출고일 목록 다시 로드 (빈 화면 방지)
         hideLoading();
-        showToast('✅ 미발계산기 초기화 완료 (위치 데이터는 유지)');
+        showToast('✅ 미발계산기 초기화 완료 (비축창고 포함 · 위치 데이터는 유지)');
     } catch (e) {
         hideLoading();
         alert('초기화 실패: ' + e.message);
@@ -1892,7 +1887,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.43';
+const WEB_VERSION = '8.44';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2020,9 +2015,8 @@ function setupEventListeners() {
         const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
         await downloadToDesktop('미발확인파일.xls', blob);
     });
-    // [Ver 8.42] 2층입고(비축) 엑셀저장 / 누적 초기화
+    // [Ver 8.42] 비축창고 엑셀저장 (초기화는 미발 초기화 시 함께 - Ver 8.44)
     document.getElementById('btn-floor2-download')?.addEventListener('click', () => downloadFloor2());
-    document.getElementById('btn-floor2-reset')?.addEventListener('click', () => resetFloor2());
 
     // 10-3. [Ver 8.16] 옵션추가항목1 다운로드는 서브뷰별 인라인 버튼으로 분리 (당일=btn-loc-download-today, 기존=btn-locmove-download)
 
