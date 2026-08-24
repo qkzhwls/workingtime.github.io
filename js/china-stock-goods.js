@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.42 (2층입고 엑셀저장: 스캐너 입고 미발초과분=2층 누적, 웹 다운로드 - fullauto 재현)
+// 중국제작 미발계산기 Ver 8.43 (2층입고 명칭→비축창고, 다운로드 헤더 '비축창고재고')
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -288,33 +288,33 @@ async function saveEditLocMoveRow(code, raw) {
         hideLoading(); showToast('✅ 수정됨');
     } catch (e) { hideLoading(); alert('수정 실패: ' + e.message); }
 }
-// [Ver 8.42] 2층입고(비축) 엑셀저장 — 스캐너 입고 누적(FLOOR2_STOCK)에서 미발수량 초과분(=2층)만 추출
-//   2층수량 = max(0, 입고누적(received) − 미발수량(mibal))  · fullauto의 '4.2층입고 엑셀저장'과 동일 형식(상품코드/수량)
+// [Ver 8.43] 비축창고 엑셀저장 — 스캐너 입고 누적(FLOOR2_STOCK)에서 미발수량 초과분(=비축창고재고)만 추출
+//   비축창고재고 = max(0, 입고누적(received) − 미발수량(mibal))  · 헤더 '상품코드/비축창고재고'
 async function downloadFloor2() {
     closeAllMenus();
     let map = {};
     try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK')); map = (s.exists() && s.data().map) ? s.data().map : {}; }
-    catch (e) { alert('2층 데이터 불러오기 실패: ' + e.message); return; }
+    catch (e) { alert('비축창고 데이터 불러오기 실패: ' + e.message); return; }
     const rows = [];
     Object.entries(map).forEach(([code, v]) => {
         const received = parseInt(v && v.received) || 0;
         const mibal = parseInt(v && v.mibal) || 0;
-        const floor2 = Math.max(0, received - mibal);
-        if (floor2 > 0) rows.push([code, floor2]);
+        const spare = Math.max(0, received - mibal);
+        if (spare > 0) rows.push([code, spare]);
     });
-    if (!rows.length) { alert('2층(비축)으로 입고된 데이터가 없습니다.\n(입고 스캔 시 미발수량을 넘긴 초과분이 2층으로 잡힙니다)'); return; }
+    if (!rows.length) { alert('비축창고로 입고된 데이터가 없습니다.\n(입고 스캔 시 미발수량을 넘긴 초과분이 비축창고로 잡힙니다)'); return; }
     rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-    const aoa = [['상품코드', '수량'], ...rows];
+    const aoa = [['상품코드', '비축창고재고'], ...rows];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '2층입고리스트');
+    XLSX.utils.book_append_sheet(wb, ws, '비축창고재고');
     const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
-    await downloadToDesktop('2층입고리스트.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
+    await downloadToDesktop('비축창고재고.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
 }
 async function resetFloor2() {
     closeAllMenus();
-    if (!confirm('2층입고 누적을 초기화할까요?\n(다음 입고 배치를 새로 시작할 때 사용 · 되돌릴 수 없습니다)')) return;
-    try { await setDoc(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'), { map: {}, updatedAt: new Date() }); showToast('🗑️ 2층입고 누적 초기화됨'); }
+    if (!confirm('비축창고 누적을 초기화할까요?\n(다음 입고 배치를 새로 시작할 때 사용 · 되돌릴 수 없습니다)')) return;
+    try { await setDoc(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'), { map: {}, updatedAt: new Date() }); showToast('🗑️ 비축창고 누적 초기화됨'); }
     catch (e) { alert('초기화 실패: ' + e.message); }
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
@@ -1892,7 +1892,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.42';
+const WEB_VERSION = '8.43';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
