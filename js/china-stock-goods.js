@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.44 (비축창고 별도 초기화 버튼 제거 → 미발 초기화 시 함께 초기화)
+// 중국제작 미발계산기 Ver 8.45 (비축창고 계산을 fullauto와 동일하게 - 스캔 단위 all-or-nothing, 초과분 안 쪼갬)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -288,8 +288,7 @@ async function saveEditLocMoveRow(code, raw) {
         hideLoading(); showToast('✅ 수정됨');
     } catch (e) { hideLoading(); alert('수정 실패: ' + e.message); }
 }
-// [Ver 8.43] 비축창고 엑셀저장 — 스캐너 입고 누적(FLOOR2_STOCK)에서 미발수량 초과분(=비축창고재고)만 추출
-//   비축창고재고 = max(0, 입고누적(received) − 미발수량(mibal))  · 헤더 '상품코드/비축창고재고'
+// [Ver 8.45] 비축창고 엑셀저장 — 스캐너가 fullauto 방식(스캔 단위 all-or-nothing)으로 누적한 floor2 값을 그대로 사용
 async function downloadFloor2() {
     closeAllMenus();
     let map = {};
@@ -297,9 +296,7 @@ async function downloadFloor2() {
     catch (e) { alert('비축창고 데이터 불러오기 실패: ' + e.message); return; }
     const rows = [];
     Object.entries(map).forEach(([code, v]) => {
-        const received = parseInt(v && v.received) || 0;
-        const mibal = parseInt(v && v.mibal) || 0;
-        const spare = Math.max(0, received - mibal);
+        const spare = parseInt(v && v.floor2) || 0;
         if (spare > 0) rows.push([code, spare]);
     });
     if (!rows.length) { alert('비축창고로 입고된 데이터가 없습니다.\n(입고 스캔 시 미발수량을 넘긴 초과분이 비축창고로 잡힙니다)'); return; }
@@ -1887,7 +1884,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.44';
+const WEB_VERSION = '8.45';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
