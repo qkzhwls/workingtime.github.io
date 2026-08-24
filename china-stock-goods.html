@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.38</div>
+            <div class="version-badge">🚀 Ver 8.39</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -185,7 +185,7 @@
             <label style="padding:8px 14px; background:#00838f; color:#fff; border-radius:5px; cursor:pointer; font-weight:bold;">📥 기존재고 업로드<input type="file" id="upload-existing-loc" accept=".xls,.xlsx,.csv,.html" style="display:none;"></label>
             <button id="btn-locmove-download" style="padding:8px 14px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
             <button id="btn-locmove-reset" style="padding:8px 14px; background:#fff; color:#c62828; border:1px solid #c62828; border-radius:5px; cursor:pointer; font-weight:bold;">🗑️ 초기화</button>
-            <span style="display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:bold; color:#555;" title="스캐너로 새로 찍은 위치를 기존 위치의 앞/뒤 중 어디에 붙일지">🆕 새 위치:
+            <span style="display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:bold; color:#555;" title="다운로드 시 새로 추가된 자리를 기존 위치의 앞/뒤 중 어디에 놓을지">🆕 새 위치:
                 <span style="display:inline-flex;">
                     <button id="btn-newloc-front" class="newloc-pos" data-pos="front" style="padding:6px 11px; border:1px solid #b39ddb; border-radius:5px 0 0 5px; cursor:pointer; font-weight:bold;">맨앞</button><button id="btn-newloc-back" class="newloc-pos" data-pos="back" style="padding:6px 11px; border:1px solid #b39ddb; border-left:none; border-radius:0 5px 5px 0; cursor:pointer; font-weight:bold;">맨뒤</button>
                 </span>
@@ -407,6 +407,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.38"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.39"></script>
 </body>
 </html>

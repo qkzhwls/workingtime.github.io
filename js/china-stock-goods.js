@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.38 (기존재고: 스캐너 새 위치를 기존값 맨앞/맨뒤 선택, CONFIG.newLocPosition)
+// 중국제작 미발계산기 Ver 8.39 (기존재고 맨앞/맨뒤를 스캔이 아닌 옵션추가항목1 다운로드 시 재배치로 변경)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -196,6 +196,15 @@ function renderLocList(location, base) {
         : `<span style="background:#c8e6c9; color:#1b5e20; font-weight:bold; padding:0 5px; border-radius:3px;">${p}</span>`
     ).join(', ');
 }
+// [Ver 8.39] 다운로드 시 새 자리(base에 없던)를 맨앞/맨뒤로 재배치 (기존자리 순서는 유지)
+function orderLocForDownload(location, base, pos) {
+    const b = new Set(locPartsArr(base));
+    const parts = locPartsArr(location);
+    const baseParts = parts.filter(p => b.has(p));
+    const newParts = parts.filter(p => !b.has(p));
+    const ordered = (pos === 'front') ? [...newParts, ...baseParts] : [...baseParts, ...newParts];
+    return ordered.join(',');
+}
 // [Ver 8.31] 추가위치: base(기존자리)에 없던 '새로 추가된 자리'만 표시
 function renderNewLocOnly(location, base) {
     const b = new Set(locPartsArr(base));
@@ -289,7 +298,7 @@ async function downloadLocMove() {
     const hasFlag = flagged > 0;
     const aoa = [hasFlag ? ['상품코드', '옵션추가항목1', '비고'] : ['상품코드', '옵션추가항목1']];
     rows.forEach(r => {
-        const row = [r.code, r.location];
+        const row = [r.code, orderLocForDownload(r.location, r.base, newLocPosition)]; // [Ver 8.39] 새 자리를 맨앞/맨뒤로 재배치
         if (hasFlag) row.push(r.base ? '' : '파일에 없던 상품');
         aoa.push(row);
     });
@@ -1577,7 +1586,7 @@ async function setNewLocPosition(pos) {
     newLocPosition = (pos === 'front') ? 'front' : 'back';
     renderNewLocPosToggle();
     try { await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { newLocPosition, updatedAt: new Date() }, { merge: true }); } catch (e) {}
-    showToast(`🆕 새 위치는 기존값 ${newLocPosition === 'front' ? '맨앞' : '맨뒤'}에 추가됩니다 (스캐너 반영)`);
+    showToast(`🆕 다운로드 시 새 자리가 기존값 ${newLocPosition === 'front' ? '맨앞' : '맨뒤'}에 놓입니다`);
 }
 function setLocSubView(s) {
     locSubView = (s === 'existing') ? 'existing' : 'today';
@@ -1857,7 +1866,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.38';
+const WEB_VERSION = '8.39';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
