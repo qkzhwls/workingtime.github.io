@@ -163,13 +163,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.41"></script>
+    <script src="js/location-map.js?v=8.42"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.41'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.42'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -405,7 +405,7 @@
         function closeSelect() { $('ov-select').style.display = 'none'; }
 
         function addInbound(item, qty, dest) {
-            inboundQueue.unshift({ barcode: item.code, qty, name: item.name, location: item.location, dest, time: new Date().toTimeString().slice(0, 8) });
+            inboundQueue.unshift({ barcode: item.code, qty, name: item.name, location: item.location, dest, mibalQty: item.mibalQty || 0, time: new Date().toTimeString().slice(0, 8) });
             saveQueues(); renderQueue(); speak(qty + '개');
         }
 
@@ -493,6 +493,10 @@
             if (!navigator.onLine) { showAlert('오프라인 상태입니다.\n인터넷 연결 후 [전송하기]를 눌러주세요.\n(스캔 내역은 저장되어 있습니다)'); return; }
             sending = true; updateSendBtn('전송 중...');
             try {
+                // [Ver 8.42] 상품별 입고수량 집계 (2층/비축 계산용)
+                const agg = {};
+                inboundQueue.forEach(it => { const c = it.barcode; if (!agg[c]) agg[c] = { qty: 0, mibal: parseInt(it.mibalQty) || 0, name: it.name || '' }; agg[c].qty += it.qty; });
+
                 const CHUNK = 200; // 배치당 400 작업 (한도 500 이내)
                 for (let i = 0; i < inboundQueue.length; i += CHUNK) {
                     const batch = writeBatch(db);
@@ -505,6 +509,19 @@
                     });
                     await batch.commit();
                 }
+                // [Ver 8.42] 2층(비축) 누적: received += 입고수량, mibal은 첫 스캔값 고정 → 웹에서 max(0,received-mibal)=2층
+                try {
+                    let cur = {};
+                    const s2 = await getDoc(doc(db, 'ChinaStockGoods', 'FLOOR2_STOCK'));
+                    if (s2.exists() && s2.data().map) cur = s2.data().map;
+                    const f2 = {};
+                    Object.keys(agg).forEach(c => {
+                        const ex = cur[c] || {};
+                        const mibal = (ex.mibal !== undefined && ex.mibal !== null) ? ex.mibal : agg[c].mibal;
+                        f2[c] = { received: increment(agg[c].qty), mibal: mibal, name: agg[c].name };
+                    });
+                    await setDoc(doc(db, 'ChinaStockGoods', 'FLOOR2_STOCK'), { map: f2, updatedAt: serverTimestamp() }, { merge: true });
+                } catch (e) {}
                 inboundQueue = []; saveQueues(); renderQueue();
                 speak('전송 완료'); toast('✅ 입고 처리 완료');
             } catch (e) { showAlert('전송 실패\n(권한 또는 네트워크 오류)'); }
