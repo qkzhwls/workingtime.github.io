@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.36 (미발예측 화면: 누적 데이터 표+예상미발/상승률/편차, 평균상승률 자가보정)
+// 중국제작 미발계산기 Ver 8.37 (평균상승률을 1~100% 상승률만 평균 - 시트 AVERAGEIFS와 동일, 이상치 제외)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1732,7 +1732,9 @@ function computeAvgRise() {
         const arr = 입고일 ? recs.find(r => String(r.전송날짜) >= 입고일) : null;      // 입고일 시점
         if (!before || !arr) return;
         const a = parseInt(before.미발수량) || 0, b = parseInt(arr.미발수량) || 0;
-        if (a > 0) rates.push((b - a) / a);
+        if (a <= 0) return;
+        const rate = (b - a) / a;
+        if (rate >= 0.01 && rate <= 1.00) rates.push(rate); // [Ver 8.37] 시트 AVERAGEIFS(1~100%)와 동일: 이상치 제외
     });
     return rates.length ? { avg: rates.reduce((s, x) => s + x, 0) / rates.length, n: rates.length } : null;
 }
@@ -1774,7 +1776,7 @@ function closeMibalPredictModal() { document.getElementById('mibal-predict-modal
 function renderMibalPredict() {
     const { rows, useRate, avg } = buildPredictionRows();
     const sum = document.getElementById('mp-summary');
-    if (sum) sum.innerHTML = `평균상승률 <b style="color:#4527a0;">${avg ? (avg.avg >= 0 ? '+' : '') + Math.round(avg.avg * 100) + '% (' + avg.n + '건 완료)' : '– (데이터 부족, 기본 40% 적용)'}</b> · 예측 배율 <b>×${(1 + useRate).toFixed(2)}</b> · 누적 패킹 <b>${rows.length}건</b>`;
+    if (sum) sum.innerHTML = `평균상승률 <b style="color:#4527a0;">${avg ? (avg.avg >= 0 ? '+' : '') + Math.round(avg.avg * 100) + '% (' + avg.n + '건, 1~100%만)' : '– (데이터 부족, 기본 40% 적용)'}</b> · 예측 배율 <b>×${(1 + useRate).toFixed(2)}</b> · 누적 패킹 <b>${rows.length}건</b>`;
     const kw = (document.getElementById('mp-search')?.value || '').trim();
     const view = kw ? rows.filter(r => (fmtMD(r.출고일).includes(kw) || fmtMD(r.입고일).includes(kw) || r.출고일.includes(kw) || (r.입고일 || '').includes(kw))) : rows;
     const tb = document.getElementById('mp-tbody'); if (!tb) return;
@@ -1840,7 +1842,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.36';
+const WEB_VERSION = '8.37';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {

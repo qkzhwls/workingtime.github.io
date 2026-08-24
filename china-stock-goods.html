@@ -78,7 +78,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.36</div>
+            <div class="version-badge">🚀 Ver 8.37</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -372,7 +372,8 @@
             <div id="mp-summary" style="font-size:13px; color:#333; background:#ede7f6; border:1px solid #d1c4e9; border-radius:8px; padding:10px 12px; margin-bottom:10px; line-height:1.6;"></div>
             <div style="font-size:11px; color:#888; margin-bottom:8px; line-height:1.5;">
                 · <b>출고미발</b> = 출고 시점(첫 전송) 미발수량 · <b>입고미발</b> = 입고일(도착) 이후 전송 미발수량<br>
-                · <b>상승률</b> = (입고미발 − 출고미발) / 출고미발 · <b>예상미발</b> = 출고미발 × (1 + 평균상승률) — 데이터 없으면 기본 40%
+                · <b>상승률</b> = (입고미발 − 출고미발) / 출고미발 · <b>예상미발</b> = 출고미발 × (1 + 평균상승률) — 데이터 없으면 기본 40%<br>
+                · <b>평균상승률</b>은 상승률이 <b>1~100%</b>인 패킹만 평균(이상치 제외, 시트 AVERAGEIFS와 동일). 표의 상승률은 실제값 그대로 표시
             </div>
             <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center;">
                 <button id="btn-mp-download" style="padding:7px 13px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">⬇️ 다운로드</button>
@@ -401,6 +402,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.36"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.37"></script>
 </body>
 </html>
