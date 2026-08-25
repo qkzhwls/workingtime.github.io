@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.46 (미발 초기화 시 출고일 선택도 실제로 비우도록 수정 - 체크박스 먼저 제거)
+// 중국제작 미발계산기 Ver 8.47 (업데이트 배너 복구 - version.json에 ?_=시각 붙여 CDN 캐시 우회)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1884,12 +1884,12 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.46';
+const WEB_VERSION = '8.47';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
     try {
-        const res = await fetch(new URL('version.json', location.href).href, { cache: 'no-store' });
+        const res = await fetch(new URL('version.json', location.href).href + '?_=' + Date.now(), { cache: 'no-store' }); // [Ver 8.47] ?_=시각으로 CDN(Fastly) 캐시 우회 — no-store만으로는 max-age=600 CDN 캐시를 못 뚫어 배너가 최대 10분 지연/누락됨
         return await res.json();
     } catch (e) { return null; }
 }
