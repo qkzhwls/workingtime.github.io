@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.51 (모든 입고 스캔 오류에 강제전송 버튼)
+// 중국제작 미발계산기 Ver 8.52 (미등록 입고분 메인표 표시 + 헤더 열별 필터)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -165,6 +165,7 @@ mibalFn = compileMibalFormula(mibalFormula);
 // UI 제어 함수 (모달 및 메뉴)
 // ---------------------------------------------------------
 function closeAllMenus() {
+    if (typeof closeColumnFilter === 'function') closeColumnFilter(); // [Ver 8.52] 열 필터 팝업도 닫기
     const menu = document.getElementById('main-tools-menu'); if (menu) menu.style.display = 'none';
     const dl = document.getElementById('download-menu'); if (dl) dl.style.display = 'none'; // [Ver 5.9] 다운로드 드롭다운
     const popup = document.getElementById('date-dropdown-popup');
@@ -1270,9 +1271,10 @@ async function syncScanDBCore() {
         await delBatch.commit();
     }
     const CHUNK_SIZE = 500;
-    for (let i = 0; i < tableData.length; i += CHUNK_SIZE) {
+    const syncRows = tableData.filter(d => !d.unregistered); // [Ver 8.52] 미등록 입고분은 스캔DB에서 제외(오더 상품만)
+    for (let i = 0; i < syncRows.length; i += CHUNK_SIZE) {
         const batch = writeBatch(db);
-        const chunk = tableData.slice(i, i + CHUNK_SIZE);
+        const chunk = syncRows.slice(i, i + CHUNK_SIZE);
         chunk.forEach(item => {
             const docRef = doc(db, SCAN_DB_COLL, item.code);
             batch.set(docRef, {
@@ -1336,6 +1338,7 @@ async function clearAllData() {
         inboundMap = {};
         tableData = [];
         filteredData = [];
+        columnFilters = {}; // [Ver 8.52] 열 필터도 초기화
         document.getElementById('date-checklist-container').innerHTML = ''; // [Ver 8.46] 체크박스 먼저 비우기 (아래 updateSavedDatesFromCheckboxes가 옛 체크값을 다시 읽어 선택을 되살리는 것 방지)
         savedDates = [];
         updateSavedDatesFromCheckboxes(); // 이제 체크된 항목 없음 → savedDates=[] 유지 + 모드별 저장소/버튼 라벨 갱신
@@ -1523,10 +1526,28 @@ function applyDates(opts) {
             shortage: shortageVal, directShip: directShipVal, memo: item.bigoY || ed.memo || ''
         };
     }).filter(d => d.arrivalQty > 0);
-    filteredData = [...tableData]; renderTable(); updateSummary();
+    appendUnregisteredInbound(); // [Ver 8.52] 오더리스트에 없는데 강제전송된 입고분도 표에 추가
+    applyFilters(); // [Ver 8.52] 검색어/열필터 유지하며 렌더 (기존 filteredData=[...tableData]+renderTable+updateSummary 대체)
     // [Ver 2.8] 표 갱신 시 앱용 스캔DB 자동 동기화
     // (앱 입고 이벤트로 인한 갱신은 앱이 이미 차감했으므로 skipSync로 생략)
     if (viewMode !== 'location' && !(opts && opts.skipSync)) scheduleScanDBSync(); // [Ver 8.10] ScanDB는 미발계산기 선택 기준으로만 동기화
+}
+
+// [Ver 8.52] 미등록 입고분: 오더리스트(CSV)에 없는데 스캐너에서 강제전송(입고)된 상품을 표에 추가
+//   - 이미 표에 있거나(선택 출고일 상품) 오더리스트에 있는 코드는 제외 → '진짜 미등록'만
+//   - 도착/미발 0, 입고확인=입고수량, 비고=미등록, unregistered 플래그(배경강조 + ScanDB동기화 제외)
+function appendUnregisteredInbound() {
+    if (viewMode === 'location') return;
+    const orderCodes = new Set();
+    [orderDataOriginal, orderDataBuy].forEach(rows => (rows || []).forEach(r => { const c = (r['어드민상품코드'] || r['상품코드'] || '').toString().trim(); if (c) orderCodes.add(c); }));
+    const inTable = new Set(tableData.map(d => d.code));
+    Object.keys(inboundMap).forEach(code => {
+        const qty = inboundMap[code]; if (!qty) return;
+        if (inTable.has(code) || orderCodes.has(code)) return; // 표에 있거나 오더리스트에 있으면 미등록 아님
+        const log = stockLogData[code] || {};
+        const loc = (log['로케이션'] || '').split('/')[0].trim() || '미지정';
+        tableData.push({ code, name: log['상품명'] || '', option: '', arrivalQty: 0, mibalQty: 0, totalStock: parseInt(log['정상재고']) || 0, location: loc, capacity: getCapacityByLocation(loc), confirmed: qty, shortage: '', directShip: '', memo: '미등록', unregistered: true });
+    });
 }
 
 // [Ver 5.4] 셀 편집 시 해당 상품 한 줄만 미발수량 재계산 + 화면 갱신
@@ -1618,6 +1639,7 @@ function closeModeSelect() { document.getElementById('mode-select-modal').style.
 function setViewMode(m) {
     persistActiveDates();                       // [Ver 8.10] 현재 모드 출고일 저장 (viewMode 아직 이전값)
     viewMode = (m === 'location') ? 'location' : 'mibal';
+    columnFilters = {}; // [Ver 8.52] 모드 전환 시 열 필터 초기화
     localStorage.setItem('csgViewMode', viewMode);
     savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; // 새 모드 출고일 로드
     closeModeSelect();
@@ -1649,11 +1671,15 @@ function renderTableHeader(cols) {
     if (!tr) return;
     tr.innerHTML = cols.map(key => {
         const def = BUILTIN_COLS[key] || {};
-        const w = def.width ? ` style="width:${def.width};"` : '';
-        if (def.sort) return `<th class="th-sortable" data-sort="${def.sort}"${w}>${colLabel(key)}</th>`;
-        return `<th${w}>${colLabel(key)}</th>`;
+        const w = def.width ? `width:${def.width};` : '';
+        const canFilter = key !== 'no' && key !== 'locCheck'; // [Ver 8.52] No/추가위치 제외 전부 필터 가능
+        const funnel = canFilter ? `<span class="col-filter${columnFilters[key] ? ' active' : ''}" data-key="${key}" title="필터">▾</span>` : '';
+        const sortCls = def.sort ? ' th-sortable' : '';
+        const sortData = def.sort ? ` data-sort="${def.sort}"` : '';
+        return `<th class="th-cell${sortCls}"${sortData} style="${w}"><span class="th-label">${colLabel(key)}</span>${funnel}</th>`;
     }).join('');
     tr.querySelectorAll('.th-sortable').forEach(th => th.addEventListener('click', () => sortTable(th.dataset.sort)));
+    tr.querySelectorAll('.col-filter').forEach(f => f.addEventListener('click', (e) => { e.stopPropagation(); openColumnFilter(f.dataset.key, f); })); // [Ver 8.52] 필터 팝업
 }
 function renderTable() {
     const cols = getActiveColumns();
@@ -1677,7 +1703,7 @@ function renderTable() {
                 tds += `<td>${val}</td>`;
             }
         });
-        html += `<tr>${tds}</tr>`;
+        html += `<tr${row.unregistered ? ' style="background:#fff3e0;"' : ''}>${tds}</tr>`; // [Ver 8.52] 미등록 입고분 강조
     });
     tbody.innerHTML = html;
 }
@@ -1724,21 +1750,84 @@ function updateSummary() {
     document.getElementById('sum-mibal').textContent = filteredData.reduce((s,d)=>s+(parseInt(d.shortage)||0),0);
 }
 
-function applySearch() {
-    const k = document.getElementById('search-input')?.value.trim().toUpperCase();
-    filteredData = k ? tableData.filter(d => d.code.includes(k) || d.name.includes(k)) : [...tableData];
+// ---------------------------------------------------------
+// [Ver 8.52] 헤더 열별 필터(엑셀식) + 검색/정렬 공용화
+// ---------------------------------------------------------
+let columnFilters = {}; // 열key -> 허용값 Set (없으면 필터 없음)
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function filterValueOf(row, key) {
+    if (key === 'no' || key === 'locCheck') return '';
+    if (key.startsWith('log:')) { const log = stockLogData[row.code] || {}; const v = log[key.slice(4)]; return (v === undefined || v === null) ? '' : String(v); }
+    const v = row[key];
+    return (v === undefined || v === null) ? '' : String(v);
+}
+function sortComparator() {
+    const key = sortConfig.key, dir = sortConfig.direction;
+    return (a, b) => {
+        let va = a[key], vb = b[key];
+        if (typeof va === 'number' && typeof vb === 'number') return dir === 'asc' ? va - vb : vb - va;
+        return dir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+    };
+}
+// 검색어 + 열필터를 함께 적용하고 현재 정렬을 유지
+function applyFilters() {
+    const k = (document.getElementById('search-input')?.value || '').trim().toUpperCase();
+    filteredData = tableData.filter(d => {
+        if (k && !(String(d.code).toUpperCase().includes(k) || String(d.name || '').toUpperCase().includes(k))) return false;
+        for (const key in columnFilters) { const set = columnFilters[key]; if (set && !set.has(filterValueOf(d, key))) return false; }
+        return true;
+    });
+    if (sortConfig.key) filteredData.sort(sortComparator());
     renderTable(); updateSummary();
 }
+function applySearch() { applyFilters(); }
 
 function sortTable(key) {
     if (sortConfig.key === key) sortConfig.direction = sortConfig.direction === 'asc' ? 'desc' : 'asc';
     else { sortConfig.key = key; sortConfig.direction = 'asc'; }
-    filteredData.sort((a, b) => {
-        let va = a[key], vb = b[key];
-        if (typeof va === 'number' && typeof vb === 'number') return sortConfig.direction === 'asc' ? va - vb : vb - va;
-        return sortConfig.direction === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-    });
+    filteredData.sort(sortComparator());
     renderTable();
+}
+
+function closeColumnFilter() { const p = document.getElementById('col-filter-pop'); if (p) p.remove(); }
+function openColumnFilter(key, anchorEl) {
+    closeColumnFilter();
+    const values = [...new Set(tableData.map(r => filterValueOf(r, key)))].sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+    const cur = columnFilters[key]; // Set | undefined
+    const pop = document.createElement('div');
+    pop.id = 'col-filter-pop'; pop.className = 'col-filter-pop';
+    pop.innerHTML =
+        '<input type="text" id="cfp-search" placeholder="값 검색..." class="cfp-search">' +
+        '<label class="cfp-item cfp-allrow"><input type="checkbox" id="cfp-all"> <b>전체</b></label>' +
+        '<div class="cfp-list" id="cfp-list"></div>' +
+        '<div class="cfp-btns"><button id="cfp-clear">필터해제</button><button id="cfp-cancel">취소</button><button id="cfp-apply" class="primary">적용</button></div>';
+    document.body.appendChild(pop);
+    pop.addEventListener('click', e => e.stopPropagation());
+    const rect = anchorEl.getBoundingClientRect();
+    pop.style.top = Math.min(rect.bottom + 4, window.innerHeight - 330) + 'px';
+    pop.style.left = Math.max(6, Math.min(rect.left, window.innerWidth - 244)) + 'px';
+    const cbs = () => Array.from(document.querySelectorAll('#cfp-list .cfp-cb'));
+    const syncAll = () => { const list = cbs(); const all = document.getElementById('cfp-all'); if (all) all.checked = list.length > 0 && list.every(c => c.checked); };
+    document.getElementById('cfp-list').innerHTML = values.map((v, i) => {
+        const label = v === '' ? '(빈값)' : v;
+        const checked = (!cur || cur.has(v)) ? 'checked' : '';
+        return `<label class="cfp-item" data-label="${escapeHtml(String(label).toLowerCase())}"><input type="checkbox" class="cfp-cb" data-i="${i}" ${checked}> ${escapeHtml(label)}</label>`;
+    }).join('') || '<div style="padding:8px;color:#888;font-size:12px;">값 없음</div>';
+    syncAll();
+    document.getElementById('cfp-search').addEventListener('input', e => {
+        const f = e.target.value.toLowerCase();
+        document.querySelectorAll('#cfp-list .cfp-item').forEach(el => { el.style.display = (!f || (el.dataset.label || '').includes(f)) ? '' : 'none'; });
+    });
+    document.getElementById('cfp-all').addEventListener('change', e => { cbs().forEach(c => c.checked = e.target.checked); });
+    document.getElementById('cfp-list').addEventListener('change', e => { if (e.target.classList.contains('cfp-cb')) syncAll(); });
+    document.getElementById('cfp-cancel').onclick = () => closeColumnFilter();
+    document.getElementById('cfp-clear').onclick = () => { delete columnFilters[key]; closeColumnFilter(); applyFilters(); };
+    document.getElementById('cfp-apply').onclick = () => {
+        const checkedVals = new Set(cbs().filter(c => c.checked).map(c => values[+c.dataset.i]));
+        if (checkedVals.size >= values.length) delete columnFilters[key]; // 전부 선택이면 필터 없음
+        else columnFilters[key] = checkedVals;
+        closeColumnFilter(); applyFilters();
+    };
 }
 
 // ---------------------------------------------------------
@@ -1885,7 +1974,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.51';
+const WEB_VERSION = '8.52';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
