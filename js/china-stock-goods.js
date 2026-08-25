@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.49 (스캔 시 로케이션 미지정 오류 안내 + 비축창고 다운로드 헤더명 '작업수량')
+// 중국제작 미발계산기 Ver 8.50 (오류 시 진동, 강제전송 버튼, 강제전송 허용목록 공유)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1328,6 +1328,7 @@ async function clearAllData() {
         await deleteAllDocs(CHINA_COLLECTION + '_StockLog');
         await deleteAllDocs('ChinaStockGoods_InboundHistory');
         await setDoc(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'), { map: {}, updatedAt: new Date() }); // [Ver 8.44] 비축창고 누적도 함께 초기화
+        await setDoc(doc(db, CHINA_COLLECTION, 'FORCE_ALLOW'), { map: {}, updatedAt: new Date() }); // [Ver 8.50] 스캐너 강제전송 허용목록도 함께 초기화
         orderDataOriginal = [];
         orderDataBuy = [];
         stockLogData = {};
@@ -1884,7 +1885,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.49';
+const WEB_VERSION = '8.50';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {

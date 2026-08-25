@@ -148,7 +148,10 @@
     <div class="overlay" id="ov-alert"><div class="modal">
         <div style="font-weight:900; color:#d32f2f; font-size:17px;">알림</div>
         <div id="alert-msg" style="margin:12px 0; font-size:15px; white-space:pre-line;"></div>
-        <button class="m-btn" id="alert-ok">확인</button>
+        <div style="display:flex; gap:8px;">
+            <button class="m-btn" id="alert-ok" style="flex:1;">확인</button>
+            <button class="m-btn" id="alert-force" style="flex:1; display:none; background:#e65100;">강제전송</button>
+        </div>
     </div></div>
 
     <!-- 설정 모달 -->
@@ -163,13 +166,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.49"></script>
+    <script src="js/location-map.js?v=8.50"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.49'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.50'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -380,6 +383,22 @@
             if (mode === 'in') await processInbound(raw); else processLocation(raw);
         }
 
+        // [Ver 8.50] 강제전송 허용 상품코드 — 한 사용자가 강제전송하면 FORCE_ALLOW 문서에 기록 → 다른 사용자 스캔 시 미지정 오류 스킵 (실시간 공유)
+        const forceAllowSet = new Set();
+        function subscribeForceAllow() {
+            try {
+                onSnapshot(doc(db, 'ChinaStockGoods', 'FORCE_ALLOW'), (snap) => {
+                    forceAllowSet.clear();
+                    const m = (snap.exists() && snap.data().map) ? snap.data().map : {};
+                    Object.keys(m).forEach(c => forceAllowSet.add(c));
+                }, () => {});
+            } catch (e) {}
+        }
+        async function registerForceAllow(code) {
+            forceAllowSet.add(code); // 로컬 즉시 반영
+            try { await setDoc(doc(db, 'ChinaStockGoods', 'FORCE_ALLOW'), { map: { [code]: true }, updatedAt: serverTimestamp() }, { merge: true }); } catch (e) {}
+        }
+
         // ---------------- 입고 모드 ----------------
         async function processInbound(code) {
             let key = resolveCode(code); // [Ver 8.3] 바코드 → 상품코드 변환
@@ -389,9 +408,13 @@
             catch (e) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
             if (!snap.exists()) { showAlert('등록되지 않은 상품입니다.\n(' + key + ')'); return; }
             const d = snap.data();
-            if (!d.location || d.location === '미지정') { showAlert('⚠️ 로케이션 미지정 상품입니다.\n(' + key + ')\n위치를 먼저 지정한 뒤 입고해주세요.'); return; } // [Ver 8.49] 로케이션 미지정이면 입고 스캔 오류 안내
             const item = { code: key, name: d.name || '', location: d.location || '미지정', arrivalQty: Math.max(parseInt(d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d.mibalQty) || 0, 0) }; // [Ver 8.48] 음수 방지(입고 초과분)
-            if (directQty) showNumpad(item); else showSelect(item);
+            const proceed = () => { if (directQty) showNumpad(item); else showSelect(item); };
+            if ((!d.location || d.location === '미지정') && !forceAllowSet.has(key)) { // [Ver 8.49] 로케이션 미지정 오류 (단, [Ver 8.50] 강제전송 등록된 상품은 통과)
+                showAlert('⚠️ 로케이션 미지정 상품입니다.\n(' + key + ')\n위치를 먼저 지정한 뒤 입고해주세요.', () => { registerForceAllow(key); proceed(); }); // 강제전송 시 허용목록 등록 후 정상 진행
+                return;
+            }
+            proceed();
         }
 
         let currentItem = null;
@@ -668,9 +691,13 @@
             renderLocBanner(); renderQueue();
         }
 
-        function showAlert(msg) {
+        let alertForceAction = null; // [Ver 8.50] 강제전송 콜백 (있으면 강제전송 버튼 노출)
+        function showAlert(msg, forceAction) {
             speak('오류');
+            try { navigator.vibrate([200, 100, 200]); } catch (e) {} // [Ver 8.50] 오류 시 진동
             $('alert-msg').textContent = msg;
+            alertForceAction = forceAction || null;
+            $('alert-force').style.display = alertForceAction ? 'block' : 'none';
             $('ov-alert').style.display = 'flex';
         }
 
@@ -748,7 +775,8 @@
             if (v > 0) { $('ov-num').style.display = 'none'; addInbound(currentItem, v, '직접입력'); resumeScan(); }
         };
         $('num-cancel').onclick = () => { $('ov-num').style.display = 'none'; resumeScan(); };
-        $('alert-ok').onclick = () => { $('ov-alert').style.display = 'none'; resumeScan(); };
+        $('alert-ok').onclick = () => { $('ov-alert').style.display = 'none'; alertForceAction = null; resumeScan(); };
+        $('alert-force').onclick = () => { const act = alertForceAction; alertForceAction = null; $('ov-alert').style.display = 'none'; if (act) act(); }; // [Ver 8.50] 강제전송 → 정상 입고 단계로
 
         $('btn-settings').onclick = () => {
             $('set-direct').checked = directQty;
@@ -772,6 +800,7 @@
         // ---------------- 초기화 ----------------
         loadLocationMap(); // [Ver 5.8] 위치 매핑 로드
         loadBarcodeMap(); // [Ver 8.3] 바코드→상품코드 맵 로드
+        subscribeForceAllow(); // [Ver 8.50] 강제전송 허용목록 실시간 구독
         buildNumpad();
         $('status-line').textContent = `v${SCAN_VERSION} · 서버: ${serverLabel}`;
         setLocSubMode(locSubMode); // [Ver 4.1] 저장된 세부 작업 복원
