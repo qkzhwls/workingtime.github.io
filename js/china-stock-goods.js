@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.47 (업데이트 배너 복구 - version.json에 ?_=시각 붙여 CDN 캐시 우회)
+// 중국제작 미발계산기 Ver 8.48 (스캐너 입고 시 미발수량도 도착수량처럼 입고분만큼 차감)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1278,7 +1278,7 @@ async function syncScanDBCore() {
             batch.set(docRef, {
                 code: item.code, name: item.name, option: item.option,
                 arrivalQty: Math.max(item.arrivalQty - (inboundMap[item.code] || 0), 0),
-                mibalQty: item.mibalQty,
+                mibalQty: Math.max(item.mibalQty - (inboundMap[item.code] || 0), 0), // [Ver 8.48] 미발도 입고분만큼 차감 (도착수량과 동일 방식) — 재동기화 시에도 유지
                 totalStock: item.totalStock, location: item.location,
                 capacity: item.capacity, updatedAt: new Date()
             });
@@ -1884,7 +1884,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.47';
+const WEB_VERSION = '8.48';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {

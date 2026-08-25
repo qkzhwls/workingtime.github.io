@@ -163,13 +163,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.47"></script>
+    <script src="js/location-map.js?v=8.48"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.47'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.48'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -389,7 +389,7 @@
             catch (e) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
             if (!snap.exists()) { showAlert('등록되지 않은 상품입니다.\n(' + key + ')'); return; }
             const d = snap.data();
-            const item = { code: key, name: d.name || '', location: d.location || '미지정', arrivalQty: parseInt(d.arrivalQty) || 0, mibalQty: parseInt(d.mibalQty) || 0 };
+            const item = { code: key, name: d.name || '', location: d.location || '미지정', arrivalQty: Math.max(parseInt(d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d.mibalQty) || 0, 0) }; // [Ver 8.48] 음수 방지(입고 초과분)
             if (directQty) showNumpad(item); else showSelect(item);
         }
 
@@ -497,7 +497,7 @@
                 for (let i = 0; i < inboundQueue.length; i += CHUNK) {
                     const batch = writeBatch(db);
                     inboundQueue.slice(i, i + CHUNK).forEach(it => {
-                        batch.update(doc(db, 'ChinaStockGoods_ScanDB', it.barcode), { arrivalQty: increment(-it.qty) });
+                        batch.update(doc(db, 'ChinaStockGoods_ScanDB', it.barcode), { arrivalQty: increment(-it.qty), mibalQty: increment(-it.qty) }); // [Ver 8.48] 미발수량도 입고분만큼 즉시 차감 (표시는 0에서 클램프)
                         batch.set(doc(collection(db, 'ChinaStockGoods_InboundHistory')), {
                             barcode: it.barcode, qty: it.qty, name: it.name, location: it.location,
                             dest: it.dest, timestamp: serverTimestamp(), worker: 'Scanner_Web'
