@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.48 (스캐너 입고 시 미발수량도 도착수량처럼 입고분만큼 차감)
+// 중국제작 미발계산기 Ver 8.49 (스캔 시 로케이션 미지정 오류 안내 + 비축창고 다운로드 헤더명 '작업수량')
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -301,7 +301,7 @@ async function downloadFloor2() {
     });
     if (!rows.length) { alert('비축창고로 입고된 데이터가 없습니다.\n(입고 스캔 시 미발수량을 넘긴 초과분이 비축창고로 잡힙니다)'); return; }
     rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
-    const aoa = [['상품코드', '비축창고재고'], ...rows];
+    const aoa = [['상품코드', '작업수량'], ...rows]; // [Ver 8.49] 헤더명 '비축창고재고' → '작업수량'
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '비축창고재고');
@@ -1884,7 +1884,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.48';
+const WEB_VERSION = '8.49';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
