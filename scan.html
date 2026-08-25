@@ -166,13 +166,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.50"></script>
+    <script src="js/location-map.js?v=8.51"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.50'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.51'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -403,18 +403,25 @@
         async function processInbound(code) {
             let key = resolveCode(code); // [Ver 8.3] 바코드 → 상품코드 변환
             if (/^[0-9]+$/.test(key)) key = 'S' + key;
+            // [Ver 8.48] 음수 방지(입고 초과분) / d 없을 때(미등록·DB오류 강제전송)는 빈 값으로 진행
+            const buildItem = (d) => ({ code: key, name: (d && d.name) || '', location: (d && d.location) || '미지정', arrivalQty: Math.max(parseInt(d && d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d && d.mibalQty) || 0, 0) });
+            const proceedWith = (d) => { const item = buildItem(d); if (directQty) showNumpad(item); else showSelect(item); };
+            const forceProceed = (d) => { registerForceAllow(key); proceedWith(d); }; // [Ver 8.51] 강제전송 → 허용목록 등록 후 정상 입고 진행
+
             let snap;
             try { snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key)); }
-            catch (e) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
-            if (!snap.exists()) { showAlert('등록되지 않은 상품입니다.\n(' + key + ')'); return; }
-            const d = snap.data();
-            const item = { code: key, name: d.name || '', location: d.location || '미지정', arrivalQty: Math.max(parseInt(d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d.mibalQty) || 0, 0) }; // [Ver 8.48] 음수 방지(입고 초과분)
-            const proceed = () => { if (directQty) showNumpad(item); else showSelect(item); };
-            if ((!d.location || d.location === '미지정') && !forceAllowSet.has(key)) { // [Ver 8.49] 로케이션 미지정 오류 (단, [Ver 8.50] 강제전송 등록된 상품은 통과)
-                showAlert('⚠️ 로케이션 미지정 상품입니다.\n(' + key + ')\n위치를 먼저 지정한 뒤 입고해주세요.', () => { registerForceAllow(key); proceed(); }); // 강제전송 시 허용목록 등록 후 정상 진행
+            catch (e) { showAlert('DB 조회 오류\n(네트워크 확인)\n(' + key + ')', () => forceProceed(null)); return; } // [Ver 8.51] 모든 오류에 강제전송
+            if (!snap.exists()) {
+                if (forceAllowSet.has(key)) { proceedWith(null); return; } // [Ver 8.51] 이미 강제전송 허용된 상품 → 오류 없이 진행
+                showAlert('등록되지 않은 상품입니다.\n(' + key + ')', () => forceProceed(null)); // [Ver 8.51] 미등록도 강제전송 가능
                 return;
             }
-            proceed();
+            const d = snap.data();
+            if ((!d.location || d.location === '미지정') && !forceAllowSet.has(key)) { // [Ver 8.49] 로케이션 미지정 오류 (단, [Ver 8.50] 강제전송 등록된 상품은 통과)
+                showAlert('⚠️ 로케이션 미지정 상품입니다.\n(' + key + ')\n위치를 먼저 지정한 뒤 입고해주세요.', () => forceProceed(d));
+                return;
+            }
+            proceedWith(d);
         }
 
         let currentItem = null;
@@ -521,7 +528,7 @@
                 for (let i = 0; i < inboundQueue.length; i += CHUNK) {
                     const batch = writeBatch(db);
                     inboundQueue.slice(i, i + CHUNK).forEach(it => {
-                        batch.update(doc(db, 'ChinaStockGoods_ScanDB', it.barcode), { arrivalQty: increment(-it.qty), mibalQty: increment(-it.qty) }); // [Ver 8.48] 미발수량도 입고분만큼 즉시 차감 (표시는 0에서 클램프)
+                        batch.set(doc(db, 'ChinaStockGoods_ScanDB', it.barcode), { arrivalQty: increment(-it.qty), mibalQty: increment(-it.qty) }, { merge: true }); // [Ver 8.48] 미발수량도 입고분만큼 즉시 차감 (표시는 0에서 클램프) / [Ver 8.51] set-merge: 강제전송된 미등록 상품(ScanDB 문서 없음)도 생성되도록
                         batch.set(doc(collection(db, 'ChinaStockGoods_InboundHistory')), {
                             barcode: it.barcode, qty: it.qty, name: it.name, location: it.location,
                             dest: it.dest, timestamp: serverTimestamp(), worker: 'Scanner_Web'
