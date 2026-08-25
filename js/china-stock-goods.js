@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.52 (미등록 입고분 메인표 표시 + 헤더 열별 필터)
+// 중국제작 미발계산기 Ver 8.53 (위치지정모드 당일입고 표 열 설정 추가)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1588,14 +1588,17 @@ const BUILTIN_COLS = {
     locCheck:  { label:'추가위치', width:'110px' }   // [Ver 8.31] 새로 추가된 자리만 표시
 };
 let columnConfig = null; // null = 기본 순서, 아니면 열 key 배열
+let locationColumnConfig = null; // [Ver 8.53] 위치지정모드(당일입고) 열 설정 (미발과 별도)
 // [Ver 7.0] 미발계산기 열: locCheck(위치확인)는 위치지정모드 전용이므로 미발 열에서 제외
 function getColumns() { const base = (Array.isArray(columnConfig) && columnConfig.length) ? columnConfig : DEFAULT_COLUMNS; return base.filter(k => k !== 'locCheck'); }
 // [Ver 6.8] 보기 모드: 미발계산기(mibal) / 위치지정모드(location)
 let viewMode = localStorage.getItem('csgViewMode') || 'mibal';
 // [Ver 7.1] 위치지정모드 서브뷰: 당일입고지정(today) / 기존재고지정(existing)
 let locSubView = localStorage.getItem('csgLocSub') || 'today';
-const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'log:옵션추가항목1', 'locCheck']; // [Ver 8.30] 당일입고: 미발재고로그의 옵션추가항목1 헤더값 표시
-function getActiveColumns() { return viewMode === 'location' ? LOCATION_COLUMNS : getColumns(); }
+const LOCATION_COLUMNS = ['no', 'code', 'name', 'option', 'location', 'log:옵션추가항목1', 'locCheck']; // [Ver 8.30] 당일입고 기본 열 (미발재고로그의 옵션추가항목1 헤더값 표시)
+// [Ver 8.53] 위치지정모드 열도 설정 가능 (저장값 없으면 기본 LOCATION_COLUMNS)
+function getLocationColumns() { return (Array.isArray(locationColumnConfig) && locationColumnConfig.length) ? locationColumnConfig : LOCATION_COLUMNS; }
+function getActiveColumns() { return viewMode === 'location' ? getLocationColumns() : getColumns(); }
 function applyViewMode() {
     document.body.dataset.view = viewMode;
     const label = document.getElementById('app-title-label');
@@ -1710,7 +1713,14 @@ function renderTable() {
 
 // [Ver 5.5] 열 설정 모달
 let colEditList = [];
-function openColumnModal() { closeAllMenus(); colEditList = [...getColumns()]; renderColumnEditor(); document.getElementById('column-modal').style.display = 'flex'; }
+function openColumnModal() {
+    closeAllMenus();
+    colEditList = viewMode === 'location' ? [...getLocationColumns()] : [...getColumns()]; // [Ver 8.53] 모드별 열 로드
+    const title = document.getElementById('column-modal-title');
+    if (title) title.textContent = viewMode === 'location' ? '🔧 표 열(헤더) 설정 — 위치지정(당일입고)' : '🔧 표 열(헤더) 설정 — 미발계산기';
+    renderColumnEditor();
+    document.getElementById('column-modal').style.display = 'flex';
+}
 function closeColumnModal() { document.getElementById('column-modal').style.display = 'none'; }
 function renderColumnEditor() {
     const box = document.getElementById('column-list');
@@ -1725,7 +1735,8 @@ function renderColumnEditor() {
         </div>`).join('');
     const sel = document.getElementById('column-add-select');
     const avail = [];
-    Object.keys(BUILTIN_COLS).forEach(k => { if (!colEditList.includes(k) && k !== 'locCheck') avail.push([k, colLabel(k)]); }); // locCheck=위치확인은 위치모드 전용
+    // [Ver 8.53] locCheck(추가위치)는 위치지정모드에서만 추가 가능
+    Object.keys(BUILTIN_COLS).forEach(k => { if (colEditList.includes(k)) return; if (k === 'locCheck' && viewMode !== 'location') return; avail.push([k, colLabel(k)]); });
     logFieldKeys().forEach(f => { const k = 'log:' + f; if (!colEditList.includes(k)) avail.push([k, f + ' (로그)']); });
     sel.innerHTML = avail.length ? avail.map(([k,l]) => `<option value="${k}">${l}</option>`).join('') : '<option value="">추가할 열 없음</option>';
     box.querySelectorAll('.col-up').forEach(b => b.onclick = () => { const i=+b.dataset.i; if(i>0){ [colEditList[i-1],colEditList[i]]=[colEditList[i],colEditList[i-1]]; renderColumnEditor(); } });
@@ -1733,12 +1744,14 @@ function renderColumnEditor() {
     box.querySelectorAll('.col-del').forEach(b => b.onclick = () => { colEditList.splice(+b.dataset.i,1); renderColumnEditor(); });
 }
 function addColumnFromSelect() { const v = document.getElementById('column-add-select').value; if (v && !colEditList.includes(v)) { colEditList.push(v); renderColumnEditor(); } }
-function resetColumns() { colEditList = [...DEFAULT_COLUMNS]; renderColumnEditor(); }
+function resetColumns() { colEditList = viewMode === 'location' ? [...LOCATION_COLUMNS] : [...DEFAULT_COLUMNS]; renderColumnEditor(); } // [Ver 8.53] 모드별 기본값
 async function saveColumns() {
     if (!colEditList.length) { alert('열이 하나도 없습니다.'); return; }
-    columnConfig = [...colEditList];
+    const payload = { updatedAt: new Date() };
+    if (viewMode === 'location') { locationColumnConfig = [...colEditList]; payload.locationColumnConfig = locationColumnConfig; } // [Ver 8.53] 위치모드 열은 별도 저장
+    else { columnConfig = [...colEditList]; payload.columnConfig = columnConfig; }
     try {
-        await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { columnConfig, updatedAt: new Date() }, { merge: true });
+        await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), payload, { merge: true });
         closeColumnModal(); showToast('✅ 열 설정 저장됨'); renderTable();
     } catch (e) { alert('저장 실패: ' + e.message); }
 }
@@ -1974,7 +1987,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.52';
+const WEB_VERSION = '8.53';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2019,7 +2032,7 @@ async function checkVersion(publishAppMeta = false) {
 // ---------------------------------------------------------
 // Firebase 설정 로직
 // ---------------------------------------------------------
-async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDatesMibal = Array.isArray(c.savedDatesMibal) ? c.savedDatesMibal : (Array.isArray(c.savedDates) ? c.savedDates : []); savedDatesLoc = Array.isArray(c.savedDatesLoc) ? c.savedDatesLoc : []; savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); MIBAL_COMPUTED_VARS.forEach(v => { if (!mibalVars.includes(v)) mibalVars.push(v); }); /* [Ver 8.25] 도착수량 등 계산변수는 기본공식에 쓰이므로 항상 포함 */ mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; newLocPosition = (c.newLocPosition === 'front') ? 'front' : 'back'; } }
+async function loadConfig() { const snap = await getDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC)); if (snap.exists()) { const c = snap.data(); csvUrlOrder = c.csvUrlOrder || ''; csvUrlBuy = c.csvUrlBuy || ''; savedDatesMibal = Array.isArray(c.savedDatesMibal) ? c.savedDatesMibal : (Array.isArray(c.savedDates) ? c.savedDates : []); savedDatesLoc = Array.isArray(c.savedDatesLoc) ? c.savedDatesLoc : []; savedDates = (viewMode === 'location') ? [...savedDatesLoc] : [...savedDatesMibal]; mibalFormula = c.mibalFormula || DEFAULT_MIBAL_FORMULA; mibalVars = sanitizeMibalVars(c.mibalVars); MIBAL_COMPUTED_VARS.forEach(v => { if (!mibalVars.includes(v)) mibalVars.push(v); }); /* [Ver 8.25] 도착수량 등 계산변수는 기본공식에 쓰이므로 항상 포함 */ mibalFn = compileMibalFormula(mibalFormula) || compileMibalFormula(DEFAULT_MIBAL_FORMULA); zoneCapacity = c.zoneCapacity || {}; columnConfig = Array.isArray(c.columnConfig) ? c.columnConfig : null; locationColumnConfig = Array.isArray(c.locationColumnConfig) ? c.locationColumnConfig : null; graceDays = (c.graceDays !== undefined && c.graceDays !== null) ? (parseInt(c.graceDays) || 0) : 1; newLocPosition = (c.newLocPosition === 'front') ? 'front' : 'back'; } }
 async function saveConfig() { persistActiveDates(); await setDoc(doc(db, CHINA_COLLECTION, CONFIG_DOC), { csvUrlOrder, csvUrlBuy, savedDatesMibal, savedDatesLoc, updatedAt: new Date() }, { merge: true }); }
 async function loadEditedCells() { const snap = await getDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS')); if (snap.exists()) editedCells = snap.data().cells || {}; }
 async function saveEditedCells() { await setDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'), { cells: editedCells }); }
@@ -2187,6 +2200,7 @@ function setupEventListeners() {
 
     // [Ver 5.5] 표 열(헤더) 설정 모달
     document.getElementById('btn-open-column')?.addEventListener('click', () => openColumnModal());
+    document.getElementById('btn-open-column-loc')?.addEventListener('click', () => openColumnModal()); // [Ver 8.53] 위치지정모드 열 설정
     document.getElementById('btn-column-cancel')?.addEventListener('click', () => closeColumnModal());
     document.getElementById('btn-column-save')?.addEventListener('click', () => saveColumns());
     document.getElementById('btn-column-reset')?.addEventListener('click', () => resetColumns());
