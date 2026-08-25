@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.45 (비축창고 계산을 fullauto와 동일하게 - 스캔 단위 all-or-nothing, 초과분 안 쪼갬)
+// 중국제작 미발계산기 Ver 8.46 (미발 초기화 시 출고일 선택도 실제로 비우도록 수정 - 체크박스 먼저 제거)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1335,12 +1335,12 @@ async function clearAllData() {
         inboundMap = {};
         tableData = [];
         filteredData = [];
+        document.getElementById('date-checklist-container').innerHTML = ''; // [Ver 8.46] 체크박스 먼저 비우기 (아래 updateSavedDatesFromCheckboxes가 옛 체크값을 다시 읽어 선택을 되살리는 것 방지)
         savedDates = [];
-        updateSavedDatesFromCheckboxes();
+        updateSavedDatesFromCheckboxes(); // 이제 체크된 항목 없음 → savedDates=[] 유지 + 모드별 저장소/버튼 라벨 갱신
         renderSelectedTags();
         renderTable();
         updateSummary();
-        document.getElementById('date-checklist-container').innerHTML = '';
         await saveConfig(); // 선택 출고일 비운 상태 저장
         await syncOrderData(true); // [Ver 4.4] 초기화 후 출고일 목록 다시 로드 (빈 화면 방지)
         hideLoading();
@@ -1884,7 +1884,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.45';
+const WEB_VERSION = '8.46';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
