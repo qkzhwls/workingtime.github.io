@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.61 (환경설정: 위치매핑 업로드를 기존재고지정 서브모드 전용으로 이동)
+// 중국제작 미발계산기 Ver 8.62 (위치매핑 관리 모달: 조회/개별 추가·수정·삭제/업로드·다운로드)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1148,11 +1148,75 @@ async function handleLocationMapUpload(e) {
         }
         const cnt = Object.keys(map).length;
         if (!cnt) { hideLoading(); alert('유효한 행이 없습니다.'); e.target.value = ''; return; }
-        await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_MAP'), { map, count: cnt, updatedAt: new Date() });
+        // [Ver 8.62] 전체 교체 대신 기존 매핑에 병합(같은 상품코드는 덮어씀) — 관리 모달의 수동 편집분 보존
+        await loadLocationMapDoc();
+        Object.assign(locationMapData, map);
+        await saveLocationMapDoc();
         hideLoading();
-        showToast(`✅ 위치 매핑 저장 완료 (${cnt}건) — 스캐너에 즉시 반영`);
+        renderLocationMapList();
+        showToast(`✅ 위치 매핑 ${cnt}건 반영 (총 ${Object.keys(locationMapData).length}건) — 스캐너에 즉시 반영`);
     } catch (err) { hideLoading(); alert('위치 매핑 처리 실패: ' + err.message); }
     e.target.value = '';
+}
+
+// [Ver 8.62] 위치매핑 관리 모달: LOCATION_MAP(상품코드→스캐너 고정 위치) 조회/추가/수정/삭제
+let locationMapData = {};
+async function loadLocationMapDoc() {
+    try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'LOCATION_MAP')); locationMapData = (s.exists() && s.data().map) ? s.data().map : {}; } catch (e) { locationMapData = {}; }
+}
+async function saveLocationMapDoc() {
+    try { await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_MAP'), { map: locationMapData, count: Object.keys(locationMapData).length, updatedAt: new Date() }); } catch (e) { alert('저장 실패: ' + e.message); }
+}
+async function openLocationMapModal() {
+    closeAllMenus();
+    showLoading('📍 위치매핑 불러오는 중...');
+    await loadLocationMapDoc();
+    hideLoading();
+    renderLocationMapList();
+    document.getElementById('location-map-modal').style.display = 'flex';
+}
+function closeLocationMapModal() { document.getElementById('location-map-modal').style.display = 'none'; }
+function renderLocationMapList() {
+    const tb = document.getElementById('locmap-tbody'); if (!tb) return;
+    const kw = (document.getElementById('locmap-search')?.value || '').trim().toUpperCase();
+    let entries = Object.entries(locationMapData);
+    if (kw) entries = entries.filter(([c, l]) => c.includes(kw) || String(l || '').toUpperCase().includes(kw));
+    entries.sort((a, b) => a[0].localeCompare(b[0]));
+    const total = Object.keys(locationMapData).length;
+    const cntEl = document.getElementById('locmap-count'); if (cntEl) cntEl.textContent = `총 ${total}건` + (kw ? ` · 검색 ${entries.length}건` : '');
+    tb.innerHTML = entries.length
+        ? entries.map(([c, l]) => `<tr style="border-bottom:1px solid #eee;"><td style="padding:7px 6px; font-weight:bold; white-space:nowrap;">${escBa(c)}</td><td style="padding:7px 6px; color:#7b1fa2; font-weight:bold;">${escBa(l)}</td><td style="padding:7px 6px; white-space:nowrap;"><span class="locmap-edit" data-c="${escBa(c)}" title="수정" style="cursor:pointer; font-size:15px; margin-right:8px;">✏️</span><span class="locmap-del" data-c="${escBa(c)}" title="삭제" style="cursor:pointer; font-size:15px;">🗑️</span></td></tr>`).join('')
+        : '<tr><td colspan="3" style="padding:22px; color:#999;">등록된 위치매핑이 없습니다. 파일 업로드 또는 위에서 직접 추가하세요.</td></tr>';
+    tb.querySelectorAll('.locmap-del').forEach(x => x.onclick = async () => { if (confirm(`[${x.dataset.c}] 매핑을 삭제할까요?`)) { delete locationMapData[x.dataset.c]; await saveLocationMapDoc(); renderLocationMapList(); showToast('🗑️ 삭제됨 — 스캐너 즉시 반영'); } });
+    tb.querySelectorAll('.locmap-edit').forEach(x => x.onclick = async () => {
+        const code = x.dataset.c;
+        const nv = prompt(`[${code}] 새 위치값`, locationMapData[code] || '');
+        if (nv === null) return;
+        locationMapData[code] = nv.trim();
+        await saveLocationMapDoc(); renderLocationMapList(); showToast('✏️ 수정됨 — 스캐너 즉시 반영');
+    });
+}
+async function addLocationMapManual() {
+    const cEl = document.getElementById('locmap-code'), lEl = document.getElementById('locmap-loc');
+    const c = (cEl.value || '').trim().toUpperCase(); const l = (lEl.value || '').trim();
+    if (!c || !l) { alert('상품코드와 위치를 모두 입력하세요.'); return; }
+    const exists = locationMapData[c] !== undefined;
+    locationMapData[c] = l;
+    await saveLocationMapDoc();
+    cEl.value = ''; lEl.value = ''; cEl.focus();
+    renderLocationMapList();
+    showToast(exists ? '✏️ 기존 상품코드 위치 변경됨 — 스캐너 즉시 반영' : '✅ 위치매핑 추가됨 — 스캐너 즉시 반영');
+}
+async function downloadLocationMap() {
+    const entries = Object.entries(locationMapData).sort((a, b) => a[0].localeCompare(b[0]));
+    if (!entries.length) { alert('내려받을 위치매핑이 없습니다.'); return; }
+    const aoa = [['상품코드', '위치']];
+    entries.forEach(([c, l]) => aoa.push([c, l]));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
+    const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
+    await downloadToDesktop('위치매핑.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
 }
 
 // ---------------------------------------------------------
@@ -2036,7 +2100,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.61';
+const WEB_VERSION = '8.62';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2133,6 +2197,16 @@ function setupEventListeners() {
     document.getElementById('ba-barcode')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('ba-code')?.focus(); });
     document.getElementById('ba-code')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBarcodeAliasManual(); });
     document.getElementById('btn-barcode-alias-clear')?.addEventListener('click', async () => { if (Object.keys(barcodeAlias).length && confirm('오류바코드매칭을 전부 삭제할까요? (되돌릴 수 없습니다)')) { barcodeAlias = {}; await saveBarcodeAlias(); renderBarcodeAliasList(); showToast('🗑️ 전체 삭제됨'); } });
+    // [Ver 8.62] 위치매핑 관리 모달
+    document.getElementById('btn-open-location-map')?.addEventListener('click', () => openLocationMapModal());
+    document.getElementById('btn-location-map-close')?.addEventListener('click', () => closeLocationMapModal());
+    document.getElementById('location-map-modal')?.addEventListener('click', (e) => { if (e.target.id === 'location-map-modal') closeLocationMapModal(); });
+    document.getElementById('btn-locmap-download')?.addEventListener('click', () => downloadLocationMap());
+    document.getElementById('btn-locmap-add')?.addEventListener('click', () => addLocationMapManual());
+    document.getElementById('locmap-search')?.addEventListener('input', () => renderLocationMapList());
+    document.getElementById('locmap-code')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('locmap-loc')?.focus(); });
+    document.getElementById('locmap-loc')?.addEventListener('keydown', (e) => { if (e.key === 'Enter') addLocationMapManual(); });
+    document.getElementById('btn-locmap-clear')?.addEventListener('click', async () => { if (Object.keys(locationMapData).length && confirm('위치매핑을 전부 삭제할까요? (되돌릴 수 없습니다)')) { locationMapData = {}; await saveLocationMapDoc(); renderLocationMapList(); showToast('🗑️ 전체 삭제됨'); } });
     // 7-3. #upload-existing-loc (기존재고 옵션추가항목1 시드 업로드 - Ver 6.5)
     document.getElementById('upload-existing-loc')?.addEventListener('change', (e) => handleExistingLocUpload(e));
 
