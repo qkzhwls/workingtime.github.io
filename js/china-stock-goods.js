@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.57 (위치 강제추가한 오더리스트 밖 상품도 당일입고 표/다운로드에 표시)
+// 중국제작 미발계산기 Ver 8.58 (당일입고 위치 다운로드: 기존 옵션추가항목1 + 새 위치 병합 - 기존값 유실 방지)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -206,6 +206,12 @@ function orderLocForDownload(location, base, pos) {
     const ordered = (pos === 'front') ? [...newParts, ...baseParts] : [...baseParts, ...newParts];
     return ordered.join(',');
 }
+// [Ver 8.58] 콤마 다중 위치 병합 (중복 제거, 순서 유지) — 당일입고 다운로드에서 기존 옵션추가항목1 + 새 위치 합칠 때 사용
+function mergeCsvLocs(a, b) {
+    const seen = new Set(); const out = [];
+    [...locPartsArr(a), ...locPartsArr(b)].forEach(p => { if (!seen.has(p)) { seen.add(p); out.push(p); } });
+    return out.join(',');
+}
 // [Ver 8.31] 추가위치: base(기존자리)에 없던 '새로 추가된 자리'만 표시
 function renderNewLocOnly(location, base) {
     const b = new Set(locPartsArr(base));
@@ -334,7 +340,14 @@ async function downloadLocMove() {
 async function downloadDayLoc() {
     if (!filteredData.length) return;
     const aoa = [['상품코드', '옵션추가항목1']];
-    filteredData.forEach(r => { const a = locationAssignMap[r.code]; if (a && a.location && (a.sub || '') === 'today') aoa.push([r.code, a.location]); });
+    filteredData.forEach(r => {
+        const a = locationAssignMap[r.code];
+        if (!(a && a.location && (a.sub || '') === 'today')) return;
+        // [Ver 8.58] 기존 옵션추가항목1(재고로그 값) + 새로 지정한 위치를 병합 (기존값 유실 방지) — 새 자리는 설정에 따라 앞/뒤 배치
+        const existing = (stockLogData[r.code] && stockLogData[r.code]['옵션추가항목1']) || '';
+        const full = mergeCsvLocs(existing, a.location);
+        aoa.push([r.code, orderLocForDownload(full, existing, newLocPosition)]);
+    });
     if (aoa.length === 1) { alert('당일 입고분으로 위치가 지정된 상품이 없습니다.\n(스캐너 위치모드 "당일 입고분"으로 지정 후 이용하세요)'); return; }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
@@ -2013,7 +2026,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.57';
+const WEB_VERSION = '8.58';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
