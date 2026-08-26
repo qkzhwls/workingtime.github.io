@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.53 (위치지정모드 당일입고 표 열 설정 추가)
+// 중국제작 미발계산기 Ver 8.54 (미발예측 입고일: 여러 전송 중 채워진 입고일 우선 - 재전송 반영 안되던 버그 수정)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1872,7 +1872,7 @@ function computeAvgRise() {
     const rates = [];
     Object.values(byShip).forEach(recs => {
         recs.sort((a, b) => String(a.전송날짜).localeCompare(String(b.전송날짜)));
-        const 입고일 = recs[0].입고일 || '';
+        const 입고일 = (recs.find(r => r.입고일) || {}).입고일 || ''; // [Ver 8.54] 여러 전송 중 입고일이 채워진 것 우선 (초기 전송 때 입고일 미확정이면 빈 값이라 옛 코드는 계속 '미정'으로 굳음)
         const before = recs.find(r => !입고일 || String(r.전송날짜) < 입고일);       // 출고(입고 전) 시점
         const arr = 입고일 ? recs.find(r => String(r.전송날짜) >= 입고일) : null;      // 입고일 시점
         if (!before || !arr) return;
@@ -1897,7 +1897,7 @@ function buildPredictionRows() {
     const rows = [];
     Object.keys(byShip).forEach(출고일 => {
         const recs = byShip[출고일].slice().sort((a, b) => String(a.전송날짜).localeCompare(String(b.전송날짜)));
-        const 입고일 = recs[0].입고일 || '';
+        const 입고일 = (recs.find(r => r.입고일) || {}).입고일 || ''; // [Ver 8.54] 여러 전송 중 입고일이 채워진 것 우선 (초기 전송 때 입고일 미확정이면 빈 값이라 옛 코드는 계속 '미정'으로 굳음)
         const before = recs.find(r => !입고일 || String(r.전송날짜) < 입고일) || recs[0];
         const 출고미발 = parseInt(before.미발수량) || 0;
         const arrRec = 입고일 ? recs.find(r => String(r.전송날짜) >= 입고일) : null;
@@ -1987,7 +1987,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.53';
+const WEB_VERSION = '8.54';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
