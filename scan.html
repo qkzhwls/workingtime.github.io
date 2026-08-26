@@ -158,8 +158,6 @@
     <div class="overlay" id="ov-set"><div class="modal">
         <div style="font-weight:900; font-size:17px; margin-bottom:6px;">⚙️ 설정</div>
         <div class="set-row"><span>스캔 즉시 수량 입력</span><input type="checkbox" id="set-direct"></div>
-        <div class="set-row" style="flex-direction:column; align-items:stretch;"><span>구글 스크립트 URL (위치 전송용)</span><input type="text" id="set-gs" placeholder="https://script.google.com/..."></div>
-        <div class="set-row"><span id="set-server">서버: -</span><button class="m-btn gray" style="width:auto; padding:0 14px; margin:0;" id="set-server-reset">기본값</button></div>
         <button class="m-btn" id="set-close">저장 후 닫기</button>
     </div></div>
 
@@ -172,7 +170,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.59'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.60'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -233,7 +231,6 @@
         let locationQueue = JSON.parse(localStorage.getItem('scanLocQueue') || '[]');
         let fixedLocation = null;
         let directQty = localStorage.getItem('scanDirectQty') === '1';
-        let gsUrl = localStorage.getItem('scanGsUrl') || '';
         let scanner = null, scanning = false, processing = false, sending = false;
 
         const $ = (id) => document.getElementById(id);
@@ -374,11 +371,6 @@
                         location.reload(); return;
                     }
                 } catch (e) {}
-            }
-            // 구글 스크립트 설정 QR
-            if (raw.includes('script.google.com')) {
-                gsUrl = raw; localStorage.setItem('scanGsUrl', raw);
-                speak('구글 주소 변경'); toast('구글 스크립트 주소 저장됨'); resumeScan(); return;
             }
             if (mode === 'in') await processInbound(raw); else processLocation(raw);
         }
@@ -617,24 +609,10 @@
                 }
                 fbOk = true;
             } catch (e) { console.error('위치 Firebase 기록 실패:', e); if (e && e.message === 'READ_FAILED') fbOk = 'READ_FAILED'; }
-            // 구글 스크립트 전송(설정된 경우만) - ERP 반영용
-            let gsOk = true;
-            if (gsUrl) {
-                const payload = items.map(it => ({ barcode: it.barcode, location: it.location }));
-                try {
-                    try {
-                        const res = await fetch(gsUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ data: payload }) });
-                        gsOk = res.ok;
-                    } catch (corsErr) {
-                        await fetch(gsUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ data: payload }) });
-                        gsOk = true;
-                    }
-                } catch (e) { gsOk = false; }
-            }
             // [Ver 8.0] Firebase 저장이 실제로 성공했을 때만 큐를 비움 (실패 시 큐 보존 → 재시도)
             if (fbOk === true) {
                 locationQueue = []; fixedLocation = null; saveQueues(); renderQueue(); renderLocBanner();
-                speak('전송 완료'); toast(gsUrl && !gsOk ? '✅ 저장됨 (ERP 전송만 실패)' : '✅ 위치 전송 완료');
+                speak('전송 완료'); toast('✅ 위치 전송 완료');
             } else if (fbOk === 'READ_FAILED') {
                 showAlert('⚠️ 기존 위치를 불러오지 못해 전송을 중단했습니다.\n(그대로 저장하면 기존 자리가 지워질 수 있어 막았습니다)\n무료 사용량 한도/네트워크를 확인하고 다시 시도하세요.\n스캔 내역은 그대로 보관됩니다.');
             } else {
@@ -795,21 +773,12 @@
 
         $('btn-settings').onclick = () => {
             $('set-direct').checked = directQty;
-            $('set-gs').value = gsUrl;
-            $('set-server').textContent = '서버: ' + serverLabel;
             $('ov-set').style.display = 'flex';
         };
         $('set-close').onclick = () => {
             directQty = $('set-direct').checked;
-            gsUrl = $('set-gs').value.trim();
             localStorage.setItem('scanDirectQty', directQty ? '1' : '0');
-            localStorage.setItem('scanGsUrl', gsUrl);
             $('ov-set').style.display = 'none'; toast('💾 설정 저장됨');
-        };
-        $('set-server-reset').onclick = () => {
-            localStorage.removeItem('scanServerCfg');
-            speak('기본 서버로 변경');
-            location.reload();
         };
 
         // ---------------- 초기화 ----------------
