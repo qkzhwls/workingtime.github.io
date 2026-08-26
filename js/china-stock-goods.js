@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.55 (입고확인 vs 도착수량: 과입고 빨강/부족 노랑 강조 - 확인 필요 상품 표시)
+// 중국제작 미발계산기 Ver 8.56 (위치지정 당일입고: DB에 없는 상품도 강제추가 버튼으로 위치지정 전송 가능)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1995,7 +1995,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.55';
+const WEB_VERSION = '8.56';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {

@@ -166,13 +166,13 @@
     <div id="toast"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-    <script src="js/location-map.js?v=8.55"></script>
+    <script src="js/location-map.js?v=8.56"></script>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.55'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.56'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -482,13 +482,16 @@
                 catch (e) { dbError = true; }
             }
             // 당일 입고분 모드: 온라인일 때만 목록 검증(오스캔 차단), 오프라인이면 생략
+            const addLoc = () => { // [Ver 8.56] 위치 큐 추가 (강제추가에서도 재사용)
+                locationQueue.unshift({ barcode: key, location: fixedLocation, name, sub: locSubMode, time: new Date().toTimeString().slice(0, 8) });
+                saveQueues(); renderQueue(); speak('스캔'); resumeScan();
+            };
             if (locSubMode === 'today') {
                 if (!navigator.onLine) { toast('⚠️ 오프라인 · 목록 확인 생략'); }
-                else if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
-                else if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n(오스캔 여부 확인)\n' + key); return; }
+                else if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)\n(' + key + ')', () => addLoc(), '강제추가'); return; } // [Ver 8.56]
+                else if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n(오스캔 여부 확인)\n' + key, () => addLoc(), '강제추가'); return; } // [Ver 8.56] 강제추가로 위치지정 가능
             }
-            locationQueue.unshift({ barcode: key, location: fixedLocation, name, sub: locSubMode, time: new Date().toTimeString().slice(0, 8) });
-            saveQueues(); renderQueue(); speak('스캔'); resumeScan();
+            addLoc();
         }
 
         // [Ver 8.0] 위치 수동 입력 — 스캔이 안 될 때 위치/상품코드를 직접 입력
@@ -508,14 +511,17 @@
                 try { const snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key)); if (snap.exists()) { exists = true; name = snap.data().name || ''; } }
                 catch (e) { dbError = true; }
             }
+            const addLoc = () => { // [Ver 8.56] 위치 큐 추가 (강제추가에서도 재사용)
+                locationQueue.unshift({ barcode: key, location: fixedLocation, name, sub: locSubMode, time: new Date().toTimeString().slice(0, 8) });
+                saveQueues(); renderQueue(); el.value = ''; el.focus();
+                speak('추가'); toast('추가: ' + key);
+            };
             if (locSubMode === 'today') {
                 if (!navigator.onLine) { toast('⚠️ 오프라인 · 목록 확인 생략'); }
-                else if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)'); return; }
-                else if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n' + key); return; }
+                else if (dbError) { showAlert('DB 조회 오류\n(네트워크 확인)\n(' + key + ')', () => addLoc(), '강제추가'); return; } // [Ver 8.56]
+                else if (!exists) { showAlert('당일 입고 목록에 없는 상품입니다.\n' + key, () => addLoc(), '강제추가'); return; } // [Ver 8.56] 강제추가 가능
             }
-            locationQueue.unshift({ barcode: key, location: fixedLocation, name, sub: locSubMode, time: new Date().toTimeString().slice(0, 8) });
-            saveQueues(); renderQueue(); el.value = ''; el.focus();
-            speak('추가'); toast('추가: ' + key);
+            addLoc();
         }
 
         // ---------------- 전송 ----------------
@@ -645,8 +651,8 @@
             if (!q.length) { el.style.display = 'none'; el.innerHTML = ''; updateSendBtn(); return; }
             el.style.display = 'block';
             el.innerHTML = q.map((it, i) => {
-                // [Ver 4.0] 위치 모드: 당일 입고분은 상품명, ScanDB에 없으면 '기존재고' 표시
-                const label = it.name ? it.name : (mode === 'loc' ? '기존재고' : '');
+                // [Ver 4.0] 위치 모드: 당일 입고분은 상품명, ScanDB에 없으면 표시 / [Ver 8.56] 당일입고 강제추가분은 '목록없음'으로 구분
+                const label = it.name ? it.name : (mode === 'loc' ? (it.sub === 'today' ? '⚠️목록없음' : '기존재고') : '');
                 return `
                 <div class="qitem">
                     <div class="qinfo">
@@ -698,13 +704,15 @@
             renderLocBanner(); renderQueue();
         }
 
-        let alertForceAction = null; // [Ver 8.50] 강제전송 콜백 (있으면 강제전송 버튼 노출)
-        function showAlert(msg, forceAction) {
+        let alertForceAction = null; // [Ver 8.50] 강제 진행 콜백 (있으면 강제 버튼 노출)
+        function showAlert(msg, forceAction, forceLabel) {
             speak('오류');
             try { navigator.vibrate([200, 100, 200]); } catch (e) {} // [Ver 8.50] 오류 시 진동
             $('alert-msg').textContent = msg;
             alertForceAction = forceAction || null;
-            $('alert-force').style.display = alertForceAction ? 'block' : 'none';
+            const fb = $('alert-force');
+            fb.textContent = forceLabel || '강제전송'; // [Ver 8.56] 상황별 버튼 라벨(입고=강제전송 / 위치=강제추가)
+            fb.style.display = alertForceAction ? 'block' : 'none';
             $('ov-alert').style.display = 'flex';
         }
 
