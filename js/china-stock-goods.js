@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.58 (당일입고 위치 다운로드: 기존 옵션추가항목1 + 새 위치 병합 - 기존값 유실 방지)
+// 중국제작 미발계산기 Ver 8.59 (당일입고/기존재고 다운로드: db(오더리스트)에 없는 상품 '파일에 없던 상품' 비고 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -319,14 +319,18 @@ async function downloadFloor2() {
 async function downloadLocMove() {
     const rows = lmExistingRows().filter(r => r.location);
     if (!rows.length) { alert('새로 추가된 위치가 없습니다.\n(기존재고 업로드 후 스캐너 "기존재고" 모드로 새 자리를 지정하세요)'); return; }
-    const flagged = rows.filter(r => !r.base).length;
-    if (flagged && !confirm(`⚠️ 파일에 없던 상품 ${flagged}건이 포함되어 있습니다.\n이 상품들은 기존 위치 없이 '스캔한 자리만' 내보내져, 이지어드민의 기존 옵션추가항목1을 덮어쓸 수 있습니다.\n\n그래도 전체 다운로드할까요?`)) return;
+    // [Ver 8.59] '파일에 없던 상품' 판정: 기존값(seed) 없음 OR db(오더리스트)에 없음 — 당일입고와 동일 기준
+    const orderCodes = new Set();
+    [orderDataOriginal, orderDataBuy].forEach(rr => (rr || []).forEach(x => { const c = (x['어드민상품코드'] || x['상품코드'] || '').toString().trim(); if (c) orderCodes.add(c); }));
+    const isMissing = r => !r.base || !orderCodes.has(r.code);
+    const flagged = rows.filter(isMissing).length;
+    if (flagged && !confirm(`⚠️ 오더리스트 또는 기존값에 없던 상품 ${flagged}건이 포함되어 있습니다.\n이 상품들은 기존 옵션추가항목1 없이 '스캔한 자리만' 내보내질 수 있어, 이지어드민의 기존값을 덮어쓸 수 있습니다.\n\n그래도 전체 다운로드할까요?`)) return;
     // [Ver 8.2] 파일에 없던 상품이 있으면 '비고' 열로 별도 표시 (없으면 기존 2열 그대로)
     const hasFlag = flagged > 0;
     const aoa = [hasFlag ? ['상품코드', '옵션추가항목1', '비고'] : ['상품코드', '옵션추가항목1']];
     rows.forEach(r => {
         const row = [r.code, orderLocForDownload(r.location, r.base, newLocPosition)]; // [Ver 8.39] 새 자리를 맨앞/맨뒤로 재배치
-        if (hasFlag) row.push(r.base ? '' : '파일에 없던 상품');
+        if (hasFlag) row.push(isMissing(r) ? '파일에 없던 상품' : '');
         aoa.push(row);
     });
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -339,16 +343,22 @@ async function downloadLocMove() {
 // [Ver 6.9] 당일입고 위치값 다운로드 (현재 표의 상품 + 앱 지정 위치 → 헤더 상품코드/옵션추가항목1, 진짜 .xls)
 async function downloadDayLoc() {
     if (!filteredData.length) return;
-    const aoa = [['상품코드', '옵션추가항목1']];
-    filteredData.forEach(r => {
+    const todayRows = filteredData.filter(r => { const a = locationAssignMap[r.code]; return a && a.location && (a.sub || '') === 'today'; });
+    if (!todayRows.length) { alert('당일 입고분으로 위치가 지정된 상품이 없습니다.\n(스캐너 위치모드 "당일 입고분"으로 지정 후 이용하세요)'); return; }
+    // [Ver 8.59] db(오더리스트)에 없던 상품(강제추가분) → '비고'에 '파일에 없던 상품' 표시 (있을 때만 열 추가)
+    const flagged = todayRows.filter(r => r.unregisteredLoc).length;
+    if (flagged && !confirm(`⚠️ 파일(오더리스트)에 없던 상품 ${flagged}건이 포함되어 있습니다.\n이 상품들은 기존 옵션추가항목1 없이 '스캔한 자리만' 내보내져, 이지어드민의 기존값을 덮어쓸 수 있습니다.\n\n그래도 전체 다운로드할까요?`)) return;
+    const hasFlag = flagged > 0;
+    const aoa = [hasFlag ? ['상품코드', '옵션추가항목1', '비고'] : ['상품코드', '옵션추가항목1']];
+    todayRows.forEach(r => {
         const a = locationAssignMap[r.code];
-        if (!(a && a.location && (a.sub || '') === 'today')) return;
         // [Ver 8.58] 기존 옵션추가항목1(재고로그 값) + 새로 지정한 위치를 병합 (기존값 유실 방지) — 새 자리는 설정에 따라 앞/뒤 배치
         const existing = (stockLogData[r.code] && stockLogData[r.code]['옵션추가항목1']) || '';
         const full = mergeCsvLocs(existing, a.location);
-        aoa.push([r.code, orderLocForDownload(full, existing, newLocPosition)]);
+        const row = [r.code, orderLocForDownload(full, existing, newLocPosition)];
+        if (hasFlag) row.push(r.unregisteredLoc ? '파일에 없던 상품' : '');
+        aoa.push(row);
     });
-    if (aoa.length === 1) { alert('당일 입고분으로 위치가 지정된 상품이 없습니다.\n(스캐너 위치모드 "당일 입고분"으로 지정 후 이용하세요)'); return; }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
@@ -2026,7 +2036,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.58';
+const WEB_VERSION = '8.59';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
