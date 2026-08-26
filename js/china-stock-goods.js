@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.56 (위치지정 당일입고: DB에 없는 상품도 강제추가 버튼으로 위치지정 전송 가능)
+// 중국제작 미발계산기 Ver 8.57 (위치 강제추가한 오더리스트 밖 상품도 당일입고 표/다운로드에 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -944,7 +944,9 @@ function rebuildLocationAssignMap() {
             locationAssignMap[code] = { location: v.location || '', at: v.at, sub: v.sub || '', worker: v.worker || '', base: (v.base !== undefined ? v.base : (v.location || '')) };
         }
     }
-    if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
+    // [Ver 8.56] 위치지정 당일입고: 미등록(강제추가) 위치행도 실시간 반영 + locCheck 갱신
+    if (viewMode === 'location' && savedDates.length > 0) { appendUnregisteredLocation(); applyFilters(); }
+    else if (filteredData.length > 0) renderTable(); // '위치확인' 열 실시간 갱신
     if (viewMode === 'location' && locSubView === 'existing' && !document.querySelector('.lm-edit-input')) renderLocMoveTable(); // 기존재고 인라인 목록 실시간 갱신(편집 중이면 건너뜀)
 }
 function loadLocationHistory() {
@@ -1527,6 +1529,7 @@ function applyDates(opts) {
         };
     }).filter(d => d.arrivalQty > 0);
     appendUnregisteredInbound(); // [Ver 8.52] 오더리스트에 없는데 강제전송된 입고분도 표에 추가
+    appendUnregisteredLocation(); // [Ver 8.56] 위치지정 당일입고 강제추가분도 표에 추가
     applyFilters(); // [Ver 8.52] 검색어/열필터 유지하며 렌더 (기존 filteredData=[...tableData]+renderTable+updateSummary 대체)
     // [Ver 2.8] 표 갱신 시 앱용 스캔DB 자동 동기화
     // (앱 입고 이벤트로 인한 갱신은 앱이 이미 차감했으므로 skipSync로 생략)
@@ -1547,6 +1550,21 @@ function appendUnregisteredInbound() {
         const log = stockLogData[code] || {};
         const loc = (log['로케이션'] || '').split('/')[0].trim() || '미지정';
         tableData.push({ code, name: log['상품명'] || '', option: '', arrivalQty: 0, mibalQty: 0, totalStock: parseInt(log['정상재고']) || 0, location: loc, capacity: getCapacityByLocation(loc), confirmed: qty, shortage: '', directShip: '', memo: '미등록', unregistered: true });
+    });
+}
+
+// [Ver 8.56] 위치지정 당일입고: 오더리스트에 없는데 강제추가로 위치 지정된 상품도 표에 추가 (없으면 웹 당일입고 표/다운로드에서 안 보임)
+function appendUnregisteredLocation() {
+    if (viewMode !== 'location') return;
+    tableData = tableData.filter(d => !d.unregisteredLoc); // 실시간 갱신: 기존 미등록 위치행 제거 후 재계산
+    const orderCodes = new Set();
+    [orderDataOriginal, orderDataBuy].forEach(rows => (rows || []).forEach(r => { const c = (r['어드민상품코드'] || r['상품코드'] || '').toString().trim(); if (c) orderCodes.add(c); }));
+    const inTable = new Set(tableData.map(d => d.code));
+    Object.entries(locationAssignMap).forEach(([code, v]) => {
+        if ((v.sub || '') !== 'today' || !v.location) return;    // 당일입고로 지정된 것만
+        if (inTable.has(code) || orderCodes.has(code)) return;   // 오더리스트/표에 있으면 미등록 아님
+        const log = stockLogData[code] || {};
+        tableData.push({ code, name: log['상품명'] || '', option: '', arrivalQty: 0, mibalQty: 0, totalStock: 0, location: (log['로케이션'] || '').split('/')[0].trim() || '', capacity: 0, confirmed: '', shortage: '', directShip: '', memo: '미등록', unregistered: true, unregisteredLoc: true });
     });
 }
 
@@ -1995,7 +2013,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.56';
+const WEB_VERSION = '8.57';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
