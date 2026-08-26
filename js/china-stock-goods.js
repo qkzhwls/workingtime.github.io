@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.54 (미발예측 입고일: 여러 전송 중 채워진 입고일 우선 - 재전송 반영 안되던 버그 수정)
+// 중국제작 미발계산기 Ver 8.55 (입고확인 vs 도착수량: 과입고 빨강/부족 노랑 강조 - 확인 필요 상품 표시)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1698,8 +1698,16 @@ function renderTable() {
             const val = colValue(key, row, idx);
             if (def.edit) {
                 let style = key === 'capacity' ? 'background:#e3f2fd;' : '';
-                if (key === 'confirmed' && isFromApp) style += 'color:#1976d2; font-weight:900;';
-                tds += `<td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="${def.edit}" style="${style}">${val}</td>`;
+                let extra = '';
+                if (key === 'confirmed') {
+                    // [Ver 8.55] 입고확인 누적과 도착수량 비교 → 과입고(빨강)/부족(노랑) 강조 (미입력은 표시 안 함)
+                    const conf = parseInt(row.confirmed);
+                    const arr = parseInt(row.arrivalQty) || 0;
+                    if (!isNaN(conf) && conf > arr) { style += 'background:#ffcdd2; color:#b71c1c; font-weight:900;'; extra = ' title="입고확인 > 도착수량 (과입고) — 입고 수량 확인 필요"'; }
+                    else if (!isNaN(conf) && conf > 0 && conf < arr) { style += 'background:#fff59d; color:#6d4c00; font-weight:900;'; extra = ' title="입고확인 < 도착수량 (부족) — 입고 수량 확인 필요"'; }
+                    else if (isFromApp) style += 'color:#1976d2; font-weight:900;';
+                }
+                tds += `<td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="${def.edit}" style="${style}"${extra}>${val}</td>`;
             } else if (def.code) {
                 tds += `<td class="code-cell" data-code="${row.code}">${val}</td>`;
             } else {
@@ -1987,7 +1995,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.54';
+const WEB_VERSION = '8.55';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
