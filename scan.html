@@ -129,25 +129,17 @@
 
     <div class="send-bar"><button class="btn-send" id="btn-send" disabled>전송하기 (0)</button></div>
 
-    <!-- 입고 선택 모달 -->
+    <!-- 입고 선택 모달 (수량: 십/일 자리 선택, 일의자리 누르면 자동 확정) -->
     <div class="overlay" id="ov-select"><div class="modal">
         <div class="m-code" id="sel-code"></div>
         <div class="m-loc" id="sel-loc"></div>
         <div class="m-remain">미발수량: <b id="sel-remain">0</b></div>
-        <button class="m-btn" id="sel-qty-btn"></button>
-        <button class="m-btn outline" id="sel-manual">직접 입력</button>
-        <button class="m-btn gray" id="sel-cancel">취소</button>
-    </div></div>
-
-    <!-- 수량 입력 모달 (십/일 자리 조합, 일의자리 선택 시 자동 확정) -->
-    <div class="overlay" id="ov-num"><div class="modal">
-        <div style="font-weight:800; margin-bottom:8px;" id="num-title"></div>
-        <div class="num-display" id="num-display">0</div>
+        <div class="num-display" id="num-display" style="margin-top:8px;">0</div>
         <div class="qty-sel-label">십의 자리 (한 자리 수량이면 건너뛰세요)</div>
         <div class="qty-sel" id="qty-tens"></div>
         <div class="qty-sel-label">일의 자리 (누르면 바로 추가)</div>
         <div class="qty-sel" id="qty-ones"></div>
-        <button class="m-btn gray" id="num-cancel">취소</button>
+        <button class="m-btn gray" id="sel-cancel">취소</button>
     </div></div>
 
     <!-- 알림 모달 -->
@@ -176,7 +168,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.68'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.69'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -403,7 +395,7 @@
             if (/^[0-9]+$/.test(key)) key = 'S' + key;
             // [Ver 8.48] 음수 방지(입고 초과분) / d 없을 때(미등록·DB오류 강제전송)는 빈 값으로 진행
             const buildItem = (d) => ({ code: key, name: (d && d.name) || '', location: (d && d.location) || '미지정', arrivalQty: Math.max(parseInt(d && d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d && d.mibalQty) || 0, 0) });
-            const proceedWith = (d) => { const item = buildItem(d); if (directQty) showNumpad(item); else showSelect(item); };
+            const proceedWith = (d) => showSelect(buildItem(d));
             const forceProceed = (d) => { registerForceAllow(key); proceedWith(d); }; // [Ver 8.51] 강제전송 → 허용목록 등록 후 정상 입고 진행
 
             let snap;
@@ -428,7 +420,9 @@
             $('sel-code').textContent = item.code;
             $('sel-loc').textContent = item.location;
             $('sel-remain').textContent = item.mibalQty;
-            $('sel-qty-btn').textContent = item.arrivalQty + '개';
+            qtyTens = 0;
+            $('num-display').textContent = '0';
+            document.querySelectorAll('#qty-tens button').forEach(b => b.classList.toggle('sel', b.dataset.d === '0')); // 십의자리 0으로 초기화
             $('ov-select').style.display = 'flex';
         }
         function closeSelect() { $('ov-select').style.display = 'none'; }
@@ -438,15 +432,8 @@
             saveQueues(); renderQueue(); speak(qty + '개');
         }
 
-        // [Ver 8.68] 수량 입력: 십의자리 선택 → 일의자리 선택(자동 확정)으로 탭 수 최소화
+        // [Ver 8.69] 스캔 팝업에 십/일 자리 선택 표시 (일의자리 누르면 자동 확정 → 큐 추가)
         let qtyTens = 0;
-        function showNumpad(item) {
-            currentItem = item; qtyTens = 0;
-            $('num-title').textContent = item.code + ' 수량 선택';
-            $('num-display').textContent = '0';
-            document.querySelectorAll('#qty-tens button').forEach(b => b.classList.toggle('sel', b.dataset.d === '0')); // 십의자리 0으로 초기화
-            $('ov-num').style.display = 'flex';
-        }
         function buildQtySelector() {
             const tens = $('qty-tens'), ones = $('qty-ones');
             for (let i = 0; i <= 9; i++) {
@@ -454,7 +441,7 @@
                 bt.onclick = () => { qtyTens = i; document.querySelectorAll('#qty-tens button').forEach(x => x.classList.toggle('sel', x === bt)); $('num-display').textContent = String(qtyTens * 10); };
                 tens.appendChild(bt);
                 const bo = document.createElement('button'); bo.textContent = i; bo.dataset.d = String(i);
-                bo.onclick = () => { const qty = qtyTens * 10 + i; $('num-display').textContent = String(qty); if (qty > 0) { $('ov-num').style.display = 'none'; addInbound(currentItem, qty, '직접입력'); resumeScan(); } };
+                bo.onclick = () => { const qty = qtyTens * 10 + i; $('num-display').textContent = String(qty); if (qty > 0) { closeSelect(); addInbound(currentItem, qty, '직접입력'); resumeScan(); } };
                 ones.appendChild(bo);
             }
         }
@@ -762,11 +749,7 @@
         document.querySelectorAll('#loc-submode button').forEach(btn => btn.onclick = () => setLocSubMode(btn.dataset.sub));
         $('btn-send').onclick = () => mode === 'in' ? sendInbound() : sendLocation();
 
-        $('sel-qty-btn').onclick = () => { closeSelect(); addInbound(currentItem, currentItem.arrivalQty, '도착예정분'); resumeScan(); };
-        $('sel-manual').onclick = () => { closeSelect(); showNumpad(currentItem); };
         $('sel-cancel').onclick = () => { closeSelect(); resumeScan(); };
-
-        $('num-cancel').onclick = () => { $('ov-num').style.display = 'none'; resumeScan(); };
         $('alert-ok').onclick = () => { $('ov-alert').style.display = 'none'; alertForceAction = null; resumeScan(); };
         $('alert-force').onclick = () => { const act = alertForceAction; alertForceAction = null; $('ov-alert').style.display = 'none'; if (act) act(); }; // [Ver 8.50] 강제전송 → 정상 입고 단계로
 
