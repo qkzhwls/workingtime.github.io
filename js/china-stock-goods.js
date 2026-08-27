@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.75 (당일입고지정 목록을 비축창고(FLOOR2)에 들어가는 상품만으로 필터)
+// 중국제작 미발계산기 Ver 8.76 (당일입고지정 목록에 이미 위치 지정된 상품 유지 — 미발 초기화로 FLOOR2 지워져도 보존)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1918,8 +1918,14 @@ function applyFilters() {
         return true;
     });
     // [Ver 8.75] 당일입고지정: 비축창고(FLOOR2_STOCK)에 실제 들어가는 상품만 (미발계산기 목록과 분리) — 강제추가분은 유지
+    // [Ver 8.76] + 이미 당일 위치가 지정된 상품도 유지 → 미발 초기화로 FLOOR2가 지워져도 작업분이 사라지지 않게 (위치 데이터는 미발 초기화 시 보존됨)
     if (viewMode === 'location' && locSubView === 'today') {
-        filteredData = filteredData.filter(d => d.unregisteredLoc || (floor2Map[d.code] || 0) > 0);
+        filteredData = filteredData.filter(d => {
+            if (d.unregisteredLoc) return true;
+            if ((floor2Map[d.code] || 0) > 0) return true;
+            const a = locationAssignMap[d.code];
+            return !!(a && (a.sub || '') === 'today' && a.location);
+        });
     }
     if (sortConfig.key) filteredData.sort(sortComparator());
     renderTable(); updateSummary();
@@ -2118,7 +2124,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.75';
+const WEB_VERSION = '8.76';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
