@@ -104,7 +104,7 @@
     <!-- [Ver 8.0] 위치모드 수동 입력 (스캔이 안 될 때) -->
     <div id="loc-manual" style="display:none; flex-direction:column; gap:6px; padding:8px 10px; background:#f4f6f8;">
         <div style="display:flex; gap:6px;">
-            <input id="manual-loc" placeholder="위치 입력 (숫자만: 155 → 비축-155)" autocapitalize="characters" style="flex:1; min-width:0; padding:9px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px;">
+            <input id="manual-loc" placeholder="위치 입력 (A1R→A-1-R, 155→비축-155)" autocapitalize="characters" style="flex:1; min-width:0; padding:9px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px;">
             <button id="btn-manual-loc" style="padding:9px 14px; border:none; background:#455a64; color:#fff; border-radius:8px; font-weight:800; white-space:nowrap;">위치설정</button>
         </div>
         <div style="display:flex; gap:6px;">
@@ -179,7 +179,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.72'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.73'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -503,14 +503,24 @@
             el.value = '';
             onScan(v.toUpperCase());
         }
-        // [Ver 8.72] 위치 직접입력 정규화: 숫자만 → 비축-155, 비축155/비축 155 → 비축-155, 그 외 문자 포함 → 대문자 그대로(예: a-2-375 → A-2-375)
+        // [Ver 8.73] 위치 직접입력을 위치매핑(LOCATION_MAP) 등록값 형식에 맞춰 정규화
+        //  - 구분자 없이 입력해도 등록된 형식대로 조립 (예: A1R → A-1-R, 비축155 → 비축-155)
+        //  - 숫자만이면 기본 예약존 '비축-' 부착
+        function activeLocMap() { return locMapOverride || (typeof barcodeMap !== 'undefined' ? barcodeMap : {}); }
+        function stripLoc(s) { return String(s || '').toUpperCase().replace(/[\s-]/g, ''); }
         function normalizeManualLoc(v) {
             v = (v || '').trim();
             if (!v) return '';
-            if (/^\d+$/.test(v)) return '비축-' + v;              // 숫자만
-            const m = v.match(/^비축\s*-?\s*(\d+)$/);             // 비축155 / 비축 155 / 비축-155
-            if (m) return '비축-' + m[1];
-            return v.toUpperCase();                               // 다른 존은 쓴 그대로(영문 대문자화)
+            // 등록된 위치값들을 '구분자 제거 키 → 원본 형식'으로 색인
+            const idx = {}, m = activeLocMap();
+            for (const k in m) { const val = m[k]; if (val) { const sk = stripLoc(val); if (sk && !(sk in idx)) idx[sk] = val; } }
+            const key = stripLoc(v);
+            if (idx[key]) return idx[key];                        // 등록 형식에 매칭 (A1R → A-1-R, 비축155 → 비축-155)
+            if (/^\d+$/.test(v)) {                                // 숫자만
+                if (idx['비축' + key]) return idx['비축' + key];  // '비축-155' 등록돼 있으면 그 형식
+                return '비축-' + v;                               // 기본 예약존
+            }
+            return v.toUpperCase();                               // 미등록 형식은 쓴 그대로(영문 대문자화)
         }
         function manualSetLocation() {
             const el = $('manual-loc'); const v = normalizeManualLoc(el.value);
