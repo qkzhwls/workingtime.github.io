@@ -104,7 +104,7 @@
     <!-- [Ver 8.0] 위치모드 수동 입력 (스캔이 안 될 때) -->
     <div id="loc-manual" style="display:none; flex-direction:column; gap:6px; padding:8px 10px; background:#f4f6f8;">
         <div style="display:flex; gap:6px;">
-            <input id="manual-loc" placeholder="위치 직접 입력 (예: 비축-155)" autocapitalize="characters" style="flex:1; min-width:0; padding:9px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px;">
+            <input id="manual-loc" placeholder="위치 입력 (숫자만: 155 → 비축-155)" autocapitalize="characters" style="flex:1; min-width:0; padding:9px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px;">
             <button id="btn-manual-loc" style="padding:9px 14px; border:none; background:#455a64; color:#fff; border-radius:8px; font-weight:800; white-space:nowrap;">위치설정</button>
         </div>
         <div style="display:flex; gap:6px;">
@@ -179,7 +179,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.71'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.72'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -503,8 +503,17 @@
             el.value = '';
             onScan(v.toUpperCase());
         }
+        // [Ver 8.72] 위치 직접입력 정규화: 숫자만 → 비축-155, 비축155/비축 155 → 비축-155, 그 외 문자 포함 → 대문자 그대로(예: a-2-375 → A-2-375)
+        function normalizeManualLoc(v) {
+            v = (v || '').trim();
+            if (!v) return '';
+            if (/^\d+$/.test(v)) return '비축-' + v;              // 숫자만
+            const m = v.match(/^비축\s*-?\s*(\d+)$/);             // 비축155 / 비축 155 / 비축-155
+            if (m) return '비축-' + m[1];
+            return v.toUpperCase();                               // 다른 존은 쓴 그대로(영문 대문자화)
+        }
         function manualSetLocation() {
-            const el = $('manual-loc'); const v = (el.value || '').trim();
+            const el = $('manual-loc'); const v = normalizeManualLoc(el.value);
             if (!v) return;
             fixedLocation = v; renderLocBanner(); el.value = '';
             speak('위치 설정'); toast('위치 설정: ' + v);
