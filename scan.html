@@ -136,7 +136,7 @@
         <div class="m-remain">미발수량: <b id="sel-remain">0</b></div>
         <div class="num-display" id="num-display" style="margin-top:8px;">0</div>
         <div class="qty-sel-label">십의 자리 (한 자리 수량이면 건너뛰세요)</div>
-        <div class="qty-sel" id="qty-tens"></div>
+        <div class="qty-sel" id="qty-tens" style="grid-template-columns: repeat(2, 1fr);"></div>
         <div class="qty-sel-label">일의 자리 (누르면 바로 추가)</div>
         <div class="qty-sel" id="qty-ones"></div>
         <button class="m-btn gray" id="sel-cancel">취소</button>
@@ -168,7 +168,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.69'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.70'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -422,7 +422,7 @@
             $('sel-remain').textContent = item.mibalQty;
             qtyTens = 0;
             $('num-display').textContent = '0';
-            document.querySelectorAll('#qty-tens button').forEach(b => b.classList.toggle('sel', b.dataset.d === '0')); // 십의자리 0으로 초기화
+            document.querySelectorAll('#qty-tens button').forEach(b => b.classList.remove('sel')); // 십의자리 선택 해제(기본=한 자리)
             $('ov-select').style.display = 'flex';
         }
         function closeSelect() { $('ov-select').style.display = 'none'; }
@@ -436,10 +436,18 @@
         let qtyTens = 0;
         function buildQtySelector() {
             const tens = $('qty-tens'), ones = $('qty-ones');
-            for (let i = 0; i <= 9; i++) {
+            // 십의 자리: 1, 2 만 (한 자리 수량은 일의자리만 누르면 됨). 같은 버튼 다시 누르면 해제.
+            [1, 2].forEach(i => {
                 const bt = document.createElement('button'); bt.textContent = i; bt.dataset.d = String(i);
-                bt.onclick = () => { qtyTens = i; document.querySelectorAll('#qty-tens button').forEach(x => x.classList.toggle('sel', x === bt)); $('num-display').textContent = String(qtyTens * 10); };
+                bt.onclick = () => {
+                    const already = qtyTens === i;
+                    qtyTens = already ? 0 : i;
+                    document.querySelectorAll('#qty-tens button').forEach(x => x.classList.toggle('sel', !already && x === bt));
+                    $('num-display').textContent = String(qtyTens * 10);
+                };
                 tens.appendChild(bt);
+            });
+            for (let i = 0; i <= 9; i++) {
                 const bo = document.createElement('button'); bo.textContent = i; bo.dataset.d = String(i);
                 bo.onclick = () => { const qty = qtyTens * 10 + i; $('num-display').textContent = String(qty); if (qty > 0) { closeSelect(); addInbound(currentItem, qty, '직접입력'); resumeScan(); } };
                 ones.appendChild(bo);
