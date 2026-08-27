@@ -109,12 +109,6 @@
         </div>
     </div>
 
-    <!-- [Ver 8.66] 하드웨어 스캐너(PM3 등 블루투스 HID) 입력 캡처창 — 항상 포커스 유지 -->
-    <div id="hw-row" style="padding:8px 10px 0;">
-        <input id="hw-input" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="🔫 스캐너 입력창 — PM3로 스캔하세요" style="width:100%; padding:11px; border:2px solid #00695c; border-radius:8px; font-size:14px; box-sizing:border-box; text-align:center; color:#00695c; font-weight:700; background:#e0f2f1;">
-        <div style="font-size:11px; color:#78909c; text-align:center; margin-top:4px;">이 창이 파랗게 활성화된 상태에서 방아쇠를 당기면 인식됩니다 (카메라 불필요).</div>
-    </div>
-
     <div class="scan-wrap">
         <div id="reader"></div>
         <button class="btn-start" id="btn-start">📷 스캔 시작</button>
@@ -176,7 +170,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.66'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.67'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -764,42 +758,6 @@
         // [Ver 4.1] 위치 세부 작업 선택
         document.querySelectorAll('#loc-submode button').forEach(btn => btn.onclick = () => setLocSubMode(btn.dataset.sub));
         $('btn-send').onclick = () => mode === 'in' ? sendInbound() : sendLocation();
-
-        // [Ver 8.65] 하드웨어 바코드 스캐너(키보드 웨지) 입력 캡처 — PM3 등: 방아쇠 스캔값을 빠르게 타이핑+Enter로 전송
-        let hwBuf = '', hwLast = 0;
-        document.addEventListener('keydown', (e) => {
-            const t = e.target;
-            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return; // 입력창 타이핑은 방해 안 함
-            const now = Date.now();
-            if (now - hwLast > 120) hwBuf = ''; // 키 간격이 크면(사람 타이핑) 새 스캔으로 간주 → 버퍼 초기화
-            hwLast = now;
-            if (e.key === 'Enter') {
-                const code = hwBuf.trim(); hwBuf = '';
-                if (code.length >= 3) { e.preventDefault(); onScan(code); }
-                return;
-            }
-            if (e.key.length === 1) hwBuf += e.key; // 인쇄 가능한 1글자만 누적
-        });
-
-        // [Ver 8.66] 모바일 블루투스 HID 스캐너(PM3) 대응: 항상 포커스되는 스캐너 입력창으로 확실히 캡처
-        //  - 모바일 크롬은 포커스된 입력창이 없으면 하드웨어 키를 페이지에 전달하지 않음 → 전용 입력창 필요
-        const hwInput = $('hw-input');
-        let hwIdle = null;
-        function isTypingField(el) { return el && ((el.tagName === 'INPUT' && el !== hwInput) || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable); }
-        function focusHw() { try { if (document.activeElement !== hwInput && !isTypingField(document.activeElement)) hwInput.focus({ preventScroll: true }); } catch (e) {} }
-        function hwFire() {
-            clearTimeout(hwIdle);
-            const code = (hwInput.value || '').trim();
-            hwInput.value = '';
-            if (code.length >= 2) onScan(code);
-        }
-        hwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); hwFire(); } });
-        hwInput.addEventListener('input', () => { clearTimeout(hwIdle); hwIdle = setTimeout(hwFire, 160); }); // Enter 접미가 없어도 입력이 끊기면 전송
-        // 다른 입력창/버튼을 만지지 않을 때 스캐너 입력창에 포커스 유지 (스캔→다이얼로그→스캔 반복 대응)
-        document.addEventListener('click', (e) => { if (!e.target.closest('input, textarea, select, button, label, .m-btn')) setTimeout(focusHw, 30); });
-        window.addEventListener('focus', () => setTimeout(focusHw, 60));
-        setInterval(focusHw, 800);
-        setTimeout(focusHw, 400);
 
         $('sel-qty-btn').onclick = () => { closeSelect(); addInbound(currentItem, currentItem.arrivalQty, '도착예정분'); resumeScan(); };
         $('sel-manual').onclick = () => { closeSelect(); showNumpad(currentItem); };
