@@ -113,6 +113,17 @@
         </div>
     </div>
 
+    <!-- [Ver 8.71] 입고모드 수동입력 토글 (바코드 스캔이 안 될 때) -->
+    <div id="in-manual-row" style="display:none; padding:6px 10px 0; background:#f4f6f8;">
+        <button id="btn-in-manual-toggle" style="width:100%; padding:9px; border:1px dashed #90a4ae; background:#fff; color:#455a64; border-radius:8px; font-weight:800; cursor:pointer;">⌨️ 수동입력</button>
+    </div>
+    <div id="in-manual" style="display:none; padding:8px 10px; background:#f4f6f8;">
+        <div style="display:flex; gap:6px;">
+            <input id="in-manual-code" placeholder="상품코드/바코드 직접 입력 (예: S123456)" autocapitalize="characters" autocomplete="off" style="flex:1; min-width:0; padding:9px; border:1px solid #cfd8dc; border-radius:8px; font-size:14px;">
+            <button id="btn-in-manual-code" style="padding:9px 14px; border:none; background:#1976d2; color:#fff; border-radius:8px; font-weight:800; white-space:nowrap;">확인</button>
+        </div>
+    </div>
+
     <div class="scan-wrap">
         <div id="reader"></div>
         <button class="btn-start" id="btn-start">📷 스캔 시작</button>
@@ -168,7 +179,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.70'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.71'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -485,6 +496,13 @@
         }
 
         // [Ver 8.0] 위치 수동 입력 — 스캔이 안 될 때 위치/상품코드를 직접 입력
+        // [Ver 8.71] 입고모드 수동입력: 스캔과 동일하게 onScan으로 넘김 → processInbound → 수량 선택 팝업
+        function inManualSubmit() {
+            const el = $('in-manual-code'); const v = (el.value || '').trim();
+            if (!v) return;
+            el.value = '';
+            onScan(v.toUpperCase());
+        }
         function manualSetLocation() {
             const el = $('manual-loc'); const v = (el.value || '').trim();
             if (!v) return;
@@ -673,6 +691,9 @@
             $('loc-manual-row').style.display = m === 'loc' ? 'block' : 'none'; // [Ver 8.1] 수동입력 토글 버튼
             $('loc-manual').style.display = 'none'; // 토글로만 열림 (모드 전환 시 닫음)
             const mt = $('btn-manual-toggle'); if (mt) { mt.textContent = '⌨️ 수동입력'; mt.style.background = '#fff'; }
+            $('in-manual-row').style.display = m === 'in' ? 'block' : 'none'; // [Ver 8.71] 입고모드 수동입력 토글
+            $('in-manual').style.display = 'none';
+            const it = $('btn-in-manual-toggle'); if (it) { it.textContent = '⌨️ 수동입력'; it.style.background = '#fff'; }
             const theme = m === 'in' ? '#1976d2' : '#2e7d32';
             document.querySelector('.tabs').style.background = theme;
             $('btn-send').style.background = '';
@@ -738,6 +759,16 @@
         $('manual-loc').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); manualSetLocation(); } });
         $('btn-manual-code').onclick = manualAddProduct;
         $('manual-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); manualAddProduct(); } });
+        // [Ver 8.71] 입고모드 수동입력
+        $('btn-in-manual-toggle').onclick = () => {
+            const open = $('in-manual').style.display !== 'block';
+            $('in-manual').style.display = open ? 'block' : 'none';
+            $('btn-in-manual-toggle').textContent = open ? '⌨️ 수동입력 닫기' : '⌨️ 수동입력';
+            $('btn-in-manual-toggle').style.background = open ? '#eceff1' : '#fff';
+            if (open) $('in-manual-code').focus();
+        };
+        $('btn-in-manual-code').onclick = inManualSubmit;
+        $('in-manual-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); inManualSubmit(); } });
         // [Ver 8.1] 오프라인 감지 표시
         function updateNet() { const b = $('offline-bar'); if (b) b.style.display = navigator.onLine ? 'none' : 'block'; }
         window.addEventListener('online', updateNet);
