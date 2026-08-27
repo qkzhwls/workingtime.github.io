@@ -64,6 +64,10 @@
         .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
         .numpad button { height: 52px; font-size: 20px; font-weight: 800; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
         .num-display { border: 2px solid #1976d2; border-radius: 8px; padding: 10px; font-size: 30px; font-weight: 900; text-align: right; }
+        .qty-sel-label { font-size: 13px; font-weight: 800; color: #555; margin: 12px 0 5px; text-align: left; }
+        .qty-sel { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+        .qty-sel button { height: 52px; font-size: 22px; font-weight: 800; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
+        .qty-sel button.sel { background: #1976d2; color: #fff; border-color: #1976d2; }
         .set-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; font-size: 14px; font-weight: bold; gap: 8px; }
         .set-row input[type="text"] { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 12px; }
         .set-row input[type="checkbox"] { width: 22px; height: 22px; }
@@ -135,12 +139,14 @@
         <button class="m-btn gray" id="sel-cancel">취소</button>
     </div></div>
 
-    <!-- 수량 입력 모달 -->
+    <!-- 수량 입력 모달 (십/일 자리 조합, 일의자리 선택 시 자동 확정) -->
     <div class="overlay" id="ov-num"><div class="modal">
         <div style="font-weight:800; margin-bottom:8px;" id="num-title"></div>
         <div class="num-display" id="num-display">0</div>
-        <div class="numpad" id="numpad"></div>
-        <button class="m-btn" id="num-ok">확인</button>
+        <div class="qty-sel-label">십의 자리 (한 자리 수량이면 건너뛰세요)</div>
+        <div class="qty-sel" id="qty-tens"></div>
+        <div class="qty-sel-label">일의 자리 (누르면 바로 추가)</div>
+        <div class="qty-sel" id="qty-ones"></div>
         <button class="m-btn gray" id="num-cancel">취소</button>
     </div></div>
 
@@ -170,7 +176,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.67'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.68'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -432,28 +438,25 @@
             saveQueues(); renderQueue(); speak(qty + '개');
         }
 
-        // 수량 넘패드
-        let numInput = '';
+        // [Ver 8.68] 수량 입력: 십의자리 선택 → 일의자리 선택(자동 확정)으로 탭 수 최소화
+        let qtyTens = 0;
         function showNumpad(item) {
-            currentItem = item; numInput = '';
-            $('num-title').textContent = item.code + ' 수량 입력';
+            currentItem = item; qtyTens = 0;
+            $('num-title').textContent = item.code + ' 수량 선택';
             $('num-display').textContent = '0';
+            document.querySelectorAll('#qty-tens button').forEach(b => b.classList.toggle('sel', b.dataset.d === '0')); // 십의자리 0으로 초기화
             $('ov-num').style.display = 'flex';
         }
-        function buildNumpad() {
-            const pad = $('numpad');
-            const keys = ['1','2','3','4','5','6','7','8','9','C','0','⌫'];
-            keys.forEach(k => {
-                const b = document.createElement('button');
-                b.textContent = k;
-                b.onclick = () => {
-                    if (k === 'C') numInput = '';
-                    else if (k === '⌫') numInput = numInput.slice(0, -1);
-                    else if (numInput.length < 5) numInput += k;
-                    $('num-display').textContent = numInput || '0';
-                };
-                pad.appendChild(b);
-            });
+        function buildQtySelector() {
+            const tens = $('qty-tens'), ones = $('qty-ones');
+            for (let i = 0; i <= 9; i++) {
+                const bt = document.createElement('button'); bt.textContent = i; bt.dataset.d = String(i);
+                bt.onclick = () => { qtyTens = i; document.querySelectorAll('#qty-tens button').forEach(x => x.classList.toggle('sel', x === bt)); $('num-display').textContent = String(qtyTens * 10); };
+                tens.appendChild(bt);
+                const bo = document.createElement('button'); bo.textContent = i; bo.dataset.d = String(i);
+                bo.onclick = () => { const qty = qtyTens * 10 + i; $('num-display').textContent = String(qty); if (qty > 0) { $('ov-num').style.display = 'none'; addInbound(currentItem, qty, '직접입력'); resumeScan(); } };
+                ones.appendChild(bo);
+            }
         }
 
         // ---------------- 위치 모드 ----------------
@@ -763,10 +766,6 @@
         $('sel-manual').onclick = () => { closeSelect(); showNumpad(currentItem); };
         $('sel-cancel').onclick = () => { closeSelect(); resumeScan(); };
 
-        $('num-ok').onclick = () => {
-            const v = parseInt(numInput);
-            if (v > 0) { $('ov-num').style.display = 'none'; addInbound(currentItem, v, '직접입력'); resumeScan(); }
-        };
         $('num-cancel').onclick = () => { $('ov-num').style.display = 'none'; resumeScan(); };
         $('alert-ok').onclick = () => { $('ov-alert').style.display = 'none'; alertForceAction = null; resumeScan(); };
         $('alert-force').onclick = () => { const act = alertForceAction; alertForceAction = null; $('ov-alert').style.display = 'none'; if (act) act(); }; // [Ver 8.50] 강제전송 → 정상 입고 단계로
@@ -785,7 +784,7 @@
         loadLocationMap(); // [Ver 5.8] 위치 매핑 로드
         loadBarcodeMap(); // [Ver 8.3] 바코드→상품코드 맵 로드
         subscribeForceAllow(); // [Ver 8.50] 강제전송 허용목록 실시간 구독
-        buildNumpad();
+        buildQtySelector();
         $('status-line').textContent = `v${SCAN_VERSION} · 서버: ${serverLabel}`;
         setLocSubMode(locSubMode); // [Ver 4.1] 저장된 세부 작업 복원
         setMode(mode);
