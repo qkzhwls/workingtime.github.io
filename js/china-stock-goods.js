@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.74 (scan.html 위치모드 수동 상품코드 S 자동부착에 맞춰 웹 버전 동기화)
+// 중국제작 미발계산기 Ver 8.75 (당일입고지정 목록을 비축창고(FLOOR2)에 들어가는 상품만으로 필터)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -982,6 +982,20 @@ function loadLocationHistory() {
     }
 }
 
+// [Ver 8.75] 비축창고(FLOOR2_STOCK) 상시 구독 — 당일입고지정 목록을 '비축에 실제 들어가는 상품'으로 필터
+//   floor2Map[code] = 비축 수량(>0). '비축창고 엑셀저장' 다운로드와 동일한 데이터.
+let floor2Map = {};
+let floor2Subscribed = false;
+function ensureFloor2() { if (!floor2Subscribed) { floor2Subscribed = true; loadFloor2(); } }
+function loadFloor2() {
+    onSnapshot(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'), (snap) => {
+        const map = (snap.exists() && snap.data() && snap.data().map) ? snap.data().map : {};
+        floor2Map = {};
+        for (const code in map) { const q = parseInt(map[code] && map[code].floor2) || 0; if (q > 0) floor2Map[code] = q; }
+        if (viewMode === 'location' && locSubView === 'today') applyFilters(); // 당일입고지정 목록 실시간 갱신
+    });
+}
+
 async function syncOrderData(silent = false) {
     if (!csvUrlOrder && !csvUrlBuy) return;
     if(!silent) showLoading('🔄 오더리스트 동기화 중...');
@@ -1712,7 +1726,7 @@ function applyViewMode() {
     if (title) title.style.color = viewMode === 'location' ? '#6a1b9a' : '#333';
     const clr = document.getElementById('btn-date-clear'); // [Ver 7.4] 모드별 초기화 라벨
     if (clr) clr.textContent = viewMode === 'location' ? '🗑️ 위치 초기화' : '🗑️ 미발 초기화';
-    if (viewMode === 'location') { ensureLocationHistory(); applyLocSub(); } else renderTable();
+    if (viewMode === 'location') { ensureLocationHistory(); ensureFloor2(); applyLocSub(); } else renderTable();
 }
 function applyLocSub() {
     document.body.dataset.locsub = locSubView;
@@ -1723,7 +1737,7 @@ function applyLocSub() {
         b.style.boxShadow = on ? 'none' : 'inset 0 0 0 1px #b39ddb';
     });
     if (locSubView === 'existing') { renderLocMoveTable(); renderNewLocPosToggle(); } // 기존재고 인라인 목록
-    else renderTable(); // 당일입고 상품표(위치확인 열)
+    else applyFilters(); // 당일입고 상품표(위치확인 열) — [Ver 8.75] 비축 대상 필터 재적용
 }
 // [Ver 8.38] 새 위치 앞/뒤 토글 (기존재고지정) → CONFIG.newLocPosition 저장, 스캐너가 병합 순서로 사용
 function renderNewLocPosToggle() {
@@ -1903,6 +1917,10 @@ function applyFilters() {
         for (const key in columnFilters) { const set = columnFilters[key]; if (set && !set.has(filterValueOf(d, key))) return false; }
         return true;
     });
+    // [Ver 8.75] 당일입고지정: 비축창고(FLOOR2_STOCK)에 실제 들어가는 상품만 (미발계산기 목록과 분리) — 강제추가분은 유지
+    if (viewMode === 'location' && locSubView === 'today') {
+        filteredData = filteredData.filter(d => d.unregisteredLoc || (floor2Map[d.code] || 0) > 0);
+    }
     if (sortConfig.key) filteredData.sort(sortComparator());
     renderTable(); updateSummary();
 }
@@ -2100,7 +2118,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.74';
+const WEB_VERSION = '8.75';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
