@@ -109,6 +109,9 @@
         </div>
     </div>
 
+    <!-- [Ver 8.65] 하드웨어 스캐너(PM3 등) 안내 -->
+    <div id="hw-hint" style="padding:6px 10px 0; font-size:11px; color:#78909c; text-align:center;">🔫 PM3 등 하드웨어 스캐너는 방아쇠만 당기면 바로 인식됩니다 (카메라 불필요)</div>
+
     <div class="scan-wrap">
         <div id="reader"></div>
         <button class="btn-start" id="btn-start">📷 스캔 시작</button>
@@ -170,7 +173,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.64'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.65'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -758,6 +761,22 @@
         // [Ver 4.1] 위치 세부 작업 선택
         document.querySelectorAll('#loc-submode button').forEach(btn => btn.onclick = () => setLocSubMode(btn.dataset.sub));
         $('btn-send').onclick = () => mode === 'in' ? sendInbound() : sendLocation();
+
+        // [Ver 8.65] 하드웨어 바코드 스캐너(키보드 웨지) 입력 캡처 — PM3 등: 방아쇠 스캔값을 빠르게 타이핑+Enter로 전송
+        let hwBuf = '', hwLast = 0;
+        document.addEventListener('keydown', (e) => {
+            const t = e.target;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return; // 입력창 타이핑은 방해 안 함
+            const now = Date.now();
+            if (now - hwLast > 120) hwBuf = ''; // 키 간격이 크면(사람 타이핑) 새 스캔으로 간주 → 버퍼 초기화
+            hwLast = now;
+            if (e.key === 'Enter') {
+                const code = hwBuf.trim(); hwBuf = '';
+                if (code.length >= 3) { e.preventDefault(); onScan(code); }
+                return;
+            }
+            if (e.key.length === 1) hwBuf += e.key; // 인쇄 가능한 1글자만 누적
+        });
 
         $('sel-qty-btn').onclick = () => { closeSelect(); addInbound(currentItem, currentItem.arrivalQty, '도착예정분'); resumeScan(); };
         $('sel-manual').onclick = () => { closeSelect(); showNumpad(currentItem); };
