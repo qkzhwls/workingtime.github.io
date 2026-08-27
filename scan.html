@@ -109,20 +109,6 @@
         </div>
     </div>
 
-    <!-- [Ver 8.63] 음성인식 입력 (테스트: 숫자를 불러 상품코드 입력, 카메라 스캔과 동일 처리) -->
-    <div id="voice-row" style="padding:6px 10px 0;">
-        <button id="btn-voice" style="width:100%; padding:11px; border:none; background:#00695c; color:#fff; border-radius:8px; font-weight:800; cursor:pointer; font-size:15px;">🎤 음성인식 시작</button>
-    </div>
-    <div id="voice-panel" style="display:none; padding:9px 10px; background:#e0f2f1; border-bottom:1px solid #b2dfdb;">
-        <div style="font-size:12px; color:#00695c; font-weight:800;">🎧 듣는 중… 숫자를 또박또박 불러주세요 (예: "오 공 팔 팔 팔 이")</div>
-        <div id="voice-interim" style="min-height:24px; font-size:16px; font-weight:700; color:#455a64; margin-top:5px;">…</div>
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
-            <span style="font-size:11px; color:#607d8b;">최근 인식 (들린값 → 입력값)</span>
-            <span id="voice-stat" style="font-size:11px; color:#00695c; font-weight:800;"></span>
-        </div>
-        <div id="voice-log" style="font-size:13px; color:#37474f; max-height:130px; overflow:auto; margin-top:3px; line-height:1.7;"></div>
-    </div>
-
     <div class="scan-wrap">
         <div id="reader"></div>
         <button class="btn-start" id="btn-start">📷 스캔 시작</button>
@@ -184,7 +170,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.63'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.64'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -388,71 +374,6 @@
             }
             if (mode === 'in') await processInbound(raw); else processLocation(raw);
         }
-
-        // ---------------- [Ver 8.63] 음성인식 입력 (테스트) ----------------
-        const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-        let voiceRec = null, voiceOn = false, voiceHits = 0;
-        // 또박또박 부른 한국어 숫자 단어 → 숫자, 공백 제거, 영문 대문자화
-        function normalizeVoice(t) {
-            if (!t) return '';
-            let s = String(t);
-            const kmap = { '영':'0','공':'0','일':'1','하나':'1','이':'2','둘':'2','삼':'3','셋':'3','사':'4','넷':'4','오':'5','다섯':'5','육':'6','륙':'6','여섯':'6','칠':'7','일곱':'7','팔':'8','여덟':'8','구':'9','아홉':'9' };
-            Object.keys(kmap).forEach(k => { s = s.split(k).join(kmap[k]); });
-            return s.replace(/\s+/g, '').toUpperCase();
-        }
-        function voiceLog(rawT, norm) {
-            voiceHits++;
-            $('voice-stat').textContent = `${voiceHits}건`;
-            const row = document.createElement('div');
-            const a = document.createElement('b'); a.style.color = '#00695c'; a.textContent = rawT || '(빈 인식)';
-            const arrow = document.createTextNode('  →  ');
-            const b = document.createElement('b'); b.textContent = norm || '-';
-            row.appendChild(a); row.appendChild(arrow); row.appendChild(b);
-            $('voice-log').prepend(row);
-        }
-        function startVoice() {
-            if (!SpeechRec) { showAlert('이 브라우저는 음성인식을 지원하지 않습니다.\n안드로이드 크롬을 사용해보세요. (아이폰 사파리는 미지원일 수 있습니다)'); return; }
-            if (voiceOn) return;
-            voiceRec = new SpeechRec();
-            voiceRec.lang = 'ko-KR';
-            voiceRec.continuous = true;
-            voiceRec.interimResults = true;
-            voiceRec.maxAlternatives = 1;
-            voiceRec.onresult = (ev) => {
-                let interim = '';
-                for (let i = ev.resultIndex; i < ev.results.length; i++) {
-                    const r = ev.results[i];
-                    if (r.isFinal) {
-                        const rawT = (r[0].transcript || '').trim();
-                        const norm = normalizeVoice(rawT);
-                        voiceLog(rawT, norm);
-                        if (norm) { $('voice-interim').textContent = rawT + '  →  ' + norm; onScan(norm); }
-                    } else { interim += r[0].transcript; }
-                }
-                if (interim) $('voice-interim').textContent = interim;
-            };
-            voiceRec.onerror = (e) => {
-                if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { showAlert('마이크 권한이 필요합니다.\n브라우저에서 마이크 권한을 허용해주세요.'); stopVoice(); }
-                // no-speech / aborted 등은 무시하고 onend에서 자동 재시작
-            };
-            voiceRec.onend = () => { if (voiceOn) { try { voiceRec.start(); } catch (e) {} } };
-            voiceOn = true;
-            try { voiceRec.start(); } catch (e) {}
-            $('btn-voice').textContent = '🛑 음성인식 중지';
-            $('btn-voice').style.background = '#c62828';
-            $('voice-panel').style.display = 'block';
-            $('voice-interim').textContent = '…';
-            speak('음성 인식 시작');
-        }
-        function stopVoice() {
-            voiceOn = false;
-            try { if (voiceRec) voiceRec.stop(); } catch (e) {}
-            voiceRec = null;
-            $('btn-voice').textContent = '🎤 음성인식 시작';
-            $('btn-voice').style.background = '#00695c';
-            $('voice-panel').style.display = 'none';
-        }
-        function toggleVoice() { voiceOn ? stopVoice() : startVoice(); }
 
         // [Ver 8.50] 강제전송 허용 상품코드 — 한 사용자가 강제전송하면 FORCE_ALLOW 문서에 기록 → 다른 사용자 스캔 시 미지정 오류 스킵 (실시간 공유)
         const forceAllowSet = new Set();
@@ -859,10 +780,6 @@
             localStorage.setItem('scanDirectQty', directQty ? '1' : '0');
             $('ov-set').style.display = 'none'; toast('💾 설정 저장됨');
         };
-
-        // [Ver 8.63] 음성인식 버튼
-        $('btn-voice').onclick = () => toggleVoice();
-        if (!SpeechRec) { $('btn-voice').textContent = '🎤 음성인식 (이 브라우저 미지원)'; $('btn-voice').style.opacity = '0.6'; }
 
         // ---------------- 초기화 ----------------
         loadLocationMap(); // [Ver 5.8] 위치 매핑 로드
