@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.77 (scan.html 입고 스캔 시 미발/비축 TTS 안내 추가에 맞춰 웹 버전 동기화)
+// 중국제작 미발계산기 Ver 8.78 (파일 업로드 시 위치 열을 헤더명으로만 탐색 — 열 위치 폴백 제거)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -37,7 +37,7 @@ const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 //   예) 옵션추가항목1을 옵션보다 우선. 못 찾으면 상품코드가 아닌 첫 비어있지 않은 열.
 function pickLocationColumn(headers, codeIdx, known) {
     for (const name of known) { const idx = headers.indexOf(name); if (idx >= 0 && idx !== codeIdx) return idx; }
-    return headers.findIndex((h, i) => i !== codeIdx && h);
+    return -1; // [Ver 8.78] 위치 열은 헤더명으로만 찾음 (열 위치 기반 폴백 제거 — 엉뚱한 열 선택 방지)
 }
 const hasValue = (v) => v !== '' && v !== undefined && v !== null && v !== 0 && v !== '0';
 
@@ -1153,7 +1153,7 @@ async function handleLocationMapUpload(e) {
         const codeIdx = headers.indexOf('상품코드');
         // 위치 열: 알려진 이름 우선, 없으면 상품코드가 아닌 첫 열
         const locIdx = pickLocationColumn(headers, codeIdx, ['로케이션','위치','옵션추가항목1','옵션']);
-        if (locIdx < 0) { hideLoading(); alert('위치 열을 찾지 못했습니다.'); e.target.value = ''; return; }
+        if (locIdx < 0) { hideLoading(); alert("위치 열을 찾지 못했습니다.\n헤더에 '로케이션'(또는 위치/옵션추가항목1)이 있어야 합니다. 열 위치는 상관없습니다."); e.target.value = ''; return; }
         const map = {};
         for (let i = hi + 1; i < rows.length; i++) {
             const code = (rows[i][codeIdx] || '').toString().trim().toUpperCase();
@@ -1343,7 +1343,7 @@ async function handleExistingLocUpload(e) {
         if (hi < 0) { hideLoading(); alert('상품코드 열을 찾지 못했습니다.'); e.target.value = ''; return; }
         const codeIdx = headers.indexOf('상품코드');
         const locIdx = pickLocationColumn(headers, codeIdx, ['옵션추가항목1', '로케이션', '위치', '옵션']);
-        if (locIdx < 0) { hideLoading(); alert('옵션추가항목1(위치) 열을 찾지 못했습니다.'); e.target.value = ''; return; }
+        if (locIdx < 0) { hideLoading(); alert("'옵션추가항목1' 열을 찾지 못했습니다.\n헤더에 '옵션추가항목1'(또는 로케이션/위치)이 있어야 합니다. 열 위치는 상관없습니다."); e.target.value = ''; return; }
         const entries = [];
         for (let i = hi + 1; i < rows.length; i++) {
             const code = (rows[i][codeIdx] || '').toString().trim().toUpperCase();
@@ -2124,7 +2124,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.77';
+const WEB_VERSION = '8.78';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
