@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.80 (기존재고 업로드: 옵션추가항목1 빈칸이어도 업로드 성공 — 상품코드만 있으면 유효)
+// 중국제작 미발계산기 Ver 8.81 (기존재고·위치매핑 업로드가 HTML형식 xls(깨진 <tr>) DOMParser로 파싱 — 상품코드 열 못찾던 문제 수정)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1141,9 +1141,7 @@ async function handleLocationMapUpload(e) {
     const file = e.target.files[0]; if (!file) return;
     showLoading('📍 위치 매핑 처리 중...');
     try {
-        const buf = await file.arrayBuffer();
-        const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
-        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        const rows = await readSheetRowsAOA(file, ['상품코드']); // [Ver 8.81] HTML형식 xls도 파싱(DOMParser 폴백)
         let hi = -1, headers = [];
         for (let i = 0; i < Math.min(20, rows.length); i++) {
             const cl = rows[i].map(h => cleanKey(h));
@@ -1280,7 +1278,18 @@ async function readSheetRowsAOA(file, need) {
     let rows = [];
     try { const wb = XLSX.read(new Uint8Array(buf), { type: 'array' }); rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }); } catch (e) {}
     if (!hasHdr(rows)) {
-        try { const t = new TextDecoder('utf-8').decode(buf); const wb2 = XLSX.read(t, { type: 'string' }); const r2 = XLSX.utils.sheet_to_json(wb2.Sheets[wb2.SheetNames[0]], { header: 1, defval: '' }); if (hasHdr(r2)) rows = r2; } catch (e) {}
+        try {
+            const t = new TextDecoder('utf-8').decode(buf);
+            if (/<table/i.test(t)) {
+                // [Ver 8.81] HTML형식 xls(ERP 내보내기: 닫는 '>' 없는 깨진 <tr> 등) → DOMParser로 관대하게 파싱 (XLSX.read가 못 읽음)
+                const doc = new DOMParser().parseFromString(t, 'text/html');
+                const r2 = [];
+                doc.querySelectorAll('table tr').forEach(tr => { const c = []; tr.querySelectorAll('th,td').forEach(td => c.push((td.innerText || '').trim())); if (c.length) r2.push(c); });
+                if (hasHdr(r2)) rows = r2;
+            } else {
+                const wb2 = XLSX.read(t, { type: 'string' }); const r2 = XLSX.utils.sheet_to_json(wb2.Sheets[wb2.SheetNames[0]], { header: 1, defval: '' }); if (hasHdr(r2)) rows = r2;
+            }
+        } catch (e) {}
     }
     return rows;
 }
@@ -1332,9 +1341,7 @@ async function handleExistingLocUpload(e) {
     const file = e.target.files[0]; if (!file) return;
     showLoading('📥 기존재고 위치값 처리 중...');
     try {
-        const buf = await file.arrayBuffer();
-        const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
-        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        const rows = await readSheetRowsAOA(file, ['상품코드']); // [Ver 8.81] HTML형식 xls도 파싱(DOMParser 폴백)
         let hi = -1, headers = [];
         for (let i = 0; i < Math.min(20, rows.length); i++) {
             const cl = rows[i].map(h => cleanKey(h));
@@ -2124,7 +2131,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.80';
+const WEB_VERSION = '8.81';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
