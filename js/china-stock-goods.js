@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.76 (당일입고지정 목록에 이미 위치 지정된 상품 유지 — 미발 초기화로 FLOOR2 지워져도 보존)
+// 중국제작 미발계산기 Ver 8.77 (scan.html 입고 스캔 시 미발/비축 TTS 안내 추가에 맞춰 웹 버전 동기화)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -2124,7 +2124,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.76';
+const WEB_VERSION = '8.77';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
