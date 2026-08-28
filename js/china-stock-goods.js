@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.79 (scan.html 비축 TTS 삭제 — 미발만 음성 안내에 맞춰 웹 버전 동기화)
+// 중국제작 미발계산기 Ver 8.80 (기존재고 업로드: 옵션추가항목1 빈칸이어도 업로드 성공 — 상품코드만 있으면 유효)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1347,10 +1347,10 @@ async function handleExistingLocUpload(e) {
         const entries = [];
         for (let i = hi + 1; i < rows.length; i++) {
             const code = (rows[i][codeIdx] || '').toString().trim().toUpperCase();
-            const loc = normLocList(rows[i][locIdx]);
-            if (code && loc) entries.push([code, loc]);
+            if (!code) continue;
+            entries.push([code, normLocList(rows[i][locIdx])]); // [Ver 8.80] 옵션추가항목1 빈칸이어도 세팅(기존 위치 없음 = 빈값) — 상품코드만 있으면 유효
         }
-        if (!entries.length) { hideLoading(); alert('유효한 (상품코드+위치) 행이 없습니다.'); e.target.value = ''; return; }
+        if (!entries.length) { hideLoading(); alert('상품코드가 있는 행이 없습니다.\n(파일이 비었거나 형식이 올바르지 않아 업로드하지 못했습니다)'); e.target.value = ''; return; }
         // [Ver 8.15] 샤드별로 나눠 병합 저장(샤드당 1회 쓰기)
         const now = Date.now();
         const byShard = {};
@@ -2124,7 +2124,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.79';
+const WEB_VERSION = '8.80';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
