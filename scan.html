@@ -179,7 +179,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.78'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.79'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -434,7 +434,7 @@
             qtyTens = 0;
             $('num-display').textContent = '0';
             document.querySelectorAll('#qty-tens button').forEach(b => b.classList.remove('sel')); // 십의자리 선택 해제(기본=한 자리)
-            speak((parseInt(item.mibalQty) || 0) > 0 ? '미발' : '비축'); // [Ver 8.77] 미발수량 있으면 '미발', 없으면 '비축' 음성 안내
+            if ((parseInt(item.mibalQty) || 0) > 0) speak('미발'); // [Ver 8.79] 미발수량 있을 때만 '미발' 음성 안내 (비축은 무음)
             $('ov-select').style.display = 'flex';
         }
         function closeSelect() { $('ov-select').style.display = 'none'; }
