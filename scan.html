@@ -179,7 +179,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.81'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.82'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -509,23 +509,27 @@
         //  - 숫자만이면 기본 예약존 '비축-' 부착
         function activeLocMap() { return locMapOverride || (typeof barcodeMap !== 'undefined' ? barcodeMap : {}); }
         function stripLoc(s) { return String(s || '').toUpperCase().replace(/[\s-]/g, ''); }
+        // [Ver 8.82] 위치매핑 등록값에 맞춰 정규화 — 등록 안 된 위치면 null(오류). 단 등록데이터가 아직 없으면 잠금 방지용 폴백.
         function normalizeManualLoc(v) {
             v = (v || '').trim();
-            if (!v) return '';
-            // 등록된 위치값들을 '구분자 제거 키 → 원본 형식'으로 색인
-            const idx = {}, m = activeLocMap();
-            for (const k in m) { const val = m[k]; if (val) { const sk = stripLoc(val); if (sk && !(sk in idx)) idx[sk] = val; } }
+            if (!v) return null;
+            const idx = {}, m = activeLocMap(); let count = 0;
+            for (const k in m) { const val = m[k]; if (val) { const sk = stripLoc(val); if (sk && !(sk in idx)) { idx[sk] = val; count++; } } }
             const key = stripLoc(v);
             if (idx[key]) return idx[key];                        // 등록 형식에 매칭 (A1R → A-1-R, 비축155 → 비축-155)
-            if (/^\d+$/.test(v)) {                                // 숫자만
-                if (idx['비축' + key]) return idx['비축' + key];  // '비축-155' 등록돼 있으면 그 형식
-                return '비축-' + v;                               // 기본 예약존
-            }
-            return v.toUpperCase();                               // 미등록 형식은 쓴 그대로(영문 대문자화)
+            if (/^\d+$/.test(v) && idx['비축' + key]) return idx['비축' + key]; // 숫자만 → 등록된 비축
+            if (count === 0) return /^\d+$/.test(v) ? ('비축-' + v) : v.toUpperCase(); // 등록데이터 없으면 검증 불가 → 폴백(잠금 방지)
+            return null;                                          // 등록된 위치가 아님 → 오류
         }
         function manualSetLocation() {
-            const el = $('manual-loc'); const v = normalizeManualLoc(el.value);
-            if (!v) return;
+            const el = $('manual-loc'); const raw = (el.value || '').trim();
+            if (!raw) return;
+            const v = normalizeManualLoc(raw);
+            if (!v) { // [Ver 8.82] 등록 안 된 위치 → 오류 안내 후 다시 입력
+                showAlert(`'${raw}'는 등록된 위치가 아닙니다.\n위치매핑에 있는 값으로 다시 입력하세요.`);
+                el.focus(); el.select();
+                return;
+            }
             fixedLocation = v; renderLocBanner(); el.value = '';
             speak('위치 설정'); toast('위치 설정: ' + v);
         }
