@@ -144,6 +144,7 @@
     <div class="overlay" id="ov-select"><div class="modal">
         <div class="m-code" id="sel-code"></div>
         <div class="m-loc" id="sel-loc"></div>
+        <div id="sel-memo" style="display:none; background:#ffebee; color:#c62828; border:2px solid #ef9a9a; border-radius:8px; padding:9px 11px; margin:9px 0; font-size:16px; font-weight:800; text-align:center; white-space:pre-line; line-height:1.4;"></div>
         <div class="m-remain">미발수량: <b id="sel-remain">0</b></div>
         <div class="num-display" id="num-display" style="margin-top:8px;">0</div>
         <div class="qty-sel-label">십의 자리 (한 자리 수량이면 건너뛰세요)</div>
@@ -179,7 +180,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.82'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.83'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -213,6 +214,7 @@
 
         // [Ver 8.3] 바코드 ≠ 상품코드 대응: 미발재고로그의 바코드→상품코드 맵을 로드해 변환
         let barcodeToCode = {};
+        let barcodeMemo = {}; // [Ver 8.83] 오류바코드 사유 (바코드 → 사유 텍스트)
         async function loadBarcodeMap() {
             try {
                 // [Ver 8.32] 자동맵(미발로그) + 수동 오류바코드매칭(BARCODE_ALIAS) 병합 (수동 우선)
@@ -222,13 +224,22 @@
                 ]);
                 const auto = (snap.exists() && snap.data().map) ? snap.data().map : {};
                 const alias = (aSnap.exists() && aSnap.data().map) ? aSnap.data().map : {};
-                barcodeToCode = { ...auto, ...alias };
+                barcodeToCode = {}; barcodeMemo = {};
+                for (const b in auto) barcodeToCode[b] = auto[b]; // 자동맵은 문자열
+                for (const b in alias) { // [Ver 8.83] 수동맵: 문자열(구버전) 또는 {code, memo}
+                    const v = alias[b];
+                    const code = (v && typeof v === 'object') ? (v.code || '') : (v || '');
+                    if (code) barcodeToCode[b] = code;
+                    const memo = (v && typeof v === 'object') ? (v.memo || '') : '';
+                    if (memo) barcodeMemo[b] = memo;
+                }
             } catch (e) {}
         }
         function resolveCode(scanned) {
             const k = (scanned || '').toString().trim().toUpperCase();
             return barcodeToCode[k] || k; // 바코드로 등록된 값이면 상품코드로, 아니면 그대로
         }
+        function aliasMemo(scanned) { return barcodeMemo[(scanned || '').toString().trim().toUpperCase()] || ''; } // [Ver 8.83] 스캔한 바코드의 오류 사유
         // [Ver 8.15] 위치 데이터 샤드 (웹과 동일한 해시여야 함)
         const NUM_LOC_SHARDS = 8;
         function locShardId(code) { let h = 0; const s = String(code || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return 'LOC_SHARD_' + (h % NUM_LOC_SHARDS); }
@@ -402,10 +413,11 @@
 
         // ---------------- 입고 모드 ----------------
         async function processInbound(code) {
+            const memoText = aliasMemo(code); // [Ver 8.83] 오류바코드 사유(원래 스캔값 기준)
             let key = resolveCode(code); // [Ver 8.3] 바코드 → 상품코드 변환
             if (/^[0-9]+$/.test(key)) key = 'S' + key;
             // [Ver 8.48] 음수 방지(입고 초과분) / d 없을 때(미등록·DB오류 강제전송)는 빈 값으로 진행
-            const buildItem = (d) => ({ code: key, name: (d && d.name) || '', location: (d && d.location) || '미지정', arrivalQty: Math.max(parseInt(d && d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d && d.mibalQty) || 0, 0) });
+            const buildItem = (d) => ({ code: key, name: (d && d.name) || '', location: (d && d.location) || '미지정', arrivalQty: Math.max(parseInt(d && d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d && d.mibalQty) || 0, 0), aliasMemo: memoText });
             const proceedWith = (d) => showSelect(buildItem(d));
             const forceProceed = (d) => { registerForceAllow(key); proceedWith(d); }; // [Ver 8.51] 강제전송 → 허용목록 등록 후 정상 입고 진행
 
@@ -434,7 +446,11 @@
             qtyTens = 0;
             $('num-display').textContent = '0';
             document.querySelectorAll('#qty-tens button').forEach(b => b.classList.remove('sel')); // 십의자리 선택 해제(기본=한 자리)
-            if ((parseInt(item.mibalQty) || 0) > 0) speak('미발'); // [Ver 8.79] 미발수량 있을 때만 '미발' 음성 안내 (비축은 무음)
+            // [Ver 8.83] 오류바코드 사유 표시 (등록된 경우) — 작업자가 처리 판단
+            const memoEl = $('sel-memo');
+            if (memoEl) { if (item.aliasMemo) { memoEl.textContent = '⚠️ 오류바코드: ' + item.aliasMemo; memoEl.style.display = 'block'; } else memoEl.style.display = 'none'; }
+            if (item.aliasMemo) { speak('오류 바코드 확인'); try { navigator.vibrate([120, 80, 120]); } catch (e) {} } // 사유 있으면 주의 환기
+            else if ((parseInt(item.mibalQty) || 0) > 0) speak('미발'); // [Ver 8.79] 미발수량 있을 때만 '미발' 음성 안내 (비축은 무음)
             $('ov-select').style.display = 'flex';
         }
         function closeSelect() { $('ov-select').style.display = 'none'; }
