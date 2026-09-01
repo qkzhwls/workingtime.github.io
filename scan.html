@@ -180,7 +180,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.88'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.89'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -235,12 +235,8 @@
                     if (memo) barcodeMemo[b] = memo;
                 }
                 barcodeMapReady = true; // [Ver 8.85] 로딩 성공
-                // [Ver 8.87] 진단: 자동/수동/사유 개수 + S574405 사유 로드여부
-                const sl = document.getElementById('status-line');
-                if (sl) sl.textContent = `v${SCAN_VERSION} · BC ${Object.keys(barcodeToCode).length} · 사유${Object.keys(barcodeMemo).length} · 574=${barcodeMemo['S574405'] ? 'Y' : 'N'}`;
             } catch (e) {
                 // [Ver 8.85] 오류바코드 목록이 커서 로딩 실패/지연될 수 있음 → 재시도 (자가복구)
-                const sl = document.getElementById('status-line'); if (sl) sl.textContent = `v${SCAN_VERSION} · 서버: ${serverLabel} · ⚠️오류BC로드실패${retry ? '('+retry+')' : ''}`;
                 if (retry < 6) setTimeout(() => loadBarcodeMap(retry + 1), 1500 * (retry + 1));
             }
         }
@@ -434,9 +430,9 @@
         async function processInbound(code) {
             if (!barcodeMapReady) { await loadBarcodeMap(); } // [Ver 8.85] 오류바코드 맵 미로딩 시 먼저 로드 → 변환 누락 방지
             if (!memoReady) { await loadBarcodeMemo(); } // [Ver 8.88] 사유(작은 문서) 확실히 로드
-            const memoText = aliasMemo(code); // [Ver 8.83] 오류바코드 사유(원래 스캔값 기준)
             let key = resolveCode(code); // [Ver 8.3] 바코드 → 상품코드 변환
             if (/^[0-9]+$/.test(key)) key = 'S' + key;
+            const memoText = aliasMemo(code) || aliasMemo(key); // [Ver 8.89] 원래 스캔값 또는 S붙인 최종코드로 사유 조회 (S 생략 입력 대응)
             // [Ver 8.48] 음수 방지(입고 초과분) / d 없을 때(미등록·DB오류 강제전송)는 빈 값으로 진행
             const buildItem = (d) => ({ code: key, name: (d && d.name) || '', location: (d && d.location) || '미지정', arrivalQty: Math.max(parseInt(d && d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d && d.mibalQty) || 0, 0), aliasMemo: memoText });
             const proceedWith = (d) => showSelect(buildItem(d));

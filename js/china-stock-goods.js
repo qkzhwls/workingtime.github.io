@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.88 (오류 사유를 별도 작은 문서 BARCODE_MEMO로 분리 — 폰 로딩 안정화)
+// 중국제작 미발계산기 Ver 8.89 (오류바코드 사유 조회를 S붙인 최종코드로도 — S생략 입력 대응, 진단표시 제거)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -2141,7 +2141,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.88';
+const WEB_VERSION = '8.89';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
