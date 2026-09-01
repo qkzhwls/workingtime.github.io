@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.90 (입고확인: 도착수량과 다르면 빈칸 포함 빨강 통일 + 헤더 색상필터)
+// 중국제작 미발계산기 Ver 8.91 (기존재고 업로드 양방향: 스캔이 먼저 와도 업로드 시 병합, 스캔분 worker 유지)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1371,10 +1371,20 @@ async function handleExistingLocUpload(e) {
         // [Ver 8.15] 샤드별로 나눠 병합 저장(샤드당 1회 쓰기)
         const now = Date.now();
         const byShard = {};
-        entries.forEach(([code, loc]) => { const sid = locShardId(code); (byShard[sid] = byShard[sid] || {})[code] = { location: loc, base: loc, sub: 'existing', at: now, worker: 'Seed_Upload' }; });
+        // [Ver 8.91] 양방향: 스캔이 먼저 온 경우(이미 찍힌 새 자리)를 보존하고 시드 base에 병합 (업로드↔스캔 순서 무관)
+        let mergedCnt = 0;
+        entries.forEach(([code, seedLoc]) => {
+            const sid = locShardId(code);
+            const prev = locationAssignMap[code];
+            let newSpots = '';
+            if (prev && prev.location) { const b = new Set(locPartsArr(prev.base || '')); newSpots = locPartsArr(prev.location).filter(p => !b.has(p)).join(','); }
+            const scanned = !!newSpots; if (scanned) mergedCnt++;
+            const location = scanned ? mergeCsvLocs(seedLoc, newSpots) : seedLoc; // 시드 base + 이미 찍은 새 자리
+            (byShard[sid] = byShard[sid] || {})[code] = { location, base: seedLoc, sub: 'existing', at: (scanned && prev.at) ? prev.at : now, worker: scanned ? 'Scanner_Web' : 'Seed_Upload' };
+        });
         for (const sid in byShard) await setDoc(doc(db, CHINA_COLLECTION, sid), { map: byShard[sid], updatedAt: new Date() }, { merge: true });
         hideLoading();
-        showToast(`✅ 기존재고 위치값 세팅 완료 (${entries.length}건) — 스캐너가 이 값 뒤에 새 자리를 추가합니다`);
+        showToast(`✅ 기존재고 위치값 세팅 완료 (${entries.length}건${mergedCnt ? ` · 먼저 찍힌 ${mergedCnt}건 병합` : ''}) — 순서 무관: 스캔이 먼저여도 업로드 시 조립됩니다`);
     } catch (err) { hideLoading(); alert('기존재고 위치값 처리 실패: ' + err.message); }
     e.target.value = '';
 }
@@ -2141,7 +2151,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.90';
+const WEB_VERSION = '8.91';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
