@@ -180,7 +180,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.86'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.87'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -235,8 +235,9 @@
                     if (memo) barcodeMemo[b] = memo;
                 }
                 barcodeMapReady = true; // [Ver 8.85] 로딩 성공
-                // [Ver 8.86] 진단: 로딩 결과를 상태줄에 표시
-                const sl = document.getElementById('status-line'); if (sl) sl.textContent = `v${SCAN_VERSION} · 서버: ${serverLabel} · 오류BC ${Object.keys(barcodeToCode).length}`;
+                // [Ver 8.87] 진단: 자동/수동/사유 개수 + S574405 사유 로드여부
+                const sl = document.getElementById('status-line');
+                if (sl) sl.textContent = `v${SCAN_VERSION} · BC ${Object.keys(barcodeToCode).length} · 사유${Object.keys(barcodeMemo).length} · 574=${barcodeMemo['S574405'] ? 'Y' : 'N'}`;
             } catch (e) {
                 // [Ver 8.85] 오류바코드 목록이 커서 로딩 실패/지연될 수 있음 → 재시도 (자가복구)
                 const sl = document.getElementById('status-line'); if (sl) sl.textContent = `v${SCAN_VERSION} · 서버: ${serverLabel} · ⚠️오류BC로드실패${retry ? '('+retry+')' : ''}`;
