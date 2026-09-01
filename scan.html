@@ -180,7 +180,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.83'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.84'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -420,18 +420,20 @@
             const buildItem = (d) => ({ code: key, name: (d && d.name) || '', location: (d && d.location) || '미지정', arrivalQty: Math.max(parseInt(d && d.arrivalQty) || 0, 0), mibalQty: Math.max(parseInt(d && d.mibalQty) || 0, 0), aliasMemo: memoText });
             const proceedWith = (d) => showSelect(buildItem(d));
             const forceProceed = (d) => { registerForceAllow(key); proceedWith(d); }; // [Ver 8.51] 강제전송 → 허용목록 등록 후 정상 입고 진행
+            const memoPfx = memoText ? ('⚠️ 오류바코드: ' + memoText + '\n\n') : ''; // [Ver 8.84] 경고에도 사유 표시
+            if (memoText) { speak('오류 바코드 확인'); try { navigator.vibrate([120, 80, 120]); } catch (e) {} }
 
             let snap;
             try { snap = await getDoc(doc(db, 'ChinaStockGoods_ScanDB', key)); }
-            catch (e) { showAlert('DB 조회 오류\n(네트워크 확인)\n(' + key + ')', () => forceProceed(null)); return; } // [Ver 8.51] 모든 오류에 강제전송
+            catch (e) { showAlert(memoPfx + 'DB 조회 오류\n(네트워크 확인)\n(' + key + ')', () => forceProceed(null)); return; } // [Ver 8.51] 모든 오류에 강제전송
             if (!snap.exists()) {
                 if (forceAllowSet.has(key)) { proceedWith(null); return; } // [Ver 8.51] 이미 강제전송 허용된 상품 → 오류 없이 진행
-                showAlert('등록되지 않은 상품입니다.\n(' + key + ')', () => forceProceed(null)); // [Ver 8.51] 미등록도 강제전송 가능
+                showAlert(memoPfx + '등록되지 않은 상품입니다.\n(' + key + ')', () => forceProceed(null)); // [Ver 8.51] 미등록도 강제전송 가능
                 return;
             }
             const d = snap.data();
             if ((!d.location || d.location === '미지정') && !forceAllowSet.has(key)) { // [Ver 8.49] 로케이션 미지정 오류 (단, [Ver 8.50] 강제전송 등록된 상품은 통과)
-                showAlert('⚠️ 로케이션 미지정 상품입니다.\n(' + key + ')\n위치를 먼저 지정한 뒤 입고해주세요.', () => forceProceed(d));
+                showAlert(memoPfx + '⚠️ 로케이션 미지정 상품입니다.\n(' + key + ')\n위치를 먼저 지정한 뒤 입고해주세요.', () => forceProceed(d));
                 return;
             }
             proceedWith(d);
@@ -446,11 +448,10 @@
             qtyTens = 0;
             $('num-display').textContent = '0';
             document.querySelectorAll('#qty-tens button').forEach(b => b.classList.remove('sel')); // 십의자리 선택 해제(기본=한 자리)
-            // [Ver 8.83] 오류바코드 사유 표시 (등록된 경우) — 작업자가 처리 판단
+            // [Ver 8.83] 오류바코드 사유 표시 (등록된 경우) — 작업자가 처리 판단 (음성/진동은 processInbound에서 처리)
             const memoEl = $('sel-memo');
             if (memoEl) { if (item.aliasMemo) { memoEl.textContent = '⚠️ 오류바코드: ' + item.aliasMemo; memoEl.style.display = 'block'; } else memoEl.style.display = 'none'; }
-            if (item.aliasMemo) { speak('오류 바코드 확인'); try { navigator.vibrate([120, 80, 120]); } catch (e) {} } // 사유 있으면 주의 환기
-            else if ((parseInt(item.mibalQty) || 0) > 0) speak('미발'); // [Ver 8.79] 미발수량 있을 때만 '미발' 음성 안내 (비축은 무음)
+            if (!item.aliasMemo && (parseInt(item.mibalQty) || 0) > 0) speak('미발'); // [Ver 8.79] 미발수량 있을 때만 '미발' 음성 (사유 있으면 사유 음성 우선)
             $('ov-select').style.display = 'flex';
         }
         function closeSelect() { $('ov-select').style.display = 'none'; }
