@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.87 (진단 상태줄 상세화)
+// 중국제작 미발계산기 Ver 8.88 (오류 사유를 별도 작은 문서 BARCODE_MEMO로 분리 — 폰 로딩 안정화)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1242,7 +1242,12 @@ async function loadBarcodeAlias() {
     try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS')); barcodeAlias = (s.exists() && s.data().map) ? s.data().map : {}; } catch (e) { barcodeAlias = {}; }
 }
 async function saveBarcodeAlias() {
-    try { await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS'), { map: barcodeAlias, count: Object.keys(barcodeAlias).length, updatedAt: new Date() }); } catch (e) { alert('저장 실패: ' + e.message); }
+    try {
+        await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS'), { map: barcodeAlias, count: Object.keys(barcodeAlias).length, updatedAt: new Date() });
+        // [Ver 8.88] 사유만 담은 작은 문서 → 스캐너가 큰 목록(315KB)과 무관하게 빠르고 확실하게 사유 로드
+        const memoMap = {}; for (const b in barcodeAlias) { const m = baMemo(barcodeAlias[b]); if (m) memoMap[b] = m; }
+        await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_MEMO'), { map: memoMap, updatedAt: new Date() });
+    } catch (e) { alert('저장 실패: ' + e.message); }
 }
 async function openBarcodeAliasModal() {
     closeAllMenus();
@@ -2136,7 +2141,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.87';
+const WEB_VERSION = '8.88';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {

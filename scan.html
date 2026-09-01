@@ -180,7 +180,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.87'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.88'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -243,6 +243,16 @@
                 const sl = document.getElementById('status-line'); if (sl) sl.textContent = `v${SCAN_VERSION} · 서버: ${serverLabel} · ⚠️오류BC로드실패${retry ? '('+retry+')' : ''}`;
                 if (retry < 6) setTimeout(() => loadBarcodeMap(retry + 1), 1500 * (retry + 1));
             }
+        }
+        // [Ver 8.88] 오류 사유를 별도 작은 문서(BARCODE_MEMO)에서 로드 — 큰 오류바코드 목록(315KB, 폰에서 중첩객체 파싱 실패) 의존 제거
+        let memoReady = false;
+        async function loadBarcodeMemo(retry = 0) {
+            try {
+                const s = await getDoc(doc(db, 'ChinaStockGoods', 'BARCODE_MEMO'));
+                const m = (s.exists() && s.data().map) ? s.data().map : {};
+                for (const b in m) { if (m[b]) barcodeMemo[b] = m[b]; } // 작은 문서로 사유 보강(확실히 로드)
+                memoReady = true;
+            } catch (e) { if (retry < 6) setTimeout(() => loadBarcodeMemo(retry + 1), 1500 * (retry + 1)); }
         }
         function resolveCode(scanned) {
             const k = (scanned || '').toString().trim().toUpperCase();
@@ -422,7 +432,8 @@
 
         // ---------------- 입고 모드 ----------------
         async function processInbound(code) {
-            if (!barcodeMapReady) { await loadBarcodeMap(); } // [Ver 8.85] 오류바코드 맵 미로딩 시 먼저 로드 → 사유/변환 누락 방지
+            if (!barcodeMapReady) { await loadBarcodeMap(); } // [Ver 8.85] 오류바코드 맵 미로딩 시 먼저 로드 → 변환 누락 방지
+            if (!memoReady) { await loadBarcodeMemo(); } // [Ver 8.88] 사유(작은 문서) 확실히 로드
             const memoText = aliasMemo(code); // [Ver 8.83] 오류바코드 사유(원래 스캔값 기준)
             let key = resolveCode(code); // [Ver 8.3] 바코드 → 상품코드 변환
             if (/^[0-9]+$/.test(key)) key = 'S' + key;
@@ -857,6 +868,7 @@
         // ---------------- 초기화 ----------------
         loadLocationMap(); // [Ver 5.8] 위치 매핑 로드
         loadBarcodeMap(); // [Ver 8.3] 바코드→상품코드 맵 로드
+        loadBarcodeMemo(); // [Ver 8.88] 오류 사유(작은 문서) 로드
         subscribeForceAllow(); // [Ver 8.50] 강제전송 허용목록 실시간 구독
         buildQtySelector();
         $('status-line').textContent = `v${SCAN_VERSION} · 서버: ${serverLabel}`;
