@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.89 (오류바코드 사유 조회를 S붙인 최종코드로도 — S생략 입력 대응, 진단표시 제거)
+// 중국제작 미발계산기 Ver 8.90 (입고확인: 도착수량과 다르면 빈칸 포함 빨강 통일 + 헤더 색상필터)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1836,11 +1836,8 @@ function renderTable() {
                 let style = key === 'capacity' ? 'background:#e3f2fd;' : '';
                 let extra = '';
                 if (key === 'confirmed') {
-                    // [Ver 8.55] 입고확인 누적과 도착수량 비교 → 과입고(빨강)/부족(노랑) 강조 (미입력은 표시 안 함)
-                    const conf = parseInt(row.confirmed);
-                    const arr = parseInt(row.arrivalQty) || 0;
-                    if (!isNaN(conf) && conf > arr) { style += 'background:#ffcdd2; color:#b71c1c; font-weight:900;'; extra = ' title="입고확인 > 도착수량 (과입고) — 입고 수량 확인 필요"'; }
-                    else if (!isNaN(conf) && conf > 0 && conf < arr) { style += 'background:#fff59d; color:#6d4c00; font-weight:900;'; extra = ' title="입고확인 < 도착수량 (부족) — 입고 수량 확인 필요"'; }
+                    // [Ver 8.90] 입고확인 ≠ 도착수량(빈칸=0 포함) → 빨강 통일. 일치 시 앱스캔이면 파랑.
+                    if (confirmedMismatch(row)) { style += 'background:#ffcdd2; color:#b71c1c; font-weight:900;'; extra = ' title="입고확인 ≠ 도착수량 — 수량 확인 필요"'; }
                     else if (isFromApp) style += 'color:#1976d2; font-weight:900;';
                 }
                 tds += `<td class="editable-cell" contenteditable="true" data-code="${row.code}" data-field="${def.edit}" style="${style}"${extra}>${val}</td>`;
@@ -1912,8 +1909,11 @@ function updateSummary() {
 // ---------------------------------------------------------
 let columnFilters = {}; // 열key -> 허용값 Set (없으면 필터 없음)
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// [Ver 8.90] 입고확인 ≠ 도착수량 판정 (빈칸=0 포함) — 색상/필터 공용
+function confirmedMismatch(row) { return (parseInt(row.confirmed) || 0) !== (parseInt(row.arrivalQty) || 0); }
 function filterValueOf(row, key) {
     if (key === 'no' || key === 'locCheck') return '';
+    if (key === 'confirmed') return confirmedMismatch(row) ? '🔴 불일치(빨강)' : '✅ 일치'; // [Ver 8.90] 입고확인은 색상(일치/불일치)으로 필터
     if (key.startsWith('log:')) { const log = stockLogData[row.code] || {}; const v = log[key.slice(4)]; return (v === undefined || v === null) ? '' : String(v); }
     const v = row[key];
     return (v === undefined || v === null) ? '' : String(v);
@@ -2141,7 +2141,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.89';
+const WEB_VERSION = '8.90';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
