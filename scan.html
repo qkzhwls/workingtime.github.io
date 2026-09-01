@@ -180,7 +180,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '8.84'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '8.85'; // 웹 배포 버전과 함께 올림 (version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -215,7 +215,8 @@
         // [Ver 8.3] 바코드 ≠ 상품코드 대응: 미발재고로그의 바코드→상품코드 맵을 로드해 변환
         let barcodeToCode = {};
         let barcodeMemo = {}; // [Ver 8.83] 오류바코드 사유 (바코드 → 사유 텍스트)
-        async function loadBarcodeMap() {
+        let barcodeMapReady = false; // [Ver 8.85] 로딩 완료 여부
+        async function loadBarcodeMap(retry = 0) {
             try {
                 // [Ver 8.32] 자동맵(미발로그) + 수동 오류바코드매칭(BARCODE_ALIAS) 병합 (수동 우선)
                 const [snap, aSnap] = await Promise.all([
@@ -233,7 +234,11 @@
                     const memo = (v && typeof v === 'object') ? (v.memo || '') : '';
                     if (memo) barcodeMemo[b] = memo;
                 }
-            } catch (e) {}
+                barcodeMapReady = true; // [Ver 8.85] 로딩 성공
+            } catch (e) {
+                // [Ver 8.85] 오류바코드 목록이 커서 로딩 실패/지연될 수 있음 → 재시도 (자가복구)
+                if (retry < 4) setTimeout(() => loadBarcodeMap(retry + 1), 1500 * (retry + 1));
+            }
         }
         function resolveCode(scanned) {
             const k = (scanned || '').toString().trim().toUpperCase();
@@ -413,6 +418,7 @@
 
         // ---------------- 입고 모드 ----------------
         async function processInbound(code) {
+            if (!barcodeMapReady) { await loadBarcodeMap(); } // [Ver 8.85] 오류바코드 맵 미로딩 시 먼저 로드 → 사유/변환 누락 방지
             const memoText = aliasMemo(code); // [Ver 8.83] 오류바코드 사유(원래 스캔값 기준)
             let key = resolveCode(code); // [Ver 8.3] 바코드 → 상품코드 변환
             if (/^[0-9]+$/.test(key)) key = 'S' + key;
