@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.91 (기존재고 업로드 양방향: 스캔이 먼저 와도 업로드 시 병합, 스캔분 worker 유지)
+// 중국제작 미발계산기 Ver 8.92 (스캔 잠금: 작업자 스캔 중 웹 새로고침/기능으로 ScanDB 삭제되는 사고 방지 — 잠금 중 동기화 완전 차단)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -29,6 +29,11 @@ let graceDays = 1; // [Ver 8.6] 본사도착 유예: 본사도착일 + graceDays
 let newLocPosition = 'back'; // [Ver 8.38] 기존재고: 스캐너가 새로 찍은 위치를 기존값 앞(front)/뒤(back)에 붙일지
 let arrivalByShip = {}; // [Ver 8.28] 패킹리스트출고일 → 본사도착일(들) : 기준=출고일, 도착일은 있으면 표시/유예에만 사용
 let saveTimeout = null;
+// [Ver 8.92] 스캔 잠금: 작업자 스캔 중 웹 새로고침/기능으로 ScanDB가 지워지는 사고 방지.
+//   잠금 중엔 ScanDB 동기화(삭제→재작성)를 완전 차단 → 실수로 새로고침돼도 ScanDB 보존.
+//   localStorage에 저장해 새로고침 후에도 잠금 상태 유지.
+const SCAN_LOCK_KEY = 'csg_scan_lock';
+let pageLocked = (() => { try { return localStorage.getItem(SCAN_LOCK_KEY) === '1'; } catch (e) { return false; } })();
 
 // 유틸리티
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
@@ -1425,12 +1430,14 @@ let scanDbSyncing = false;
 let scanDbSyncPending = false;
 
 function scheduleScanDBSync() {
+    if (pageLocked) return; // [Ver 8.92] 스캔 잠금 중엔 ScanDB 동기화(삭제→재작성) 금지 → 새로고침돼도 ScanDB 보호
     if (!tableData || tableData.length === 0) return;
     clearTimeout(scanDbSyncTimer);
     scanDbSyncTimer = setTimeout(runScanDBSync, 1500);
 }
 
 async function runScanDBSync() {
+    if (pageLocked) return; // [Ver 8.92] 잠금 중 예약분이 남아있어도 실행 차단
     if (scanDbSyncing) { scanDbSyncPending = true; return; }
     scanDbSyncing = true;
     try {
@@ -1439,6 +1446,40 @@ async function runScanDBSync() {
     } catch (e) { console.error('스캔DB 자동 동기화 실패:', e); }
     scanDbSyncing = false;
     if (scanDbSyncPending) { scanDbSyncPending = false; scheduleScanDBSync(); }
+}
+
+// [Ver 8.92] ===== 스캔 잠금 (작업자 스캔 중 ScanDB 보호) =====
+function scanLockBeforeUnload(e) {
+    // 잠금 중 새로고침/닫기 시 브라우저 기본 확인창 (실수 방지). 문구는 브라우저가 고정.
+    e.preventDefault();
+    e.returnValue = '스캔 잠금 중입니다. 새로고침하면 작업이 중단될 수 있습니다.';
+    return e.returnValue;
+}
+function applyScanLockUI() {
+    const ov = document.getElementById('scan-lock-overlay');
+    const btn = document.getElementById('btn-scan-lock');
+    if (ov) ov.style.display = pageLocked ? 'flex' : 'none';
+    if (btn) {
+        btn.textContent = pageLocked ? '🔒 잠금중' : '🔒 스캔잠금';
+        btn.style.background = pageLocked ? '#8e0000' : '#c62828';
+        btn.title = pageLocked
+            ? '스캔 잠금 중 — ScanDB 보호. 클릭 없이 오버레이의 [잠금 해제]로 풀 수 있음'
+            : '스캔 잠금: 새로고침·업로드·초기화 등 모든 기능을 잠가 작업자 스캔 중 ScanDB를 보호';
+    }
+    window.removeEventListener('beforeunload', scanLockBeforeUnload);
+    if (pageLocked) window.addEventListener('beforeunload', scanLockBeforeUnload);
+}
+function setScanLock(on) {
+    pageLocked = on;
+    try { on ? localStorage.setItem(SCAN_LOCK_KEY, '1') : localStorage.removeItem(SCAN_LOCK_KEY); } catch (e) {}
+    applyScanLockUI();
+    if (on) { showToast('🔒 스캔 잠금 — 모든 기능 차단, ScanDB 보호 중'); }
+    else { showToast('🔓 잠금 해제 — 기능 사용 가능'); try { scheduleScanDBSync(); } catch (e) {} } // 해제 시 현재 표 기준 재동기화
+}
+function setupScanLock() {
+    document.getElementById('btn-scan-lock')?.addEventListener('click', () => setScanLock(true));
+    document.getElementById('btn-scan-unlock')?.addEventListener('click', () => setScanLock(false));
+    applyScanLockUI(); // 새로고침으로 돌아왔을 때 잠금 상태(오버레이·경고) 복원
 }
 
 // [Ver 7.4] 컬렉션 전체 삭제 (배치 한도 500 회피 위해 400씩 청크)
@@ -2151,7 +2192,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.91';
+const WEB_VERSION = '8.92';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2446,6 +2487,7 @@ function setupEventListeners() {
 async function init() {
     setupMobileGate(); // [Ver 8.11] 모바일이면 입고앱 실행 안내 먼저
     setupEventListeners();
+    setupScanLock(); // [Ver 8.92] 스캔 잠금 버튼/오버레이 + 새로고침 복원
     loadInboundHistory();
     // [Ver 7.9] 위치 구독은 위치지정모드 진입 시에만(setupEventListeners의 applyViewMode → ensureLocationHistory) → 미발 접속은 위치 2천건 읽기 0
     // [Ver 3.3] 버전 체크: 로드 시 1회(앱 최신버전 게시 포함) + 10분 간격 + 창 복귀 시
