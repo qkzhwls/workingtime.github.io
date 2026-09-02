@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.92 (스캔 잠금: 작업자 스캔 중 웹 새로고침/기능으로 ScanDB 삭제되는 사고 방지 — 잠금 중 동기화 완전 차단)
+// 중국제작 미발계산기 Ver 8.93 (스캔 잠금 보강: 잠금 시 현재 표를 ScanDB에 최종 동기화 완료 후 잠금 + 로딩 완료 전 잠금 버튼 비활성화)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -34,6 +34,7 @@ let saveTimeout = null;
 //   localStorage에 저장해 새로고침 후에도 잠금 상태 유지.
 const SCAN_LOCK_KEY = 'csg_scan_lock';
 let pageLocked = (() => { try { return localStorage.getItem(SCAN_LOCK_KEY) === '1'; } catch (e) { return false; } })();
+let scanDataReady = false; // [Ver 8.93] 초기 데이터 로드 완료 여부 — 완료 전엔 잠금 불가(빈/옛 데이터로 잠기는 사고 방지)
 
 // 유틸리티
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
@@ -1460,21 +1461,57 @@ function applyScanLockUI() {
     const btn = document.getElementById('btn-scan-lock');
     if (ov) ov.style.display = pageLocked ? 'flex' : 'none';
     if (btn) {
-        btn.textContent = pageLocked ? '🔒 잠금중' : '🔒 스캔잠금';
-        btn.style.background = pageLocked ? '#8e0000' : '#c62828';
-        btn.title = pageLocked
-            ? '스캔 잠금 중 — ScanDB 보호. 클릭 없이 오버레이의 [잠금 해제]로 풀 수 있음'
-            : '스캔 잠금: 새로고침·업로드·초기화 등 모든 기능을 잠가 작업자 스캔 중 ScanDB를 보호';
+        if (pageLocked) {
+            btn.disabled = false; btn.textContent = '🔒 잠금중'; btn.style.background = '#8e0000'; btn.style.cursor = 'pointer';
+            btn.title = '스캔 잠금 중 — ScanDB 보호. 오버레이의 [잠금 해제]로 풀 수 있음';
+        } else if (!scanDataReady) {
+            btn.disabled = true; btn.textContent = '⏳ 로딩 중…'; btn.style.background = '#9e9e9e'; btn.style.cursor = 'not-allowed';
+            btn.title = '데이터 로딩 중 — 완료 후 잠글 수 있습니다 (빈/옛 데이터로 잠기는 것 방지)';
+        } else {
+            btn.disabled = false; btn.textContent = '🔒 스캔잠금'; btn.style.background = '#c62828'; btn.style.cursor = 'pointer';
+            btn.title = '스캔 잠금: 지금 데이터를 ScanDB에 확정 저장한 뒤, 새로고침·모든 기능을 잠가 작업자 스캔을 보호';
+        }
     }
     window.removeEventListener('beforeunload', scanLockBeforeUnload);
     if (pageLocked) window.addEventListener('beforeunload', scanLockBeforeUnload);
 }
-function setScanLock(on) {
-    pageLocked = on;
-    try { on ? localStorage.setItem(SCAN_LOCK_KEY, '1') : localStorage.removeItem(SCAN_LOCK_KEY); } catch (e) {}
-    applyScanLockUI();
-    if (on) { showToast('🔒 스캔 잠금 — 모든 기능 차단, ScanDB 보호 중'); }
-    else { showToast('🔓 잠금 해제 — 기능 사용 가능'); try { scheduleScanDBSync(); } catch (e) {} } // 해제 시 현재 표 기준 재동기화
+// [Ver 8.93] 잠금 = "지금 표 데이터를 ScanDB에 최종 동기화(완료 보장) → 그 다음 잠금".
+//   초기 자동 동기화(1.5초 디바운스)가 끝나기 전에 눌러도, 여기서 직접 동기화를 완료하므로 빈/옛 ScanDB로 잠기지 않음.
+async function setScanLock(on) {
+    const btn = document.getElementById('btn-scan-lock');
+    if (on) {
+        if (pageLocked) return; // 이미 잠김
+        if (!scanDataReady) { showToast('⏳ 데이터 로딩 중 — 잠시 후 다시 눌러주세요'); return; }
+        clearTimeout(scanDbSyncTimer); // 예약된 자동 동기화 취소 → 여기서 직접 최종 동기화
+        if (tableData && tableData.length) {
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 동기화 중…'; btn.style.background = '#9e9e9e'; btn.style.cursor = 'wait'; }
+            showToast('🔒 잠금 준비 — ScanDB 최종 동기화 중…');
+            try {
+                let waited = 0; while (scanDbSyncing && waited < 15000) { await sleep(200); waited += 200; } // 진행 중인 자동 동기화 완료 대기
+                scanDbSyncing = true;
+                await syncScanDBCore();
+                scanDbSyncing = false;
+            } catch (e) {
+                scanDbSyncing = false;
+                console.error('잠금 전 동기화 실패:', e);
+                applyScanLockUI(); // 미잠금 상태로 버튼 복구
+                alert('⚠️ 잠금 실패 — ScanDB 동기화 오류.\n네트워크 확인 후 다시 시도하세요.\n(아직 잠기지 않았습니다)');
+                return;
+            }
+        } else {
+            showToast('ℹ️ 표 데이터 없음 — 기존 ScanDB를 유지한 채 잠급니다');
+        }
+        pageLocked = true;
+        try { localStorage.setItem(SCAN_LOCK_KEY, '1'); } catch (e) {}
+        applyScanLockUI();
+        showToast('🔒 스캔 잠금 — ScanDB 확정·보호 중');
+    } else {
+        pageLocked = false;
+        try { localStorage.removeItem(SCAN_LOCK_KEY); } catch (e) {}
+        applyScanLockUI();
+        showToast('🔓 잠금 해제 — 기능 사용 가능');
+        try { scheduleScanDBSync(); } catch (e) {} // 해제 시 현재 표 기준 재동기화
+    }
 }
 function setupScanLock() {
     document.getElementById('btn-scan-lock')?.addEventListener('click', () => setScanLock(true));
@@ -2192,7 +2229,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.92';
+const WEB_VERSION = '8.93';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2506,6 +2543,8 @@ async function init() {
             applyDates();
         }
     } catch(e) { console.error(e); }
+    scanDataReady = true; // [Ver 8.93] 초기 데이터 로드 완료 → 스캔잠금 버튼 활성화
+    applyScanLockUI();
 }
 init();
 
