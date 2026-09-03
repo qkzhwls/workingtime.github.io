@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.94 (ScanDB 버전기록/롤백: 미발재고로그 업로드마다 순수 미발 스냅샷 저장, 초기화·롤백 직전 백업, 롤백 후 자동잠금 — 별도 컬렉션이라 초기화로도 안 지워짐)
+// 중국제작 미발계산기 Ver 8.95 (버전기록·미발예측을 환경설정 메뉴 안으로 이동)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1603,6 +1603,7 @@ async function rollbackScanDBVersion(versionId) {
     } catch (e) { hideLoading(); alert('롤백 실패: ' + e.message); }
 }
 async function openVersionModal() {
+    closeAllMenus(); // [Ver 8.94] 환경설정 드롭다운 닫기
     const modal = document.getElementById('version-modal'); if (!modal) return;
     modal.style.display = 'flex';
     const list = document.getElementById('version-list');
@@ -2337,7 +2338,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.94';
+const WEB_VERSION = '8.95';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
