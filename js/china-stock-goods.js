@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.98 (검수리스트 추림 로직 반영: JH0001 리오더 제외 + 공급처상품명·색상 중복제거 + 상품명 정렬)
+// 중국제작 미발계산기 Ver 8.99 (검수리스트: 미발재고로그 미로딩 시 경고 가드 — 공급처상품명·두께·로케이션 빈칸 방지 안내)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -337,6 +337,11 @@ async function downloadInspectionList() {
     closeAllMenus();
     let rows = (tableData || []).filter(d => !d.unregistered && (parseInt(d.arrivalQty) || 0) > 0);
     if (!rows.length) { alert('검수리스트로 만들 상품이 없습니다.\n(현재 표에 도착수량 > 0 인 상품이 필요합니다 — 출고일을 먼저 선택/계산하세요)'); return; }
+    // [Ver 8.99] 미발재고로그(현재고조회) 로딩 확인 — 없으면 공급처상품명·두께·로케이션이 비어 나옴 + 중복제거도 안 됨
+    const missingLog = rows.filter(r => { const s = stockLogData[r.code]; return !s || !(s['로케이션'] || s['공급처상품명']); }).length;
+    if (missingLog > rows.length * 0.5) {
+        if (!confirm(`⚠️ 미발재고로그(현재고조회) 데이터가 없어\n공급처상품명·두께·로케이션이 비어 나오고 중복제거도 안 됩니다. (${missingLog}/${rows.length}건)\n\n[파일 다운로드 → 미발재고로그 업로드]를 먼저 하신 뒤 받는 것을 권장합니다.\n그래도 지금 받으시겠습니까?`)) return;
+    }
     // 구분 맵 (오더리스트: 어드민상품코드/상품코드 → 구분)
     const gubunByCode = {};
     [orderDataOriginal, orderDataBuy].forEach(arr => (arr || []).forEach(row => {
@@ -2413,7 +2418,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.98';
+const WEB_VERSION = '8.99';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
