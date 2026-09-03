@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.96 (버전기록 당일 보관: 오늘 날짜 버전만 유지, 새 입고일 작업 시작 시 이전 날 자동 정리)
+// 중국제작 미발계산기 Ver 8.97 (검수리스트파일다운로드: 샘플검수업무 업로드용 xlsx 생성 — 상품코드/상품명/옵션/수량/두께/공급처상품명/로케이션)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -320,6 +320,36 @@ async function downloadFloor2() {
     XLSX.utils.book_append_sheet(wb, ws, '비축창고재고');
     const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
     await downloadToDesktop('비축창고재고.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
+}
+// [Ver 8.97] 검수리스트파일 다운로드 — 샘플검수업무(관리자 페이지) 업로드용 .xlsx
+//   시트명 worksheet, 7열(위치 기반): 상품코드/상품명/옵션/수량/추가항목5(두께)/공급처상품명/로케이션
+//   두께·공급처상품명은 미발재고로그(stockLogData) 원본에서, 로케이션은 표의 location + '/ 코드'
+async function downloadInspectionList() {
+    closeAllMenus();
+    const rows = (tableData || []).filter(d => !d.unregistered && (parseInt(d.arrivalQty) || 0) > 0);
+    if (!rows.length) { alert('검수리스트로 만들 상품이 없습니다.\n(현재 표에 도착수량 > 0 인 상품이 필요합니다 — 출고일을 먼저 선택/계산하세요)'); return; }
+    const aoa = [['상품코드', '상품명', '옵션', '수량', '추가항목5', '공급처상품명', '로케이션']];
+    let noThick = 0;
+    rows.forEach(r => {
+        const s = stockLogData[r.code] || {};
+        const dukkae = s['추가항목5'] || '';
+        if (!dukkae) noThick++;
+        const supp = s['공급처상품명'] || s['공급처 상품명'] || '';
+        const locBase = (r.location || (s['로케이션'] || '').split('/')[0] || '').toString().trim();
+        const locVal = locBase ? `${locBase}/ ${r.code}` : r.code;
+        aoa.push([r.code, r.name, r.option, parseInt(r.arrivalQty) || 0, dukkae, supp, locVal]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    // 파일명 날짜 = 선택 출고일(첫 번째) 또는 오늘 → (YYMMDD) : 파서가 패킹일자로 인식
+    let dstr;
+    const d0 = (savedDates && savedDates.length && /^\d{4}-\d{2}-\d{2}/.test(savedDates[0])) ? savedDates[0] : null;
+    if (d0) dstr = d0.slice(2, 4) + d0.slice(5, 7) + d0.slice(8, 10);
+    else { const t = new Date(), p = n => String(n).padStart(2, '0'); dstr = String(t.getFullYear()).slice(2) + p(t.getMonth() + 1) + p(t.getDate()); }
+    await downloadToDesktop(`검수리스트(${dstr}).xlsx`, new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    showToast(`✅ 검수리스트 ${rows.length}건 다운로드${noThick ? ` (두께 없음 ${noThick}건 — 미발재고로그에 추가항목5 열이 없으면 빈칸)` : ''}`);
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
 async function downloadLocMove() {
@@ -2344,7 +2374,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.96';
+const WEB_VERSION = '8.97';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2485,6 +2515,8 @@ function setupEventListeners() {
     });
     // [Ver 8.42] 비축창고 엑셀저장 (초기화는 미발 초기화 시 함께 - Ver 8.44)
     document.getElementById('btn-floor2-download')?.addEventListener('click', () => downloadFloor2());
+    // [Ver 8.97] 검수리스트파일다운로드 (샘플검수업무 업로드용)
+    document.getElementById('btn-inspection-download')?.addEventListener('click', () => downloadInspectionList());
 
     // 10-3. [Ver 8.16] 옵션추가항목1 다운로드는 서브뷰별 인라인 버튼으로 분리 (당일=btn-loc-download-today, 기존=btn-locmove-download)
 
