@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.97 (검수리스트파일다운로드: 샘플검수업무 업로드용 xlsx 생성 — 상품코드/상품명/옵션/수량/두께/공급처상품명/로케이션)
+// 중국제작 미발계산기 Ver 8.98 (검수리스트 추림 로직 반영: JH0001 리오더 제외 + 공급처상품명·색상 중복제거 + 상품명 정렬)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -321,13 +321,52 @@ async function downloadFloor2() {
     const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
     await downloadToDesktop('비축창고재고.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
 }
-// [Ver 8.97] 검수리스트파일 다운로드 — 샘플검수업무(관리자 페이지) 업로드용 .xlsx
+// [Ver 8.98] 검수리스트파일 다운로드 — 샘플검수업무(관리자 페이지) 업로드용 .xlsx
 //   시트명 worksheet, 7열(위치 기반): 상품코드/상품명/옵션/수량/추가항목5(두께)/공급처상품명/로케이션
-//   두께·공급처상품명은 미발재고로그(stockLogData) 원본에서, 로케이션은 표의 location + '/ 코드'
+//   Google Sheet(상품관리_템플릿) Apps Script의 추림 로직 재현:
+//     ② 공급처='JH0001' AND 구분='리오더' 제외  ③ 공급처상품명+색상 중복제거  ④ 상품명 정렬
+//   두께·공급처상품명·공급처=미발재고로그(stockLogData), 구분=오더리스트, 로케이션=location+'/ 코드'
+const INSP_PREFIXES = ['촬샘', '매칭금지', '제작샘플', '원샘', '오리지날원샘', '재샘', '제샘', '제샘1', '제샘2', '확샘'];
+function inspNormalizeOption(opt) {
+    let tokens = (opt || '').toString().replace(/\[|\]/g, '').trim().split('-').map(t => t.trim());
+    if (INSP_PREFIXES.includes((tokens[0] || '').toLowerCase())) tokens.shift();
+    return tokens.join('-');
+}
+function inspColor(opt) { return inspNormalizeOption(opt).toLowerCase().split('-')[0].trim(); }
 async function downloadInspectionList() {
     closeAllMenus();
-    const rows = (tableData || []).filter(d => !d.unregistered && (parseInt(d.arrivalQty) || 0) > 0);
+    let rows = (tableData || []).filter(d => !d.unregistered && (parseInt(d.arrivalQty) || 0) > 0);
     if (!rows.length) { alert('검수리스트로 만들 상품이 없습니다.\n(현재 표에 도착수량 > 0 인 상품이 필요합니다 — 출고일을 먼저 선택/계산하세요)'); return; }
+    // 구분 맵 (오더리스트: 어드민상품코드/상품코드 → 구분)
+    const gubunByCode = {};
+    [orderDataOriginal, orderDataBuy].forEach(arr => (arr || []).forEach(row => {
+        const g = (row['구분'] || '').toString().trim();
+        const a = (row['어드민상품코드'] || '').toString().trim();
+        const c = (row['상품코드'] || '').toString().trim();
+        if (a && !(a in gubunByCode)) gubunByCode[a] = g;
+        if (c && !(c in gubunByCode)) gubunByCode[c] = g;
+    }));
+    // ② 공급처='JH0001' AND 구분='리오더' 제외
+    let excluded = 0;
+    rows = rows.filter(r => {
+        const vendor = ((stockLogData[r.code] || {})['공급처'] || '').toString().trim();
+        const gubun = (gubunByCode[r.code] || '').toString().trim();
+        if (vendor === 'JH0001' && gubun === '리오더') { excluded++; return false; }
+        return true;
+    });
+    // ③ 중복 제거: 공급처상품명(소문자) + 색상(옵션 첫 토큰, 접두어 제거), 첫 행만 보존
+    const seen = {};
+    rows = rows.filter(r => {
+        const s = stockLogData[r.code] || {};
+        const sup = (s['공급처상품명'] || s['공급처 상품명'] || '').toString().trim().toLowerCase();
+        if (!sup || !r.option) return true; // 판단 불가 → 유지
+        const key = sup + '||' + inspColor(r.option);
+        if (seen[key]) return false;
+        seen[key] = true; return true;
+    });
+    // ④ 상품명 기준 정렬
+    rows.sort((a, b) => (a.name || '').toString().localeCompare((b.name || '').toString()));
+    if (!rows.length) { alert('필터 후 남는 상품이 없습니다.\n(JH0001 리오더 제외 등으로 전부 걸러졌을 수 있습니다)'); return; }
     const aoa = [['상품코드', '상품명', '옵션', '수량', '추가항목5', '공급처상품명', '로케이션']];
     let noThick = 0;
     rows.forEach(r => {
@@ -349,7 +388,7 @@ async function downloadInspectionList() {
     if (d0) dstr = d0.slice(2, 4) + d0.slice(5, 7) + d0.slice(8, 10);
     else { const t = new Date(), p = n => String(n).padStart(2, '0'); dstr = String(t.getFullYear()).slice(2) + p(t.getMonth() + 1) + p(t.getDate()); }
     await downloadToDesktop(`검수리스트(${dstr}).xlsx`, new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-    showToast(`✅ 검수리스트 ${rows.length}건 다운로드${noThick ? ` (두께 없음 ${noThick}건 — 미발재고로그에 추가항목5 열이 없으면 빈칸)` : ''}`);
+    showToast(`✅ 검수리스트 ${rows.length}건${excluded ? ` (JH0001 리오더 ${excluded}건 제외)` : ''}${noThick ? ` · 두께없음 ${noThick}건` : ''}`);
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
 async function downloadLocMove() {
@@ -2374,7 +2413,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.97';
+const WEB_VERSION = '8.98';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
