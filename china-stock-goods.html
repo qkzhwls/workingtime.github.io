@@ -92,11 +92,12 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.93</div>
+            <div class="version-badge">🚀 Ver 8.94</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
             <button id="btn-scan-lock" title="스캔 잠금: 새로고침·업로드·초기화 등 모든 기능을 잠가 작업자 스캔 중 ScanDB를 보호" style="padding: 8px 15px; background: #c62828; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🔒 스캔잠금</button>
+            <button id="btn-version-history" title="ScanDB 버전 기록 / 롤백 — 미발재고로그 업로드마다 자동 저장, 문제 시 원하는 시점으로 복원" style="padding: 8px 15px; background: #5d4037; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">🕘 버전기록</button>
             <button class="mode-mibal" id="btn-mibal-send" style="padding: 8px 15px; background: #00897b; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📤 미발전송</button>
             <button class="mode-mibal" id="btn-mibal-predict" style="padding: 8px 15px; background: #5e35b1; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">📈 미발예측</button>
             <div class="upload-dropdown mode-mibal" style="position: relative; display: inline-block;">
@@ -137,6 +138,19 @@
             <div style="font-size:14px; color:#444; line-height:1.7; margin-bottom:10px;">작업자 스캔을 보호하는 중입니다.<br><b>새로고침 · 업로드 · 초기화 · 출고일 변경 등<br>모든 기능이 잠겼습니다.</b><br>스캔DB(ScanDB)는 변경되지 않습니다.</div>
             <div style="font-size:12px; color:#b71c1c; background:#ffebee; border-radius:8px; padding:9px 11px; margin-bottom:18px; line-height:1.6;">⚠️ 작업이 끝난 뒤에만 잠금을 해제하세요.<br>해제 후 재계산/새로고침해야 ScanDB가 갱신됩니다.</div>
             <button id="btn-scan-unlock" style="padding:12px 30px; background:#2e7d32; color:white; border:none; border-radius:8px; font-weight:900; font-size:16px; cursor:pointer;">🔓 잠금 해제</button>
+        </div>
+    </div>
+
+    <!-- [Ver 8.94] ScanDB 버전 기록 / 롤백 모달 -->
+    <div id="version-modal" style="display:none; position:fixed; inset:0; z-index:2147483100; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
+        <div style="background:#fff; border-radius:12px; width:min(560px,92vw); max-height:82vh; display:flex; flex-direction:column; box-shadow:0 12px 50px rgba(0,0,0,0.45);">
+            <div style="padding:15px 18px; border-bottom:1px solid #eee; display:flex; align-items:center; gap:8px;">
+                <div style="font-size:18px; font-weight:900; color:#333; flex:1;">🕘 버전 기록 <span style="font-size:12px; color:#888; font-weight:normal;">(ScanDB · 순수 미발수량)</span></div>
+                <button id="btn-version-manual" style="padding:7px 12px; background:#2e7d32; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">📌 현재 저장</button>
+                <button id="btn-version-close" style="padding:7px 12px; background:#eceff1; color:#333; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">✕ 닫기</button>
+            </div>
+            <div style="padding:9px 15px; background:#fff8e1; font-size:12px; color:#795548; border-bottom:1px solid #ffe082; line-height:1.55;">미발재고로그 업로드마다 자동 저장됩니다. <b>롤백하면</b> 그 시점 미발수량으로 복원되고 <b>자동으로 스캔잠금</b>이 걸립니다. (초기화해도 이 기록은 안 지워집니다)</div>
+            <div id="version-list" style="overflow-y:auto; flex:1;"></div>
         </div>
     </div>
 
@@ -472,6 +486,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.93"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.94"></script>
 </body>
 </html>

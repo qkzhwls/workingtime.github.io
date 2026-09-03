@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.93 (스캔 잠금 보강: 잠금 시 현재 표를 ScanDB에 최종 동기화 완료 후 잠금 + 로딩 완료 전 잠금 버튼 비활성화)
+// 중국제작 미발계산기 Ver 8.94 (ScanDB 버전기록/롤백: 미발재고로그 업로드마다 순수 미발 스냅샷 저장, 초기화·롤백 직전 백업, 롤백 후 자동잠금 — 별도 컬렉션이라 초기화로도 안 지워짐)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1131,7 +1131,8 @@ function handleStockLogUpload(e) {
             hideLoading();
             showToast(`✅ 미발재고 저장 완료 (바코드≠상품코드 ${Object.keys(bcMap).length}건 매핑)`);
             if (tableData.length > 0) applyDates();
-            
+            await saveScanDBVersionOnUpload(file.name); // [Ver 8.94] 업로드마다 순수 미발 버전 자동 저장
+
         } catch (err) { 
             hideLoading(); 
             alert('파일 처리 실패: ' + err.message); 
@@ -1516,8 +1517,114 @@ async function setScanLock(on) {
 function setupScanLock() {
     document.getElementById('btn-scan-lock')?.addEventListener('click', () => setScanLock(true));
     document.getElementById('btn-scan-unlock')?.addEventListener('click', () => setScanLock(false));
+    // [Ver 8.94] 버전 기록 버튼
+    document.getElementById('btn-version-history')?.addEventListener('click', openVersionModal);
+    document.getElementById('btn-version-close')?.addEventListener('click', closeVersionModal);
+    document.getElementById('btn-version-manual')?.addEventListener('click', manualSaveVersion);
     applyScanLockUI(); // 새로고침으로 돌아왔을 때 잠금 상태(오버레이·경고) 복원
 }
+
+// [Ver 8.94] ===== ScanDB 버전 기록 / 롤백 (순수 미발수량 보존) =====
+//   미발재고로그 업로드마다 자동 스냅샷 + 초기화/롤백 직전 백업. 별도 컬렉션이라 미발초기화로도 안 지워짐.
+const SCANDB_VERSIONS_COLL = 'ChinaStockGoods_ScanDB_Versions';
+const MAX_SCANDB_VERSIONS = 30;
+const VER_TRIGGER_LABEL = { upload: '📂 업로드', 'pre-reset': '🗑️ 초기화 직전', 'pre-rollback': '⏪ 롤백 직전', manual: '📌 수동' };
+function fmtVerTime(ms) { const d = new Date(ms || Date.now()); const p = n => String(n).padStart(2, '0'); return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function escHtmlVer(s) { return (s || '').toString().replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+async function saveScanDBVersion(trigger, note) {
+    try {
+        const snap = await getDocs(collection(db, 'ChinaStockGoods_ScanDB'));
+        if (snap.empty) return false; // 빈 ScanDB는 저장 안 함
+        const data = {}; let totalMibal = 0;
+        snap.docs.forEach(d => {
+            const v = d.data();
+            data[d.id] = { name: v.name || '', option: v.option || '', arrivalQty: v.arrivalQty || 0, mibalQty: v.mibalQty || 0, location: v.location || '', totalStock: v.totalStock || 0, capacity: v.capacity || 0 };
+            totalMibal += (parseInt(v.mibalQty) || 0);
+        });
+        const count = snap.size;
+        if (JSON.stringify(data).length > 950000) console.warn('버전 스냅샷 큼(1MiB 근접):', JSON.stringify(data).length);
+        const id = 'v' + Date.now();
+        await setDoc(doc(db, SCANDB_VERSIONS_COLL, id), { at: new Date(), atMs: Date.now(), trigger: trigger || 'manual', note: note || '', count, totalMibal, data });
+        await pruneScanDBVersions();
+        showToast(`💾 버전 저장 (${count}개 · 미발 ${totalMibal})`);
+        return true;
+    } catch (e) { console.error('버전 저장 실패:', e); return false; }
+}
+async function pruneScanDBVersions() {
+    try {
+        const snap = await getDocs(collection(db, SCANDB_VERSIONS_COLL));
+        if (snap.size <= MAX_SCANDB_VERSIONS) return;
+        const arr = snap.docs.map(d => ({ id: d.id, atMs: d.data().atMs || 0 })).sort((a, b) => a.atMs - b.atMs);
+        const del = arr.slice(0, snap.size - MAX_SCANDB_VERSIONS);
+        const batch = writeBatch(db);
+        del.forEach(x => batch.delete(doc(db, SCANDB_VERSIONS_COLL, x.id)));
+        await batch.commit();
+    } catch (e) { console.error('버전 정리 실패:', e); }
+}
+// 업로드 직후: 최신 미발로 동기화한 뒤 스냅샷
+async function saveScanDBVersionOnUpload(fileName) {
+    try {
+        clearTimeout(scanDbSyncTimer);
+        let w = 0; while (scanDbSyncing && w < 15000) { await sleep(200); w += 200; }
+        if (!pageLocked && tableData && tableData.length) { scanDbSyncing = true; try { await syncScanDBCore(); } finally { scanDbSyncing = false; } }
+    } catch (e) { scanDbSyncing = false; console.error(e); }
+    await saveScanDBVersion('upload', '미발재고로그 업로드' + (fileName ? ` (${fileName})` : ''));
+}
+async function manualSaveVersion() {
+    const note = prompt('이 버전에 남길 메모 (선택):', '수동 저장');
+    if (note === null) return;
+    const ok = await saveScanDBVersion('manual', note || '수동 저장');
+    if (ok) openVersionModal(); else alert('저장할 ScanDB 데이터가 없습니다.\n(미발재고로그 업로드/계산 후 다시 시도하세요)');
+}
+async function rollbackScanDBVersion(versionId) {
+    try {
+        const vSnap = await getDoc(doc(db, SCANDB_VERSIONS_COLL, versionId));
+        if (!vSnap.exists()) { alert('버전을 찾을 수 없습니다.'); return; }
+        const v = vSnap.data();
+        const cnt = v.count || Object.keys(v.data || {}).length;
+        if (!confirm(`이 버전으로 롤백할까요?\n\n저장시각: ${fmtVerTime(v.atMs)}\n상품수: ${cnt}\n총 미발수량: ${v.totalMibal || 0}\n\n→ 현재 ScanDB를 이 상태로 되돌리고, 자동으로 스캔잠금을 겁니다.`)) return;
+        showLoading('⏪ 롤백 중...');
+        await saveScanDBVersion('pre-rollback', '롤백 직전 자동 백업'); // 현재 상태 백업
+        const data = v.data || {}; const keep = new Set(Object.keys(data));
+        // 1) 스냅샷 먼저 기록(덮어쓰기) — ScanDB가 비는 순간 없음
+        let batch = writeBatch(db); let ops = 0;
+        for (const code in data) { batch.set(doc(db, 'ChinaStockGoods_ScanDB', code), { code, ...data[code], updatedAt: new Date() }); if (++ops >= 450) { await batch.commit(); batch = writeBatch(db); ops = 0; } }
+        if (ops > 0) { await batch.commit(); batch = writeBatch(db); ops = 0; }
+        // 2) 스냅샷에 없는 잔여 상품 삭제
+        const cur = await getDocs(collection(db, 'ChinaStockGoods_ScanDB'));
+        for (const d of cur.docs) { if (!keep.has(d.id)) { batch.delete(d.ref); if (++ops >= 450) { await batch.commit(); batch = writeBatch(db); ops = 0; } } }
+        if (ops > 0) await batch.commit();
+        // 3) 자동 잠금 (재동기화 덮어쓰기 방지)
+        pageLocked = true; try { localStorage.setItem(SCAN_LOCK_KEY, '1'); } catch (e) {}
+        applyScanLockUI();
+        hideLoading(); closeVersionModal();
+        showToast(`✅ 롤백 완료 (미발 ${v.totalMibal || 0}) + 스캔잠금`);
+    } catch (e) { hideLoading(); alert('롤백 실패: ' + e.message); }
+}
+async function openVersionModal() {
+    const modal = document.getElementById('version-modal'); if (!modal) return;
+    modal.style.display = 'flex';
+    const list = document.getElementById('version-list');
+    list.innerHTML = '<div style="padding:24px; text-align:center; color:#888;">불러오는 중…</div>';
+    try {
+        const snap = await getDocs(collection(db, SCANDB_VERSIONS_COLL));
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (b.atMs || 0) - (a.atMs || 0));
+        if (!rows.length) { list.innerHTML = '<div style="padding:24px; text-align:center; color:#888;">저장된 버전이 없습니다.<br>미발재고로그를 업로드하면 자동으로 기록됩니다.</div>'; return; }
+        list.innerHTML = rows.map(r => {
+            const lbl = VER_TRIGGER_LABEL[r.trigger] || r.trigger || '';
+            return `<div style="display:flex; align-items:center; gap:10px; padding:11px 14px; border-bottom:1px solid #eee;">
+              <div style="flex:1; min-width:0;">
+                <div style="font-weight:bold; color:#333;">${fmtVerTime(r.atMs)} <span style="font-size:11px; color:#777; font-weight:normal;">${lbl}</span></div>
+                <div style="font-size:12px; color:#666;">상품 ${r.count || 0}개 · 총 미발수량 <b style="color:#e65100;">${r.totalMibal || 0}</b>${r.note ? ` · <span style="color:#999;">${escHtmlVer(r.note)}</span>` : ''}</div>
+              </div>
+              <button data-vid="${r.id}" class="ver-rollback-btn" style="padding:8px 14px; background:#c62828; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; white-space:nowrap;">⏪ 롤백</button>
+            </div>`;
+        }).join('');
+        list.querySelectorAll('.ver-rollback-btn').forEach(b => b.addEventListener('click', () => rollbackScanDBVersion(b.dataset.vid)));
+    } catch (e) { list.innerHTML = '<div style="padding:24px; color:#c62828;">불러오기 실패: ' + escHtmlVer(e.message) + '</div>'; }
+}
+function closeVersionModal() { const m = document.getElementById('version-modal'); if (m) m.style.display = 'none'; }
 
 // [Ver 7.4] 컬렉션 전체 삭제 (배치 한도 500 회피 위해 400씩 청크)
 async function deleteAllDocs(collName) {
@@ -1534,6 +1641,7 @@ async function clearAllData() {
     if (!confirm("미발계산기 데이터를 초기화할까요?\n(수동편집·미발재고로그·앱 입고이력·비축창고 누적 삭제 / 위치 데이터는 유지)")) return;
     showLoading('🗑️ 미발계산기 초기화 중...');
     try {
+        await saveScanDBVersion('pre-reset', '미발 초기화 직전 백업'); // [Ver 8.94] 초기화 전 순수 미발 스냅샷 (버전기록은 안 지워짐)
         await deleteDoc(doc(db, CHINA_COLLECTION, 'EDITED_CELLS'));
         await deleteAllDocs(CHINA_COLLECTION + '_StockLog');
         await deleteAllDocs('ChinaStockGoods_InboundHistory');
@@ -2229,7 +2337,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.93';
+const WEB_VERSION = '8.94';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
