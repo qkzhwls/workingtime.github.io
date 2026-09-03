@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.95 (버전기록·미발예측을 환경설정 메뉴 안으로 이동)
+// 중국제작 미발계산기 Ver 8.96 (버전기록 당일 보관: 오늘 날짜 버전만 유지, 새 입고일 작업 시작 시 이전 날 자동 정리)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1530,6 +1530,7 @@ const SCANDB_VERSIONS_COLL = 'ChinaStockGoods_ScanDB_Versions';
 const MAX_SCANDB_VERSIONS = 30;
 const VER_TRIGGER_LABEL = { upload: '📂 업로드', 'pre-reset': '🗑️ 초기화 직전', 'pre-rollback': '⏪ 롤백 직전', manual: '📌 수동' };
 function fmtVerTime(ms) { const d = new Date(ms || Date.now()); const p = n => String(n).padStart(2, '0'); return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`; }
+function verIsToday(ms) { const d = new Date(ms || 0), n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate(); } // [Ver 8.96] 당일 보관 판정
 function escHtmlVer(s) { return (s || '').toString().replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 async function saveScanDBVersion(trigger, note) {
@@ -1551,15 +1552,20 @@ async function saveScanDBVersion(trigger, note) {
         return true;
     } catch (e) { console.error('버전 저장 실패:', e); return false; }
 }
+// [Ver 8.96] 당일 보관: 오늘(달력 날짜)이 아닌 버전은 삭제 → 새 입고일 작업 시작 시 이전 날 버전 자동 정리.
+//   같은 날에도 과도하면(MAX) 오래된 것부터 안전 정리.
 async function pruneScanDBVersions() {
     try {
         const snap = await getDocs(collection(db, SCANDB_VERSIONS_COLL));
-        if (snap.size <= MAX_SCANDB_VERSIONS) return;
-        const arr = snap.docs.map(d => ({ id: d.id, atMs: d.data().atMs || 0 })).sort((a, b) => a.atMs - b.atMs);
-        const del = arr.slice(0, snap.size - MAX_SCANDB_VERSIONS);
-        const batch = writeBatch(db);
-        del.forEach(x => batch.delete(doc(db, SCANDB_VERSIONS_COLL, x.id)));
-        await batch.commit();
+        const today = [], stale = [];
+        snap.docs.forEach(d => (verIsToday(d.data().atMs) ? today : stale).push(d));
+        let batch = writeBatch(db), ops = 0;
+        for (const d of stale) { batch.delete(d.ref); if (++ops >= 450) { await batch.commit(); batch = writeBatch(db); ops = 0; } } // 이전 날 버전 삭제
+        if (today.length > MAX_SCANDB_VERSIONS) { // 같은 날 안전 상한
+            const sorted = today.map(d => ({ ref: d.ref, atMs: d.data().atMs || 0 })).sort((a, b) => a.atMs - b.atMs);
+            for (const x of sorted.slice(0, today.length - MAX_SCANDB_VERSIONS)) { batch.delete(x.ref); if (++ops >= 450) { await batch.commit(); batch = writeBatch(db); ops = 0; } }
+        }
+        if (ops > 0) await batch.commit();
     } catch (e) { console.error('버전 정리 실패:', e); }
 }
 // 업로드 직후: 최신 미발로 동기화한 뒤 스냅샷
@@ -2338,7 +2344,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.95';
+const WEB_VERSION = '8.96';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {

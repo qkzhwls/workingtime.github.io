@@ -92,7 +92,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 8.95</div>
+            <div class="version-badge">🚀 Ver 8.96</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -150,7 +150,7 @@
                 <button id="btn-version-manual" style="padding:7px 12px; background:#2e7d32; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">📌 현재 저장</button>
                 <button id="btn-version-close" style="padding:7px 12px; background:#eceff1; color:#333; border:none; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px;">✕ 닫기</button>
             </div>
-            <div style="padding:9px 15px; background:#fff8e1; font-size:12px; color:#795548; border-bottom:1px solid #ffe082; line-height:1.55;">미발재고로그 업로드마다 자동 저장됩니다. <b>롤백하면</b> 그 시점 미발수량으로 복원되고 <b>자동으로 스캔잠금</b>이 걸립니다. (초기화해도 이 기록은 안 지워집니다)</div>
+            <div style="padding:9px 15px; background:#fff8e1; font-size:12px; color:#795548; border-bottom:1px solid #ffe082; line-height:1.55;">미발재고로그 업로드마다 자동 저장 · <b>당일(오늘) 버전만 보관</b>(새 입고일 작업 시작 시 이전 날 자동 정리). <b>롤백하면</b> 그 시점 미발수량으로 복원되고 <b>자동 스캔잠금</b>이 걸립니다.</div>
             <div id="version-list" style="overflow-y:auto; flex:1;"></div>
         </div>
     </div>
@@ -487,6 +487,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=8.95"></script>
+    <script type="module" src="js/china-stock-goods.js?v=8.96"></script>
 </body>
 </html>
