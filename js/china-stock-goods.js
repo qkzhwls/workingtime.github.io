@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.6 (버전기록/롤백 버튼을 미발계산기 모드 전용으로 — 위치지정모드 환경설정에선 숨김, ScanDB 전용 기능이라)
+// 중국제작 미발계산기 Ver 9.7 (웹스캐너 scan.html: 수동입력 숫자패드(inputmode=numeric) + 폰 뒤로가기로 수량/알림 팝업만 닫기(페이지 이탈 방지))
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -2493,7 +2493,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.6';
+const WEB_VERSION = '9.7';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
