@@ -92,7 +92,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 9.5</div>
+            <div class="version-badge">🚀 Ver 9.6</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -114,8 +114,8 @@
             <div class="upload-dropdown" style="position: relative; display: inline-block;">
                 <button class="btn-main-upload" id="btn-toggle-menu" style="padding: 8px 15px; background: #333; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">⚙️ 환경설정 ▼</button>
                 <div class="upload-menu" id="main-tools-menu" style="display: none; position: absolute; top: 100%; right: 0; background: white; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 10001; width: 280px;">
-                    <div style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a;">🛠️ 도구</div>
-                    <div class="menu-item" id="btn-version-history" title="ScanDB 버전 기록 / 롤백 — 미발재고로그 업로드마다 자동 저장, 문제 시 원하는 시점으로 복원" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#5d4037;">🕘 버전기록 (롤백)</div>
+                    <div class="mode-mibal" style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a;">🛠️ 도구</div>
+                    <div class="menu-item mode-mibal" id="btn-version-history" title="ScanDB 버전 기록 / 롤백 — 미발재고로그 업로드마다 자동 저장, 문제 시 원하는 시점으로 복원" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#5d4037;">🕘 버전기록 (롤백)</div>
                     <div class="menu-item mode-mibal" id="btn-mibal-predict" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#5e35b1;">📈 미발예측</div>
                     <div class="mode-mibal" style="padding:8px 15px; background:#eceff1; font-size:11px; color:#546e7a;">⚙️ 설정</div>
                     <div class="menu-item mode-mibal" id="btn-open-grace" style="display: block; padding: 12px 20px; font-size: 13px; cursor: pointer; border-bottom: 1px solid #eee; font-weight: bold; color:#2e7d32;">📅 본사도착 유예 일수</div>
@@ -489,6 +489,6 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-goods.js?v=9.5"></script>
+    <script type="module" src="js/china-stock-goods.js?v=9.6"></script>
 </body>
 </html>
