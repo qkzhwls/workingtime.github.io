@@ -1,8 +1,8 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.2 (샘플위치 매칭 정정: 상품명 → '공급처상품명+색상'으로 Locations 매칭 — code→stockLogData로 공급처상품명 해석)
+// 중국제작 미발계산기 Ver 9.3 (샘플위치: 제작샘플=로케이션 SAM 시작만 필터 → 공급처상품명+색상 매칭, ZONE_SAM* 문서만 쿼리)
 
 import { initializeFirebase } from './config.js?v=7.9';
-import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
 const CHINA_COLLECTION = 'ChinaStockGoods';
@@ -402,17 +402,17 @@ async function downloadInspectionList() {
     await downloadToDesktop(`검수리스트(${dstr}).xlsx`, new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     showToast(`✅ 검수리스트 ${rows.length}건${excluded ? ` (JH0001 리오더 ${excluded}건 제외)` : ''}${noThick ? ` · 두께없음 ${noThick}건` : ''}`);
 }
-// [Ver 9.2] 샘플위치 맵 — location.html의 'Locations'(ZONE_* 문서: locId→{code,option,...})에서
+// [Ver 9.3] 샘플위치 맵 — location.html의 'Locations'에서 제작샘플(로케이션이 SAM으로 시작)만 골라
 //   "공급처상품명 + 색상(옵션)" → 로케이션(locId). Locations엔 공급처상품명이 없어 code→stockLogData로 해석.
-//   키 = 공급처상품명(소문자) + '||' + 색상(옵션 첫 토큰). 관리자 사이트(로그인) 배포 시 채워짐, dev/미존재 시 빈 맵→'수기작성'.
+//   ZONE_SAM* 문서만 쿼리(개별 위치문서 수백개 안 읽음). 관리자 사이트(로그인) 배포 시 채워짐, dev/미존재 시 '수기작성'.
 async function loadSampleLocMap() {
     const acc = {};
     try {
-        const snap = await getDocs(collection(db, 'Locations'));
+        const snap = await getDocs(query(collection(db, 'Locations'), where(documentId(), '>=', 'ZONE_SAM'), where(documentId(), '<', 'ZONE_SAM')));
         snap.forEach(docSnap => {
-            if (!docSnap.id.startsWith('ZONE_')) return; // 창고 존 문서만
             const zoneData = docSnap.data() || {};
             for (const locId in zoneData) {
+                if (!locId.toString().trim().toUpperCase().startsWith('SAM')) continue; // 제작샘플 = 로케이션 SAM- 로 시작하는 것만
                 const o = zoneData[locId];
                 if (!o || typeof o !== 'object') continue;
                 const code = (o.code || '').toString().trim();
@@ -2488,7 +2488,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.2';
+const WEB_VERSION = '9.3';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
