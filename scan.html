@@ -180,7 +180,7 @@
         import { getFirestore, doc, getDoc, setDoc, collection, writeBatch, increment, serverTimestamp, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { firebaseConfig } from './js/config.js';
 
-        const SCAN_VERSION = '9.7'; // 웹 배포 버전과 함께 올림 (version.json의 web)
+        const SCAN_VERSION = '9.8'; // 웹 배포 버전과 함께 올림 (china-stock-version.json의 web)
 
         // ---------------- 서버 선택 (URL 파라미터 → 저장값 → 기본 config) ----------------
         const params = new URLSearchParams(location.search);
@@ -790,7 +790,7 @@
         // ---------------- 버전 체크 ----------------
         async function checkVersion() {
             try {
-                const res = await fetch(new URL('version.json', location.href).href + '?_=' + Date.now(), { cache: 'no-store' }); // [Ver 8.47] ?_=시각으로 CDN 캐시 우회 (no-store만으로는 max-age=600 CDN 캐시 못 뚫음)
+                const res = await fetch(new URL('china-stock-version.json', location.href).href + '?_=' + Date.now(), { cache: 'no-store' }); // [Ver 9.8] china-stock 전용 버전파일. [Ver 8.47] ?_=시각으로 CDN 캐시 우회 (no-store만으로는 max-age=600 CDN 캐시 못 뚫음)
                 const info = await res.json();
                 if (info.web && info.web !== SCAN_VERSION) {
                     const b = $('update-banner');

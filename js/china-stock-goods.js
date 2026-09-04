@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.7 (웹스캐너 scan.html: 수동입력 숫자패드(inputmode=numeric) + 폰 뒤로가기로 수량/알림 팝업만 닫기(페이지 이탈 방지))
+// 중국제작 미발계산기 Ver 9.8 (버전파일 분리: version.json → china-stock-version.json — 최종관리자 원본 version.json과 충돌 방지)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -2489,16 +2489,16 @@ function setupMobileGate() {
 
 // ---------------------------------------------------------
 // [Ver 3.3] 버전 체크
-//  - version.json이 배포의 기준 버전 (web: 페이지, app: 스캐너 앱)
+//  - china-stock-version.json이 배포의 기준 버전 (web: 페이지, app: 스캐너 앱) — china-stock 전용 파일(최종관리자 version.json과 분리)
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.7';
+const WEB_VERSION = '9.8';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
     try {
-        const res = await fetch(new URL('version.json', location.href).href + '?_=' + Date.now(), { cache: 'no-store' }); // [Ver 8.47] ?_=시각으로 CDN(Fastly) 캐시 우회 — no-store만으로는 max-age=600 CDN 캐시를 못 뚫어 배너가 최대 10분 지연/누락됨
+        const res = await fetch(new URL('china-stock-version.json', location.href).href + '?_=' + Date.now(), { cache: 'no-store' }); // [Ver 9.8] china-stock 전용 버전파일. [Ver 8.47] ?_=시각으로 CDN(Fastly) 캐시 우회 — no-store만으로는 max-age=600 CDN 캐시를 못 뚫어 배너가 최대 10분 지연/누락됨
         return await res.json();
     } catch (e) { return null; }
 }
