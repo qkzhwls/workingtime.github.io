@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.1 (검수리스트인쇄 보강: 마지막 열 헤더 '구분', 샘플위치=Locations(상품명매칭·관리자사이트에서 채워짐) — dev는 수기작성 폴백)
+// 중국제작 미발계산기 Ver 9.2 (샘플위치 매칭 정정: 상품명 → '공급처상품명+색상'으로 Locations 매칭 — code→stockLogData로 공급처상품명 해석)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -402,8 +402,9 @@ async function downloadInspectionList() {
     await downloadToDesktop(`검수리스트(${dstr}).xlsx`, new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     showToast(`✅ 검수리스트 ${rows.length}건${excluded ? ` (JH0001 리오더 ${excluded}건 제외)` : ''}${noThick ? ` · 두께없음 ${noThick}건` : ''}`);
 }
-// [Ver 9.1] 샘플위치 맵 — location.html의 'Locations' 컬렉션(ZONE_* 문서: locId→{name,...})에서 상품명→로케이션(locId)
-//   관리자 사이트(work-tool-e2943, 로그인 연결) 배포 시 채워짐. dev/미로그인/미존재 시 권한오류 → 빈 맵 → '수기작성' 폴백.
+// [Ver 9.2] 샘플위치 맵 — location.html의 'Locations'(ZONE_* 문서: locId→{code,option,...})에서
+//   "공급처상품명 + 색상(옵션)" → 로케이션(locId). Locations엔 공급처상품명이 없어 code→stockLogData로 해석.
+//   키 = 공급처상품명(소문자) + '||' + 색상(옵션 첫 토큰). 관리자 사이트(로그인) 배포 시 채워짐, dev/미존재 시 빈 맵→'수기작성'.
 async function loadSampleLocMap() {
     const acc = {};
     try {
@@ -413,15 +414,17 @@ async function loadSampleLocMap() {
             const zoneData = docSnap.data() || {};
             for (const locId in zoneData) {
                 const o = zoneData[locId];
-                if (o && typeof o === 'object') {
-                    const nm = (o.name || '').toString().trim();
-                    if (nm && locId) (acc[nm] = acc[nm] || new Set()).add(locId);
-                }
+                if (!o || typeof o !== 'object') continue;
+                const code = (o.code || '').toString().trim();
+                const supplier = ((stockLogData[code] || {})['공급처상품명'] || (stockLogData[code] || {})['공급처 상품명'] || '').toString().trim().toLowerCase();
+                if (!supplier) continue; // 공급처상품명 해석 실패 → 스킵
+                const key = supplier + '||' + inspColor(o.option || '');
+                (acc[key] = acc[key] || new Set()).add(locId);
             }
         });
     } catch (e) { console.warn('샘플위치(Locations) 조회 불가 → 수기작성 폴백:', e && e.code); }
     const out = {};
-    for (const nm in acc) out[nm] = [...acc[nm]].join(', ');
+    for (const k in acc) out[k] = [...acc[k]].join(', ');
     return out;
 }
 // [Ver 9.1] 검수리스트 인쇄 — 담당자 전달용 (Google Sheet printBlankRows 기반)
@@ -440,7 +443,8 @@ async function printInspectionList() {
         const gubun = (gubunByCode[r.code] || '').toString().trim();
         const isNew = gubun === '신상';
         const loc = (r.location || (s['로케이션'] || '').split('/')[0] || '').toString().trim();
-        const sampleLoc = sampleLocMap[(r.name || '').toString().trim()] || (isNew ? '수기작성' : '');
+        const supplier = (s['공급처상품명'] || s['공급처 상품명'] || '').toString().trim().toLowerCase();
+        const sampleLoc = (supplier && sampleLocMap[supplier + '||' + inspColor(r.option)]) || (isNew ? '수기작성' : '');
         const stock = (r.totalStock !== undefined && r.totalStock !== '') ? r.totalStock : (s['정상재고'] || '');
         const recv = s['접수'] || '';
         return { cells: [r.name || '', r.option || '', loc, sampleLoc, parseInt(r.arrivalQty) || 0, stock, recv, gubun], isNew };
@@ -2484,7 +2488,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.1';
+const WEB_VERSION = '9.2';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
