@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 8.99 (검수리스트: 미발재고로그 미로딩 시 경고 가드 — 공급처상품명·두께·로케이션 빈칸 방지 안내)
+// 중국제작 미발계산기 Ver 9.0 (검수리스트인쇄 추가: 담당자 전달용 8열 인쇄 — 상품명/옵션/로케이션/샘플위치/수량/재고수량/접수/출고분, 신상 로케이션 음영)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -333,15 +333,9 @@ function inspNormalizeOption(opt) {
     return tokens.join('-');
 }
 function inspColor(opt) { return inspNormalizeOption(opt).toLowerCase().split('-')[0].trim(); }
-async function downloadInspectionList() {
-    closeAllMenus();
+// 공통: 검수 대상 행 필터 (도착>0 → JH0001 리오더 제외 → 공급처상품명+색상 중복제거 → 상품명 정렬)
+function buildInspectionRows() {
     let rows = (tableData || []).filter(d => !d.unregistered && (parseInt(d.arrivalQty) || 0) > 0);
-    if (!rows.length) { alert('검수리스트로 만들 상품이 없습니다.\n(현재 표에 도착수량 > 0 인 상품이 필요합니다 — 출고일을 먼저 선택/계산하세요)'); return; }
-    // [Ver 8.99] 미발재고로그(현재고조회) 로딩 확인 — 없으면 공급처상품명·두께·로케이션이 비어 나옴 + 중복제거도 안 됨
-    const missingLog = rows.filter(r => { const s = stockLogData[r.code]; return !s || !(s['로케이션'] || s['공급처상품명']); }).length;
-    if (missingLog > rows.length * 0.5) {
-        if (!confirm(`⚠️ 미발재고로그(현재고조회) 데이터가 없어\n공급처상품명·두께·로케이션이 비어 나오고 중복제거도 안 됩니다. (${missingLog}/${rows.length}건)\n\n[파일 다운로드 → 미발재고로그 업로드]를 먼저 하신 뒤 받는 것을 권장합니다.\n그래도 지금 받으시겠습니까?`)) return;
-    }
     // 구분 맵 (오더리스트: 어드민상품코드/상품코드 → 구분)
     const gubunByCode = {};
     [orderDataOriginal, orderDataBuy].forEach(arr => (arr || []).forEach(row => {
@@ -371,7 +365,24 @@ async function downloadInspectionList() {
     });
     // ④ 상품명 기준 정렬
     rows.sort((a, b) => (a.name || '').toString().localeCompare((b.name || '').toString()));
-    if (!rows.length) { alert('필터 후 남는 상품이 없습니다.\n(JH0001 리오더 제외 등으로 전부 걸러졌을 수 있습니다)'); return; }
+    return { rows, gubunByCode, excluded };
+}
+// 출고일(첫 번째)로 라벨/파일명 날짜 계산
+function inspShipDate() {
+    const d0 = (savedDates && savedDates.length && /^\d{4}-\d{2}-\d{2}/.test(savedDates[0])) ? savedDates[0] : null;
+    if (d0) return { yymmdd: d0.slice(2, 4) + d0.slice(5, 7) + d0.slice(8, 10), label: `${parseInt(d0.slice(5, 7))}월 ${parseInt(d0.slice(8, 10))}일 출고분` };
+    const t = new Date(), p = n => String(n).padStart(2, '0');
+    return { yymmdd: String(t.getFullYear()).slice(2) + p(t.getMonth() + 1) + p(t.getDate()), label: `${t.getMonth() + 1}월 ${t.getDate()}일 출고분` };
+}
+async function downloadInspectionList() {
+    closeAllMenus();
+    const { rows, excluded } = buildInspectionRows();
+    if (!rows.length) { alert('검수리스트로 만들 상품이 없습니다.\n(도착수량 > 0 상품이 없거나 전부 걸러졌습니다 — 출고일을 먼저 선택/계산하세요)'); return; }
+    // [Ver 8.99] 미발재고로그(현재고조회) 로딩 확인 — 없으면 공급처상품명·두께·로케이션이 비어 나옴 + 중복제거도 안 됨
+    const missingLog = rows.filter(r => { const s = stockLogData[r.code]; return !s || !(s['로케이션'] || s['공급처상품명']); }).length;
+    if (missingLog > rows.length * 0.5) {
+        if (!confirm(`⚠️ 미발재고로그(현재고조회) 데이터가 없어\n공급처상품명·두께·로케이션이 비어 나오고 중복제거도 안 됩니다. (${missingLog}/${rows.length}건)\n\n[파일 다운로드 → 미발재고로그 업로드]를 먼저 하신 뒤 받는 것을 권장합니다.\n그래도 지금 받으시겠습니까?`)) return;
+    }
     const aoa = [['상품코드', '상품명', '옵션', '수량', '추가항목5', '공급처상품명', '로케이션']];
     let noThick = 0;
     rows.forEach(r => {
@@ -387,13 +398,45 @@ async function downloadInspectionList() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'worksheet');
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    // 파일명 날짜 = 선택 출고일(첫 번째) 또는 오늘 → (YYMMDD) : 파서가 패킹일자로 인식
-    let dstr;
-    const d0 = (savedDates && savedDates.length && /^\d{4}-\d{2}-\d{2}/.test(savedDates[0])) ? savedDates[0] : null;
-    if (d0) dstr = d0.slice(2, 4) + d0.slice(5, 7) + d0.slice(8, 10);
-    else { const t = new Date(), p = n => String(n).padStart(2, '0'); dstr = String(t.getFullYear()).slice(2) + p(t.getMonth() + 1) + p(t.getDate()); }
+    const dstr = inspShipDate().yymmdd; // 파일명 날짜 = 선택 출고일(파서가 패킹일자로 인식)
     await downloadToDesktop(`검수리스트(${dstr}).xlsx`, new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     showToast(`✅ 검수리스트 ${rows.length}건${excluded ? ` (JH0001 리오더 ${excluded}건 제외)` : ''}${noThick ? ` · 두께없음 ${noThick}건` : ''}`);
+}
+// [Ver 9.0] 검수리스트 인쇄 — 담당자 전달용 (Google Sheet printBlankRows와 동일 출력)
+//   8열: 상품명/옵션/로케이션/샘플위치/수량/재고수량/접수/(n월 n일 출고분=구분). 신상 로케이션 음영.
+//   ※ 제작샘플 위치코드 미보유 → 샘플위치는 신상만 '수기작성', 나머지 빈칸(담당자 수기).
+function printInspectionList() {
+    closeAllMenus();
+    const { rows, gubunByCode } = buildInspectionRows();
+    if (!rows.length) { alert('인쇄할 검수 대상이 없습니다.\n(도착수량 > 0 상품이 없거나 전부 걸러졌습니다 — 출고일을 먼저 선택/계산하세요)'); return; }
+    const { label } = inspShipDate();
+    const esc = v => (v === null || v === undefined ? '' : String(v)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const header = ['상품명', '옵션', '로케이션', '샘플위치', '수량', '재고수량', '접수', label];
+    const bodyRows = rows.map(r => {
+        const s = stockLogData[r.code] || {};
+        const gubun = (gubunByCode[r.code] || '').toString().trim();
+        const isNew = gubun === '신상';
+        const loc = (r.location || (s['로케이션'] || '').split('/')[0] || '').toString().trim();
+        const sampleLoc = isNew ? '수기작성' : '';
+        const stock = (r.totalStock !== undefined && r.totalStock !== '') ? r.totalStock : (s['정상재고'] || '');
+        const recv = s['접수'] || '';
+        return { cells: [r.name || '', r.option || '', loc, sampleLoc, parseInt(r.arrivalQty) || 0, stock, recv, gubun], isNew };
+    });
+    let html = `<html><head><meta charset="utf-8"><title>검수리스트 ${esc(label)}</title><style>
+      table,th,td{border:1px solid #000;border-collapse:collapse;}
+      th,td{padding:4px 6px;text-align:center;font-size:13px;}
+      td.loc-new{background:#d9d9d9;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+      body{margin:16px;font-family:'Malgun Gothic',sans-serif;} h3{margin:0 0 8px;}
+    </style></head><body>`;
+    html += `<h3>검수리스트 · ${esc(label)} · 총 ${rows.length}건</h3>`;
+    html += '<table><tr>' + header.map(h => `<th>${esc(h)}</th>`).join('') + '</tr>';
+    bodyRows.forEach(item => {
+        html += '<tr>' + item.cells.map((c, idx) => `<td${(item.isNew && idx === 2) ? ' class="loc-new"' : ''}>${esc(c)}</td>`).join('') + '</tr>';
+    });
+    html += '</table><scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},200);};</scr' + 'ipt></body></html>';
+    const w = window.open('', '_blank');
+    if (!w) { alert('팝업이 차단되어 인쇄창을 열 수 없습니다.\n브라우저에서 이 사이트의 팝업을 허용한 뒤 다시 시도하세요.'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
 }
 // [Ver 6.2] 기존재고 위치값 다운로드 — 헤더 '상품코드', '옵션추가항목1' (입고용/미발확인용과 동일한 진짜 .xls)
 async function downloadLocMove() {
@@ -2418,7 +2461,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '8.99';
+const WEB_VERSION = '9.0';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2561,6 +2604,8 @@ function setupEventListeners() {
     document.getElementById('btn-floor2-download')?.addEventListener('click', () => downloadFloor2());
     // [Ver 8.97] 검수리스트파일다운로드 (샘플검수업무 업로드용)
     document.getElementById('btn-inspection-download')?.addEventListener('click', () => downloadInspectionList());
+    // [Ver 9.0] 검수리스트인쇄 (담당자 전달용)
+    document.getElementById('btn-inspection-print')?.addEventListener('click', () => printInspectionList());
 
     // 10-3. [Ver 8.16] 옵션추가항목1 다운로드는 서브뷰별 인라인 버튼으로 분리 (당일=btn-loc-download-today, 기존=btn-locmove-download)
 
