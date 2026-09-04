@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.4 (오더CSV 중복헤더 '구분' 2개 파싱 버그 수정 — 빈 열이 실제값 덮어써서 구분/JH0001리오더제외 미작동하던 것 해결)
+// 중국제작 미발계산기 Ver 9.5 (샘플위치 보강: Locations 항목 rawData의 공급처상품명 우선 사용 후 미발재고로그 폴백 — 실데이터 테스트로 매칭 검증)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -412,13 +412,17 @@ async function loadSampleLocMap() {
         snap.forEach(docSnap => {
             const zoneData = docSnap.data() || {};
             for (const locId in zoneData) {
-                if (!locId.toString().trim().toUpperCase().startsWith('SAM')) continue; // 제작샘플 = 로케이션 SAM- 로 시작하는 것만
+                if (!locId.toString().trim().toUpperCase().startsWith('SAM')) continue; // 제작샘플 = 로케이션 SAM 로 시작하는 것만
                 const o = zoneData[locId];
                 if (!o || typeof o !== 'object') continue;
-                const code = (o.code || '').toString().trim();
-                const supplier = ((stockLogData[code] || {})['공급처상품명'] || (stockLogData[code] || {})['공급처 상품명'] || '').toString().trim().toLowerCase();
-                if (!supplier) continue; // 공급처상품명 해석 실패 → 스킵
-                const key = supplier + '||' + inspColor(o.option || '');
+                let rd = {};
+                if (o.rawDataStr) { try { rd = JSON.parse(o.rawDataStr) || {}; } catch (e) { rd = {}; } }
+                // 공급처상품명: 항목 rawData 우선(로케이션 업로드 파일에 공급처상품명 열 있음) → 없으면 code→미발재고로그
+                let supplier = (rd['공급처상품명'] || rd['공급처 상품명'] || '').toString().trim();
+                if (!supplier) { const s = stockLogData[(o.code || '').toString().trim()] || {}; supplier = (s['공급처상품명'] || s['공급처 상품명'] || '').toString().trim(); }
+                supplier = supplier.toLowerCase();
+                if (!supplier) continue;
+                const key = supplier + '||' + inspColor(o.option || rd['옵션'] || '');
                 (acc[key] = acc[key] || new Set()).add(locId);
             }
         });
@@ -2489,7 +2493,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.4';
+const WEB_VERSION = '9.5';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
