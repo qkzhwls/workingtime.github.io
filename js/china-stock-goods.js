@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.3 (샘플위치: 제작샘플=로케이션 SAM 시작만 필터 → 공급처상품명+색상 매칭, ZONE_SAM* 문서만 쿼리)
+// 중국제작 미발계산기 Ver 9.4 (오더CSV 중복헤더 '구분' 2개 파싱 버그 수정 — 빈 열이 실제값 덮어써서 구분/JH0001리오더제외 미작동하던 것 해결)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -1177,7 +1177,8 @@ async function fetchCSV(url) {
     const result = [];
     for (let i = headerIdx + 1; i < rawData.length; i++) {
         let obj = {}, empty = true;
-        for (let j = 0; j < headers.length; j++) { if (headers[j]) { obj[headers[j]] = rawData[i][j]; if (rawData[i][j] !== '') empty = false; } }
+        // [Ver 9.4] 중복 헤더(예: 오더시트에 '구분' 2개 — 뒤 열이 전부 빈칸) 대응: 첫 비어있지 않은 값 유지(빈 값이 실제 값을 덮어쓰지 않게)
+        for (let j = 0; j < headers.length; j++) { if (headers[j]) { const v = rawData[i][j]; if (!(headers[j] in obj) || obj[headers[j]] === '' || obj[headers[j]] === undefined) obj[headers[j]] = v; if (v !== '') empty = false; } }
         if (!empty) result.push(obj);
     }
     return result;
@@ -2488,7 +2489,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.3';
+const WEB_VERSION = '9.4';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
