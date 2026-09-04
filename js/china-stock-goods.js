@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.0 (검수리스트인쇄 추가: 담당자 전달용 8열 인쇄 — 상품명/옵션/로케이션/샘플위치/수량/재고수량/접수/출고분, 신상 로케이션 음영)
+// 중국제작 미발계산기 Ver 9.1 (검수리스트인쇄 보강: 마지막 열 헤더 '구분', 샘플위치=Locations(상품명매칭·관리자사이트에서 채워짐) — dev는 수기작성 폴백)
 
 import { initializeFirebase } from './config.js?v=7.9';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -402,22 +402,45 @@ async function downloadInspectionList() {
     await downloadToDesktop(`검수리스트(${dstr}).xlsx`, new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     showToast(`✅ 검수리스트 ${rows.length}건${excluded ? ` (JH0001 리오더 ${excluded}건 제외)` : ''}${noThick ? ` · 두께없음 ${noThick}건` : ''}`);
 }
-// [Ver 9.0] 검수리스트 인쇄 — 담당자 전달용 (Google Sheet printBlankRows와 동일 출력)
-//   8열: 상품명/옵션/로케이션/샘플위치/수량/재고수량/접수/(n월 n일 출고분=구분). 신상 로케이션 음영.
-//   ※ 제작샘플 위치코드 미보유 → 샘플위치는 신상만 '수기작성', 나머지 빈칸(담당자 수기).
-function printInspectionList() {
+// [Ver 9.1] 샘플위치 맵 — location.html의 'Locations' 컬렉션(ZONE_* 문서: locId→{name,...})에서 상품명→로케이션(locId)
+//   관리자 사이트(work-tool-e2943, 로그인 연결) 배포 시 채워짐. dev/미로그인/미존재 시 권한오류 → 빈 맵 → '수기작성' 폴백.
+async function loadSampleLocMap() {
+    const acc = {};
+    try {
+        const snap = await getDocs(collection(db, 'Locations'));
+        snap.forEach(docSnap => {
+            if (!docSnap.id.startsWith('ZONE_')) return; // 창고 존 문서만
+            const zoneData = docSnap.data() || {};
+            for (const locId in zoneData) {
+                const o = zoneData[locId];
+                if (o && typeof o === 'object') {
+                    const nm = (o.name || '').toString().trim();
+                    if (nm && locId) (acc[nm] = acc[nm] || new Set()).add(locId);
+                }
+            }
+        });
+    } catch (e) { console.warn('샘플위치(Locations) 조회 불가 → 수기작성 폴백:', e && e.code); }
+    const out = {};
+    for (const nm in acc) out[nm] = [...acc[nm]].join(', ');
+    return out;
+}
+// [Ver 9.1] 검수리스트 인쇄 — 담당자 전달용 (Google Sheet printBlankRows 기반)
+//   8열: 상품명/옵션/로케이션/샘플위치/수량/재고수량/접수/구분. 구분='신상' 행 로케이션 음영.
+//   구분 값 = 오더리스트 '구분'. 샘플위치 = Locations에서 상품명 매칭 로케이션(없으면 신상만 '수기작성').
+async function printInspectionList() {
     closeAllMenus();
     const { rows, gubunByCode } = buildInspectionRows();
     if (!rows.length) { alert('인쇄할 검수 대상이 없습니다.\n(도착수량 > 0 상품이 없거나 전부 걸러졌습니다 — 출고일을 먼저 선택/계산하세요)'); return; }
+    const sampleLocMap = await loadSampleLocMap();
     const { label } = inspShipDate();
     const esc = v => (v === null || v === undefined ? '' : String(v)).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const header = ['상품명', '옵션', '로케이션', '샘플위치', '수량', '재고수량', '접수', label];
+    const header = ['상품명', '옵션', '로케이션', '샘플위치', '수량', '재고수량', '접수', '구분'];
     const bodyRows = rows.map(r => {
         const s = stockLogData[r.code] || {};
         const gubun = (gubunByCode[r.code] || '').toString().trim();
         const isNew = gubun === '신상';
         const loc = (r.location || (s['로케이션'] || '').split('/')[0] || '').toString().trim();
-        const sampleLoc = isNew ? '수기작성' : '';
+        const sampleLoc = sampleLocMap[(r.name || '').toString().trim()] || (isNew ? '수기작성' : '');
         const stock = (r.totalStock !== undefined && r.totalStock !== '') ? r.totalStock : (s['정상재고'] || '');
         const recv = s['접수'] || '';
         return { cells: [r.name || '', r.option || '', loc, sampleLoc, parseInt(r.arrivalQty) || 0, stock, recv, gubun], isNew };
@@ -2461,7 +2484,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.0';
+const WEB_VERSION = '9.1';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
