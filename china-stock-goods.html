@@ -95,7 +95,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 10.2</div>
+            <div class="version-badge">🚀 Ver 10.3</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -195,9 +195,8 @@
     </div>
     <!-- 당일입고지정 안내 + 다운로드 (당일 서브뷰 전용) -->
     <div id="loc-tools-today" class="loc-today-only" style="gap:10px; align-items:center; flex-wrap:wrap; padding:10px 16px; background:#f3e5f5; border-bottom:1px solid #e1bee7;">
-        <button id="btn-loc-dayclose" title="켜면 비축창고 입고분 중 자리 미지정 줄을 빨간색으로 맨 위에 표시합니다 (다시 누르면 해제)" style="padding:8px 14px; background:#c62828; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔒 마감 (자리지정 확인)</button>
         <button id="btn-loc-download-today" style="padding:8px 14px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
-        <span style="font-size:12px; color:#6a1b9a;">※ 위치 지정은 스캐너([📱 입고앱실행])의 '당일 입고분' 모드로. 지정이 끝나면 <b>[🔒 마감]</b>을 눌러 아래 목록의 <b>빨간 줄(자리 미지정)</b>을 확인한 뒤 <b>[⬇️ 옵션추가항목1 다운로드]</b>로 받으세요.</span>
+        <span style="font-size:12px; color:#6a1b9a;">※ 위치 지정은 스캐너([📱 입고앱실행])의 '당일 입고분' 모드로. 아래 목록 맨 위 <b>빨간 줄</b>은 비축창고에 들어갔는데 <b>자리 미지정</b>인 상품입니다. 다 지정한 뒤 <b>[⬇️ 옵션추가항목1 다운로드]</b>로 받으세요.</span>
     </div>
 
     <div class="list-container">
@@ -503,7 +502,7 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-gate.js?v=202610021800"></script>
-    <script type="module" src="js/china-stock-goods.js?v=202610021800"></script>
+    <script type="module" src="js/china-stock-gate.js?v=202610021900"></script>
+    <script type="module" src="js/china-stock-goods.js?v=202610021900"></script>
 </body>
 </html>
