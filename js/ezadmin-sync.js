@@ -14,7 +14,7 @@
 //      그래서 타이머로 주기적으로 '다시 판정' 한다.
 
 import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import * as State from './state.js?v=202610021122';
+import * as State from './state.js?v=202610021228';
 
 const 문서경로 = ['artifacts', 'team-work-logger-v2', 'integrations', 'ezadmin'];
 

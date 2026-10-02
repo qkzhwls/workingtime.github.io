@@ -1,7 +1,8 @@
 // === js/ui-history-attendance.js ===
 
-import { formatTimeTo24H, formatDuration, getWeekOfYear } from './utils.js?v=202610021122';
-import { context, LEAVE_TYPES } from './state.js?v=202610021122';
+import { formatTimeTo24H, formatDuration, getWeekOfYear, escapeHtml } from './utils.js?v=202610021228';
+import { context, LEAVE_TYPES, appState, appConfig } from './state.js?v=202610021228';
+import { systemAccountSet } from './attendance-stats.js?v=202610021228';
 
 // 근태 요약 표의 열 순서. 기존 순서를 유지하되, LEAVE_TYPES에 있는데 여기 없는 종류는
 // 뒤에 자동으로 붙는다 → 근태 종류가 추가돼도 표에서 누락되지 않는다.
@@ -66,6 +67,82 @@ const getFilterDropdown = (mode, key, currentFilterValue, options = []) => {
 };
 
 
+/**
+ * 출퇴근 시각 표. 마감된 날의 퇴근시각이 틀렸을 때 고칠 수 있는 **유일한** 화면이다.
+ *
+ * 왜 필요했나
+ *   마감은 아직 퇴근을 찍지 않은 사람 전원의 퇴근시각을 그 시각으로 확정한다. 늦게 마감하면
+ *   전원이 그 시각 퇴근으로 박히고, 이력 저장은 마감된 날의 근태를 **서버 우선**으로 지킨다
+ *   (그래야 마감 전 상태를 들고 있던 탭이 되돌리지 못한다). 그 결과 틀린 퇴근시각을
+ *   화면에서 고칠 방법이 0개였다 — 2026-10-01 에는 스크립트로 직접 고쳐야 했다.
+ */
+const renderClockInOutTable = (dateKey, data) => {
+    const att = (data && data.dailyAttendance) || {};
+    const 멤버들 = Object.keys(att).filter(m => att[m] && typeof att[m] === 'object').sort();
+    const 관리자 = appState.currentUserRole === 'admin';
+    // 시스템계정은 근무시간 집계에서 빠진다. 표에 아무 표시 없이 섞여 있으면
+    // '표엔 5명인데 인력운영은 4명' 이 되어 숫자가 틀린 것처럼 보인다.
+    let 시스템 = new Set();
+    try { 시스템 = systemAccountSet(appConfig); } catch (_) {}
+
+    if (멤버들.length === 0) {
+        return `<div class="bg-white p-4 rounded-lg shadow-sm mb-4 text-center text-sm text-gray-400">
+                    출퇴근 기록이 없는 날입니다.
+                </div>`;
+    }
+
+    const 시각 = (v) => (v ? String(v) : '—');
+    const 분 = (v) => {
+        const m = /^(\d{1,2}):(\d{2})/.exec(String(v || ''));
+        return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+    };
+
+    const 행들 = 멤버들.map(m => {
+        const a = att[m] || {};
+        const 들 = 분(a.inTime), 나 = 분(a.outTime);
+        // 근무시간 집계(attendance-stats)가 이 사람을 세지 못하는 상태를 눈에 보이게 한다.
+        // 그냥 '—' 로 두면 왜 인원 수가 안 맞는지 아무도 알 수 없다.
+        const 셀수없음 = (들 == null || 나 == null || 나 <= 들);
+        return `
+            <tr class="border-b last:border-0 ${셀수없음 ? 'bg-amber-50' : ''}">
+                <td class="px-3 py-2 font-medium text-gray-700">${escapeHtml(m)}</td>
+                <td class="px-3 py-2 font-mono text-xs text-gray-600">${escapeHtml(시각(a.inTime))}</td>
+                <td class="px-3 py-2 font-mono text-xs text-gray-600">${escapeHtml(시각(a.outTime))}</td>
+                <td class="px-3 py-2 text-xs">${(a.status === 'returned' || a.outTime)
+                    ? '<span class="text-gray-500">퇴근</span>'
+                    : '<span class="font-bold text-emerald-600">근무 중</span>'}</td>
+                <td class="px-3 py-2 text-xs text-amber-700">${시스템.has(m)
+                    ? '<span class="text-gray-400">시스템 계정 — 집계 제외</span>'
+                    : (셀수없음 ? '근무시간 집계에서 빠집니다' : '')}</td>
+                <td class="px-3 py-2 text-right">${관리자 ? `
+                    <button class="text-xs text-blue-600 hover:underline font-semibold"
+                            data-action="edit-clockinout"
+                            data-date-key="${escapeHtml(dateKey)}" data-member="${escapeHtml(m)}">수정</button>` : ''}</td>
+            </tr>`;
+    }).join('');
+
+    return `
+        <div class="bg-white p-4 rounded-lg shadow-sm mb-4">
+            <div class="flex justify-between items-center mb-2">
+                <h4 class="font-bold text-gray-800">출퇴근 시각 <span class="text-xs font-normal text-gray-400">${멤버들.length}명</span></h4>
+                ${관리자 ? '' : '<span class="text-xs text-gray-400">수정은 관리자만 가능합니다</span>'}
+            </div>
+            <table class="w-full text-sm text-left">
+                <thead class="text-xs text-gray-500 border-b">
+                    <tr>
+                        <th class="px-3 py-2 font-bold">이름</th>
+                        <th class="px-3 py-2 font-bold">출근</th>
+                        <th class="px-3 py-2 font-bold">퇴근</th>
+                        <th class="px-3 py-2 font-bold">상태</th>
+                        <th class="px-3 py-2 font-bold"></th>
+                        <th class="px-3 py-2"></th>
+                    </tr>
+                </thead>
+                <tbody>${행들}</tbody>
+            </table>
+        </div>`;
+};
+
 export const renderAttendanceDailyHistory = (dateKey, allHistoryData) => {
     const view = document.getElementById('history-attendance-daily-view');
     if (!view) return;
@@ -89,6 +166,11 @@ export const renderAttendanceDailyHistory = (dateKey, allHistoryData) => {
         </div>
     `;
     
+    // 출퇴근 시각 표 — 휴가성 기록(onLeaveMembers)과 다른 데이터(dailyAttendance)다.
+    // 아래 '근태 기록이 없습니다' 조기 return **앞에** 있어야 한다. 휴가 기록이 없는 날이
+    // 대부분이라, 뒤에 두면 정작 출퇴근을 고쳐야 하는 날에 화면이 비어 버린다.
+    html += renderClockInOutTable(dateKey, data);
+
     if (!data || !data.onLeaveMembers || data.onLeaveMembers.length === 0) {
         html += `<div class="bg-white p-4 rounded-lg shadow-sm text-center text-gray-500">해당 날짜의 근태 기록이 없습니다.</div>`;
         view.innerHTML = html;

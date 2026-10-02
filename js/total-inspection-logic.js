@@ -1,9 +1,9 @@
 // === js/total-inspection-logic.js ===
 // 설명: 전량 검수(누적 데이터) 관리 및 샘플 검수 연동 로직
 
-import * as DOM from './dom-elements.js?v=202610021122';
-import * as State from './state.js?v=202610021122';
-import { showToast, getTodayDateString } from './utils.js?v=202610021122';
+import * as DOM from './dom-elements.js?v=202610021228';
+import * as State from './state.js?v=202610021228';
+import { showToast, getTodayDateString } from './utils.js?v=202610021228';
 import { doc, getDoc, setDoc, serverTimestamp, updateDoc, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // 현재 조회된 상품의 누적 상태를 저장할 변수

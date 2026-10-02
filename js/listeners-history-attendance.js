@@ -1,15 +1,16 @@
 // === js/listeners-history-attendance.js ===
 // 설명: 이력 보기의 '근태 이력' 관리(추가/수정/삭제 요청) 관련 리스너를 담당합니다.
 
-import * as DOM from './dom-elements.js?v=202610021122';
-import * as State from './state.js?v=202610021122';
-import { isPersistentLeaveType } from './state.js?v=202610021122';
-import { showToast, getTodayDateString, getCurrentTime } from './utils.js?v=202610021122';
-import { renderAttendanceDailyHistory } from './ui-history.js?v=202610021122';
-import { clearLocalCache } from './history-data-manager.js?v=202610021122';
-import { saveLeaveSchedule } from './config.js?v=202610021122';
-import { notifyLeaveScheduleChanged } from './leave-schedule-sync.js?v=202610021122';
-import { augmentHistoryWithPersistentLeave } from './history-enricher.js?v=202610021122';
+import * as DOM from './dom-elements.js?v=202610021228';
+import * as State from './state.js?v=202610021228';
+import { isPersistentLeaveType } from './state.js?v=202610021228';
+import { showToast, getTodayDateString, getCurrentTime } from './utils.js?v=202610021228';
+import { renderAttendanceDailyHistory } from './ui-history.js?v=202610021228';
+import { clearLocalCache, updateAttendanceTime } from './history-data-manager.js?v=202610021228';
+import { validateClockInOut, normalizeClock } from './lib/clock-in-out.js?v=202610021228';
+import { saveLeaveSchedule } from './config.js?v=202610021228';
+import { notifyLeaveScheduleChanged } from './leave-schedule-sync.js?v=202610021228';
+import { augmentHistoryWithPersistentLeave } from './history-enricher.js?v=202610021228';
 import { doc, updateDoc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // 수정 모달이 지금 다루고 있는 근태의 '원본'.
@@ -129,6 +130,37 @@ export function setupHistoryAttendanceListeners() {
 
 // 리스트 내 클릭 핸들러 (위임)
 function handleAttendanceListClicks(e) {
+    // 0. 출퇴근 시각 수정 — dailyAttendance 전용. onLeaveMembers 와 섞지 않는다.
+    const clockBtn = e.target.closest('button[data-action="edit-clockinout"]');
+    if (clockBtn) {
+        const dateKey = clockBtn.dataset.dateKey;
+        const member = clockBtn.dataset.member;
+        if (!dateKey || !member) return;
+
+        const day = State.allHistoryData.find(d => d.id === dateKey);
+        const a = (day && day.dailyAttendance && day.dailyAttendance[member]) || {};
+
+        if (DOM.editClockInOutMember) DOM.editClockInOutMember.value = member;
+        // ⚠️ 0채움으로 고쳐서 넣는다. <input type="time"> 은 '9:10' 을 무효로 보고 빈칸으로
+        //    버리는데, 빈 출근시각은 저장이 거부돼 그 레코드를 영영 못 고치게 된다.
+        //    하필 그런 레코드가 집계에서 빠져 있어서 가장 먼저 고쳐야 하는 값이다.
+        if (DOM.editClockInOutIn) DOM.editClockInOutIn.value = normalizeClock(a.inTime) || '';
+        if (DOM.editClockInOutOut) DOM.editClockInOutOut.value = normalizeClock(a.outTime) || '';
+        if (DOM.editClockInOutDateKey) DOM.editClockInOutDateKey.value = dateKey;
+        if (DOM.editClockInOutWarn) {
+            // 원래 저장돼 있던 값이 입력칸에 그대로 못 들어갔으면 그 사실을 보여 준다.
+            const 못담음 = [['출근', a.inTime], ['퇴근', a.outTime]]
+                .filter(([, v]) => v && !normalizeClock(v))
+                .map(([k, v]) => `${k} ${v}`);
+            DOM.editClockInOutWarn.textContent = 못담음.length
+                ? `저장된 값을 입력칸에 담을 수 없습니다 (${못담음.join(' · ')}). 올바른 시각으로 다시 넣어 주세요.`
+                : '';
+            DOM.editClockInOutWarn.classList.toggle('hidden', 못담음.length === 0);
+        }
+        if (DOM.editClockInOutModal) DOM.editClockInOutModal.classList.remove('hidden');
+        return;
+    }
+
     // 1. 수정 버튼
     const editBtn = e.target.closest('button[data-action="edit-attendance"]');
     if (editBtn) {
@@ -237,6 +269,59 @@ function handleAttendanceListClicks(e) {
 }
 
 function setupAttendanceModalButtons() {
+    // --- 출퇴근 시각 수정 ---
+    if (DOM.confirmEditClockInOutBtn) {
+        DOM.confirmEditClockInOutBtn.addEventListener('click', async () => {
+            const dateKey = DOM.editClockInOutDateKey?.value;
+            const member = DOM.editClockInOutMember?.value;
+            const inTime = (DOM.editClockInOutIn?.value || '').trim();
+            const outTime = (DOM.editClockInOutOut?.value || '').trim();
+
+            const 경고 = (글) => {
+                if (!DOM.editClockInOutWarn) { showToast(글, true); return; }
+                DOM.editClockInOutWarn.textContent = 글;
+                DOM.editClockInOutWarn.classList.remove('hidden');
+            };
+
+            if (!dateKey || !member) { 경고('대상을 찾을 수 없습니다.'); return; }
+
+            // 저장 함수와 **같은 함수**로 검사한다. 예전엔 여기에만 간단한 검사를 두어,
+            // 매니저 쪽에서 거부된 값은 모달이 그냥 열린 채 남고 이유가 안 보였다.
+            const 검사 = validateClockInOut({ inTime, outTime },
+                { isPast: dateKey < getTodayDateString() });
+            if (!검사.ok) { 경고(검사.message); return; }
+
+            DOM.confirmEditClockInOutBtn.disabled = true;
+            try {
+                // 퇴근을 비우면 '아직 근무 중'. 찍으면 'returned' —
+                // 집계가 status 를 보기 때문에 둘을 따로 둘 수 없다.
+                const ok = await updateAttendanceTime(dateKey, member, {
+                    inTime,
+                    outTime: outTime || null,
+                    status: outTime ? 'returned' : 'active'
+                });
+                if (!ok) 경고('저장되지 않았습니다. 값을 다시 확인해 주세요.');
+                if (!ok) return;   // 실패 안내는 updateAttendanceTime 이 한다
+                if (DOM.editClockInOutModal) DOM.editClockInOutModal.classList.add('hidden');
+                // 근태 탭만 그리면 인력운영·개인별 숫자가 옛 값으로 남는다.
+                if (typeof window.__refreshHistoryViews === 'function') {
+                    await window.__refreshHistoryViews();
+                }
+            } catch (e) {
+                console.error('출퇴근 시각 수정 실패:', e);
+                경고('저장 중 오류가 발생했습니다: ' + (e.message || e));
+            } finally {
+                DOM.confirmEditClockInOutBtn.disabled = false;
+            }
+        });
+    }
+
+    if (DOM.cancelEditClockInOutBtn) {
+        DOM.cancelEditClockInOutBtn.addEventListener('click', () => {
+            if (DOM.editClockInOutModal) DOM.editClockInOutModal.classList.add('hidden');
+        });
+    }
+
     // --- 수정 모달 확인 버튼 ---
     if (DOM.confirmEditAttendanceBtn) {
         DOM.confirmEditAttendanceBtn.addEventListener('click', async () => {

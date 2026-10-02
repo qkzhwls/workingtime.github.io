@@ -6,7 +6,7 @@
 //   ② 기존 hourErr 가 **바뀌지 않았는지** — 옛 날짜 9일치 숫자가 흔들리면 안 된다
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decomposeAccuracy, summarizeAccuracyRows, aggregateByTask } from '../js/forecast-accuracy.js?v=202610021122';
+import { decomposeAccuracy, summarizeAccuracyRows, aggregateByTask } from '../js/forecast-accuracy.js?v=202610021228';
 
 /** duration 은 '분'. 한 업무에 여러 건이 들어오는 게 정상이다(사람·분할). */
 const rec = (task, min, member = 'A') => ({ task, duration: min, member });

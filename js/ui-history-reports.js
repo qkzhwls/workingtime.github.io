@@ -1,5 +1,5 @@
 // === js/ui-history-reports.js ===
-import { getWeekOfYear, buildMemberHourlyWageMap } from './utils.js?v=202610021122';
+import { getWeekOfYear, buildMemberHourlyWageMap } from './utils.js?v=202610021228';
 
 import {
     calculateReportKPIs,
@@ -11,11 +11,11 @@ import {
     calculateAdvancedProductivity,
     calculateBenchmarkOEE,
     calculateAverageStaffing
-} from './ui-history-reports-logic.js?v=202610021122';
+} from './ui-history-reports-logic.js?v=202610021228';
 
 import {
     renderGenericReport
-} from './ui-history-reports-renderer.js?v=202610021122';
+} from './ui-history-reports-renderer.js?v=202610021228';
 
 
 const _prepareReportData = (currentDaysData, previousDaysData, appConfig) => {

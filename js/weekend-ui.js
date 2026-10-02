@@ -1,11 +1,11 @@
 // === js/weekend-ui.js ===
-import * as State from './state.js?v=202610021122';
+import * as State from './state.js?v=202610021228';
 // 공휴일 표는 utils.js 로 옮겼다(업무 예상에서도 쓰기 위해). 기존 사용처를 위해 그대로 다시 내보낸다.
-import { getHolidayName } from './utils.js?v=202610021122';
+import { getHolidayName } from './utils.js?v=202610021228';
 export { getHolidayName };
-import { store } from './weekend-store.js?v=202610021122';
-import { handleDateClick } from './weekend-core.js?v=202610021122';
-import { openAdminDatePopup, openPastDateEditPopup, handleAdminBadgeClick } from './weekend-admin.js?v=202610021122';
+import { store } from './weekend-store.js?v=202610021228';
+import { handleDateClick } from './weekend-core.js?v=202610021228';
+import { openAdminDatePopup, openPastDateEditPopup, handleAdminBadgeClick } from './weekend-admin.js?v=202610021228';
 
 // 주말근무 기준 관리자 명단 (계정 역할이 admin이 아니어도 관리자 권한 부여)
 const WEEKEND_ADMINS = ['박영철', '박호진', '유아라', '이승운'];

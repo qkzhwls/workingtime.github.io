@@ -1,33 +1,33 @@
 // === js/listeners-main.js ===
 // 설명: 메인 화면의 리스너 (실시간 현황판 제외)
 
-import * as DOM from './dom-elements.js?v=202610021122';
-import * as State from './state.js?v=202610021122';
+import * as DOM from './dom-elements.js?v=202610021228';
+import * as State from './state.js?v=202610021228';
 
 // app.js에서는 'render'만, app-data.js에서는 'updateDailyData'를 가져옵니다.
-import { render } from './app.js?v=202610021122';
-import { updateDailyData } from './app-data.js?v=202610021122';
+import { render } from './app.js?v=202610021228';
+import { updateDailyData } from './app-data.js?v=202610021228';
 
-import { calcElapsedMinutes, showToast, getTodayDateString, getCurrentTime, formatTimeTo24H } from './utils.js?v=202610021122';
+import { calcElapsedMinutes, showToast, getTodayDateString, getCurrentTime, formatTimeTo24H } from './utils.js?v=202610021228';
 import {
     renderPersonalAnalysis,
     renderQuantityModalInputs,
     renderManualAddModalDatalists,
     renderLeaveTypeModalOptions 
-} from './ui.js?v=202610021122';
+} from './ui.js?v=202610021228';
 import {
     processClockIn, processClockOut, cancelClockOut
-} from './app-logic.js?v=202610021122';
-import { saveProgress, saveDayDataToHistory, checkUnverifiedRecords, previewDayClose } from './history-data-manager.js?v=202610021122';
-import { checkMissingQuantities } from './analysis-logic.js?v=202610021122';
-import { openHistoryQuantityModal } from './app-history-logic.js?v=202610021122';
+} from './app-logic.js?v=202610021228';
+import { saveProgress, saveDayDataToHistory, checkUnverifiedRecords, previewDayClose } from './history-data-manager.js?v=202610021228';
+import { checkMissingQuantities } from './analysis-logic.js?v=202610021228';
+import { openHistoryQuantityModal } from './app-history-logic.js?v=202610021228';
 
 import { 
     doc, updateDoc, collection, query, where, getDocs, setDoc 
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Admin Todo 로직 임포트
-import * as AdminTodoLogic from './admin-todo-logic.js?v=202610021122';
+import * as AdminTodoLogic from './admin-todo-logic.js?v=202610021228';
 
 export function setupMainScreenListeners() {
 

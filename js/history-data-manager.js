@@ -1,6 +1,10 @@
 // === js/history-data-manager.js ===
-import * as State from './state.js?v=202610021122';
-import { getTodayDateString, toDateString, getCurrentTime, calcElapsedMinutes, showToast } from './utils.js?v=202610021122';
+import * as State from './state.js?v=202610021228';
+import { getTodayDateString, toDateString, getCurrentTime, calcElapsedMinutes, showToast } from './utils.js?v=202610021228';
+import { clampOpenRecords } from './lib/record-close.js?v=202610021228';
+import { decideHistoryMerge } from './lib/history-merge.js?v=202610021228';
+import { validateClockInOut, normalizeClock } from './lib/clock-in-out.js?v=202610021228';
+import { validMemberNames, systemAccountSet } from './attendance-stats.js?v=202610021228';
 import {
     doc, setDoc, getDoc, getDocFromServer, collection, getDocs, getDocsFromServer,
     deleteDoc, deleteField,
@@ -343,14 +347,10 @@ export const syncTodayToHistory = async () => {
     const now = getCurrentTime();
 
     try {
-        const liveWorkRecords = (State.appState.workRecords || []).map(record => {
-            const data = { ...record };
-            if (data.status === 'ongoing' || data.status === 'paused') {
-                data.duration = calcElapsedMinutes(data.startTime, now, data.pauses);
-                data.endTime = now;
-            }
-            return data;
-        });
+        // 열린 기록의 끝은 record-close.js 가 정한다 — saveProgress 와 같은 규칙이어야 한다.
+        // 예전엔 여기만 상한이 없어서, 같은 기록이 메모리에선 무제한 · 서버에선 다른 값이었다.
+        const { records: liveWorkRecords } = clampOpenRecords(
+            State.appState.workRecords, State.appState.dailyAttendance, now);
 
         const idx = State.allHistoryData.findIndex(d => d.id === todayKey);
         const existingHistory = idx > -1 ? State.allHistoryData[idx] : null;
@@ -443,8 +443,9 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
             // 베이스는 아래에서 읽는 serverHistory.management 로 교체된다(메모리 캐시는 얼어붙어 있어,
             // 그걸 베이스로 쓰면 내 탭이 켜진 뒤 남이 고친 매출·재고가 옛 값으로 되돌아간다).
             management: { ...(State.appState.management || {}) },
-            inspectionList: State.appState.inspectionList || [],
-            isQuantityVerified: State.appState.isQuantityVerified || false
+            inspectionList: State.appState.inspectionList || []
+            // isQuantityVerified 는 여기 두지 않는다 — decideHistoryMerge 에
+            // State 값을 직접 넘기고, 그쪽이 서버 값과 OR 한다.
         };
 
         // 업무기록은 '서버 원본'에서 읽는다.
@@ -474,15 +475,24 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
                 return 'failed';
             }
         }
-        const liveWorkRecords = sourceRecords.map(record => {
-            const data = { ...record };
-            if (data.status === 'ongoing' || data.status === 'paused') {
-                data.duration = calcElapsedMinutes(data.startTime, now, data.pauses);
-                data.endTime = now;
-                if (data.duration > 1200) data.status = 'completed';
-            }
-            return data;
-        }).filter(record => {
+        // 아직 끝나지 않은 기록의 '끝' 을 어디로 볼 것인가 — js/lib/record-close.js (테스트됨).
+        //
+        // 예전엔 그냥 '지금' 이었다. 그런데 마감 안전망(eodFlushToHistory)은 30분마다
+        // **자정까지** 재시도한다. 아무도 '업무 마감' 을 누르지 않은 날 22:00 에 저장이 돌면
+        // 10:00 에 시작한 기록이 12시간으로 이력에 영구히 박혔다 — 아무도 그렇게 말하지 않았는데.
+        //
+        // 상한처럼 보였던 `if (duration > 1200) status = 'completed'` 한 줄은 상한이 아니었다.
+        // 시간을 깎지 않고 상태만 바꿨고, 아래 '마감된 날 덧붙이기' 가 **완료된 기록만** 골라
+        // 접붙이므로, 20시간을 넘긴 가짜 기록만 정확히 통과시키는 구멍이었다.
+        const { records: clampedRecords, clamped } = clampOpenRecords(
+            sourceRecords, State.appState.dailyAttendance, now);
+        if (clamped.length > 0) {
+            // 영구히 박히는 숫자라서 근거를 남긴다. 토스트는 띄우지 않는다 —
+            // 이 함수는 자동저장·안전망이 반복 호출하므로 밤새 알림만 쌓인다.
+            console.warn(`[saveProgress] ${dateStr}: 끝나지 않은 기록 ${clamped.length}건의`
+                + ' 종료시각을 조정했습니다(퇴근시각 → 업무일 종료 → 상한 순).', clamped);
+        }
+        const liveWorkRecords = clampedRecords.filter(record => {
             if (record.status !== 'completed') return true;
             return Math.round(record.duration || 0) > 0;
         });
@@ -501,8 +511,30 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
         }
         const existingRecordsCount = (serverHistory.workRecords || []).length;
 
-        // management 베이스를 서버 값으로 교체 (위 주석 참조)
-        dailyData.management = { ...(serverHistory.management || {}), ...(State.appState.management || {}) };
+        // 서버에 있는 것과 내 화면에 있는 것 중 **무엇이 이기는가** — 판단은
+        // js/lib/history-merge.js 가 한다(순수 함수. tests/history-merge.test.js 가 지킨다).
+        //
+        // 아래 긴 주석들은 그 규칙이 **왜** 그렇게 생겼는지의 기록이다. 전부 실제 사고 뒤에
+        // 붙은 것이라 지우지 않았다. 규칙 자체를 고치려면 그 모듈과 테스트를 같이 고쳐야 한다 —
+        // 여기서 조용히 한 줄 바꾸는 것으로는 못 고치게 만든 것이 이 분리의 목적이다.
+        // (같은 종류의 사고가 네 번 났고, 그때마다 이 자리에 주석만 한 단락 늘었다)
+        const { patch: historyData, memRecords, notes } = decideHistoryMerge({
+            dateStr,
+            liveRecords: liveWorkRecords,
+            serverHistory,
+            live: {
+                taskQuantities: dailyData.taskQuantities,
+                confirmedZeroTasks: dailyData.confirmedZeroTasks,
+                onLeaveMembers: dailyData.onLeaveMembers,
+                partTimers: dailyData.partTimers,
+                dailyAttendance: dailyData.dailyAttendance,
+                management: State.appState.management,
+                inspectionList: dailyData.inspectionList,
+                isQuantityVerified: State.appState.isQuantityVerified
+            },
+            isQuantityVerifiedArg: isQuantityVerified,
+            now
+        });
 
         // 살아있는 기록이 0건인데 이력엔 있으면 '업무기록만' 손대지 않는다.
         //
@@ -515,8 +547,7 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
         // 다만 저장 자체를 중단하면 같은 payload 에 실린 물량·검수·검증여부까지 함께 날아간다
         // (0분 기록을 전부 지우고 물량만 입력한 날의 마감이 그 경우다).
         // 그래서 '중단'이 아니라 'workRecords 키만 빼기'로 처리한다 — merge 라 서버 배열이 보존된다.
-        const keepServerRecords = existingRecordsCount > 0 && liveWorkRecords.length === 0;
-        if (keepServerRecords) {
+        if (notes.keepServerRecords) {
             console.warn(`[saveProgress] ${dateStr}: 살아있는 기록 0건, 이력 ${existingRecordsCount}건 — 업무기록은 건드리지 않고 나머지만 저장합니다.`);
         }
 
@@ -548,27 +579,16 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
         //        뒤에 찍힌다), (2) 예외를 두면 삭제 확인창을 띄워 둔 사이에 다른 PC·봇이
         //        마감을 끝내는 창이 열려, 막으려던 사고가 그대로 재현된다.
         //    이미 마감된 날을 고쳐야 하면 이력 편집으로 한다(버튼 한 번으로 덮지 않는다).
-        const isClosedDay = !!serverHistory.closedAt;
-        let appendOnlyRecords = null;
-        if (isClosedDay && !keepServerRecords) {
-            const serverRecords = serverHistory.workRecords || [];
-            const serverIds = new Set(serverRecords.map(r => r && r.id).filter(Boolean));
-            // 진행 중 기록은 덧붙이지 않는다. endTime 이 '저장한 시각' 으로 박히고,
-            // 그 뒤에는 '이미 있는 id' 라 영원히 갱신되지 않아 거짓 시간이 굳는다.
-            const appendable = liveWorkRecords.filter(r => r && r.status === 'completed');
-            const noId = appendable.filter(r => !r.id).length;
-            const newRecords = appendable.filter(r => r.id && !serverIds.has(r.id));
-            appendOnlyRecords = newRecords.length > 0 ? [...serverRecords, ...newRecords] : null;
-            console.warn(`[saveProgress] ${dateStr}: 이미 마감된 날(closedAt=${serverHistory.closedAt})`
-                + ` — 이력 ${serverRecords.length}건을 교체하지 않습니다.`
-                + (newRecords.length > 0 ? ` 완료된 새 기록 ${newRecords.length}건만 덧붙입니다.` : ' 덧붙일 새 기록이 없습니다.')
-                + (noId > 0 ? ` ⚠️ id 가 없어 건너뛴 기록 ${noId}건.` : ''));
+        // 진행 중 기록은 덧붙이지 않는다. endTime 이 '저장한 시각' 으로 박히고,
+        // 그 뒤에는 '이미 있는 id' 라 영원히 갱신되지 않아 거짓 시간이 굳는다.
+        if (notes.isClosedDay && !notes.keepServerRecords) {
+            console.warn(`[saveProgress] ${dateStr}: 이미 마감된 날(closedAt=${notes.closedAt})`
+                + ` — 이력 ${existingRecordsCount}건을 교체하지 않습니다.`
+                + (notes.appendedCount > 0 ? ` 완료된 새 기록 ${notes.appendedCount}건만 덧붙입니다.` : ' 덧붙일 새 기록이 없습니다.')
+                + (notes.skippedNoIdCount > 0 ? ` ⚠️ id 가 없어 건너뛴 기록 ${notes.skippedNoIdCount}건.` : ''));
         }
-        const omitRecordsKey = keepServerRecords || (isClosedDay && appendOnlyRecords === null);
 
-        if (liveWorkRecords.length === 0 &&
-            Object.keys(dailyData.taskQuantities).length === 0 &&
-            (!dailyData.inspectionList || dailyData.inspectionList.length === 0)) {
+        if (notes.nothingToSave) {
              // 저장할 것이 아무것도 없는 상태. 실패가 아니지만 저장도 아니다 —
              // 마감 안전망은 재시도해야 하고, 화면은 오류로 안내하면 안 되어 따로 구분한다.
              return 'nothing';
@@ -580,10 +600,7 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
         // 사람만 더한다. 키를 통째로 빼려고 했다가 되돌렸다 — 이력의 근태를 고치는 UI 가
         // 저장소에 존재하지 않아서(listeners-history-attendance.js 는 onLeaveMembers 만 다룬다),
         // 키를 빼면 마감 뒤 퇴근시각이 틀렸을 때 사용자가 고칠 방법이 0개가 된다.
-        const liveAttendance = { ...dailyData.dailyAttendance, ...State.appState.dailyAttendance };
-        const mergedAttendance = isClosedDay
-            ? { ...liveAttendance, ...(serverHistory.dailyAttendance || {}) }
-            : liveAttendance;
+        // → history-merge.js 의 규칙 ②.
 
         // 🛡️ 마감된 날에는 '이력에 있는 값을 후퇴시키지 않는다'.
         //    마감이 daily_data 의 물량·검증여부를 초기화하기 때문에, 마감 뒤에 열린 세션이
@@ -591,27 +608,7 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
         //    recoverDailyDataToHistory 가 쓰는 것과 같은 규칙이다(중복 구현을 피해 같은 모양으로 둔다).
         //    dailyAttendance 는 아예 **키를 뺀다** — 마감이 확정한 퇴근시각은 이력 편집으로만
         //    고친다(.claude/skills/attendance-check 1번 규칙과 같은 방향).
-        const emptyObj_ = (v) => !v || Object.keys(v).length === 0;
-        const emptyArr_ = (v) => !Array.isArray(v) || v.length === 0;
-        const keepClosed = (live, hist, isEmpty) => (!isClosedDay || !isEmpty(live))
-            ? live
-            : (hist !== undefined && hist !== null ? hist : live);
-
-        const historyData = {
-            id: dateStr,
-            ...(omitRecordsKey ? {} : { workRecords: appendOnlyRecords || liveWorkRecords }),
-            taskQuantities: keepClosed(dailyData.taskQuantities, serverHistory.taskQuantities, emptyObj_),
-            confirmedZeroTasks: keepClosed(dailyData.confirmedZeroTasks, serverHistory.confirmedZeroTasks, emptyArr_),
-            onLeaveMembers: keepClosed(dailyData.onLeaveMembers, serverHistory.onLeaveMembers, emptyArr_),
-            partTimers: keepClosed(dailyData.partTimers, serverHistory.partTimers, emptyArr_),
-            dailyAttendance: mergedAttendance,
-            management: dailyData.management,
-            inspectionList: keepClosed(dailyData.inspectionList, serverHistory.inspectionList, emptyArr_),
-            // 서버값을 항상 OR 에 넣는다 — 검증을 찍은 뒤 다른 탭이 저장하면 false 로 후퇴했다.
-            isQuantityVerified: !!(isQuantityVerified || State.appState.isQuantityVerified
-                || serverHistory.isQuantityVerified),
-            savedAt: now
-        };
+        // → history-merge.js 의 규칙 ③④. 검증여부는 인자·라이브·서버의 OR 이라 후퇴하지 않는다.
 
         await setDoc(historyDocRef, historyData, { merge: true });
         
@@ -632,9 +629,8 @@ export async function saveProgress(isAutoSave = false, isQuantityVerified = fals
         // ⚠️ 서버에 실제로 남은 배열과 반드시 같아야 한다. 어긋나면 addHistoryWorkRecord·
         //    updateHistoryDirectly·deleteHistoryWorkRecord 가 '메모리 배열을 통째로' 서버에
         //    쓰면서 방금 지킨 기록을 날린다(바로 위 주석의 사고가 그 경로다).
-        const memRecords = omitRecordsKey
-            ? (serverHistory.workRecords || [])
-            : (appendOnlyRecords || liveWorkRecords);
+        // memRecords 는 historyData 와 **같은 판단에서** 나온다(history-merge.js 규칙 ⑤) —
+        // 둘이 어긋나면 메모리 배열을 통째로 쓰는 다른 함수들이 서버 기록을 날린다.
         const memPatch = { ...historyData, workRecords: memRecords };
 
         const memIdx = State.allHistoryData.findIndex(d => d.id === dateStr);
@@ -1634,6 +1630,119 @@ export async function saveManagementData(dateKey, managementData) {
         throw e; 
     }
 }
+
+/**
+ * 🕘 이력의 **출퇴근 시각**을 고친다. 관리자만.
+ *
+ * 왜 이 함수가 생겼나
+ *   마감은 아직 퇴근을 찍지 않은 사람 **전원**의 퇴근시각을 마감 시각으로 확정한다.
+ *   21시에 마감 버튼을 누르면 전원이 21시 퇴근으로 박힌다. 그리고 saveProgress 는
+ *   마감된 날의 근태를 **서버 우선**으로 지킨다(그래야 마감 전 상태를 들고 있던 탭이
+ *   되돌리지 못한다). 두 규칙이 겹쳐서, 틀린 퇴근시각을 화면에서 고칠 방법이 **0개**였다 —
+ *   2026-10-01 에는 스크립트로 직접 고쳐야 했다. 그 구멍을 닫는 전용 경로다.
+ *
+ * ⚠️ 저장 경로를 새로 늘리는 것이라서, 규칙을 좁게 잡았다
+ *    (.claude/skills/attendance-check 1번: 근태는 전용 경로에만 저장한다).
+ *    · `dailyAttendance` 객체를 **통째로 쓰지 않는다.** 그 멤버 키 하나만 merge 한다.
+ *      통째로 쓰면 마감 후 재출근한 인원이 되살아난다(과거 사고).
+ *    · 두 문서를 **같이** 고친다. `history` 만 고치면 '일일 데이터 복구' 가 `daily_data`
+ *      쪽 값을 우선해 되돌려 놓는다(마감이 daily_data 의 근태를 지우지 않는다).
+ *    · `notifyLeaveScheduleChanged` 는 부르지 않는다. 그 알림은 `leaveSchedule`(연차·외출)
+ *      용이고 이 함수는 그걸 건드리지 않는다. 화면 갱신은 호출한 쪽이 한다.
+ *
+ * @param {string} dateKey  'YYYY-MM-DD'
+ * @param {string} member   인원 이름(배열 인덱스가 아니다 — 목록에는 사본 행이 섞여 있다)
+ * @param {{inTime:string, outTime:string|null, status:string}} value
+ * @returns {Promise<boolean>} 저장했으면 true
+ */
+export async function updateAttendanceTime(dateKey, member, { inTime, outTime, status }) {
+    // 🔒 실수 방지용 문지기다. **보안 경계가 아니다** — Firestore 규칙이 history·daily_data
+    //    쓰기를 로그인한 전원에게 허용하므로, 콘솔에서 setDoc 을 직접 부르면 그대로 통과한다.
+    //    (role 이 아직 안 들어왔으면 거부한다. 틀리는 쪽을 '막는 쪽' 으로 둔다)
+    if (State.appState.currentUserRole !== 'admin') {
+        showToast('출퇴근 시각 수정은 관리자만 할 수 있습니다.', true);
+        return false;
+    }
+    if (!State.auth || !State.auth.currentUser) {
+        showToast('로그인이 필요합니다.', true);
+        return false;
+    }
+    if (!dateKey || !member) {
+        showToast('대상을 찾을 수 없습니다.', true);
+        return false;
+    }
+
+    // 검증은 js/lib/clock-in-out.js 가 한다(테스트됨). 화면 쪽도 **같은 함수**를 쓴다 —
+    // 예전엔 두 군데에 따로 복사돼 있어서, 한쪽만 통과한 값이 저장되고 집계에서 조용히 빠졌다.
+    // 0채움이 아닌 옛 값('9:10')은 여기서 고쳐 받는다. 거부하면 그 레코드를 영영 못 고친다.
+    const 들어옴 = normalizeClock(inTime) || String(inTime || '').trim();
+    const 나감 = outTime == null || String(outTime).trim() === ''
+        ? null : (normalizeClock(outTime) || String(outTime).trim());
+
+    const 검사 = validateClockInOut({ inTime: 들어옴, outTime: 나감 },
+        { isPast: dateKey < getTodayDateString() });
+    if (!검사.ok) {
+        showToast(검사.message, true);
+        return false;
+    }
+    검사.warnings.forEach(w => showToast(w, false));
+
+    const 새값 = { inTime: 들어옴, outTime: 나감, status: 나감 ? 'returned' : 'active' };
+
+    try {
+        // ⚠️ setDoc + **중첩 객체** + merge 다. 점표기법(`{'dailyAttendance.홍길동': v}`)은
+        //    setDoc 에서 필드경로가 아니라 '점이 든 리터럴 키' 가 되어, 집계 순회에
+        //    유령 멤버가 끼어든다(updateDoc 에서만 필드경로로 동작한다).
+        //    Firestore 는 map 을 깊게 merge 하므로 다른 인원은 보존된다.
+        const 조각 = { dailyAttendance: { [member]: 새값 } };
+
+        // ⚠️ 두 문서를 **한 번에** 쓴다. 순차 await 로 쓰면 첫 쓰기만 성공하는 창이 열리고,
+        //    그 상태에서 마감 안 된 날은 '일일 데이터 복구'(앱 시작 시 자동으로도 돈다)가
+        //    daily_data 를 우선해 옛 값을 history 로 되돌려 놓는다 —
+        //    사용자는 '저장 실패' 토스트를 봤는데 값은 바뀌었다가 다시 돌아가 있다.
+        const batch = writeBatch(State.db);
+        batch.set(doc(State.db, 'artifacts', 'team-work-logger-v2', 'history', dateKey),
+                  조각, { merge: true });
+        // daily_data 도 같이 고친다 — 마감이 이 문서의 근태를 지우지 않아서,
+        // 여기를 안 고치면 복구가 옛 값으로 되돌려 놓는다.
+        batch.set(doc(State.db, 'artifacts', 'team-work-logger-v2', 'daily_data', dateKey),
+                  조각, { merge: true });
+        await batch.commit();
+
+        // 메모리도 **그 키만** 바꾼다. 객체를 통째로 교체하면 다른 인원이 날아간다.
+        const idx = State.allHistoryData.findIndex(d => d.id === dateKey);
+        if (idx === -1) {
+            // 저장은 됐는데 화면은 옛 값이다. 도달하기 어렵지만(수정 중 이력을 다시 불러온 경우)
+            // 조용히 넘기면 '고쳤는데 그대로' 가 된다.
+            console.warn(`[updateAttendanceTime] ${dateKey}: 메모리 이력에 없어 화면이 갱신되지 않습니다.`);
+        }
+        if (idx > -1) {
+            const day = State.allHistoryData[idx];
+            day.dailyAttendance = { ...(day.dailyAttendance || {}), [member]: 새값 };
+
+            // 그 사람이 그날 '인원' 으로 인정되지 않으면 수정해도 집계 숫자가 안 변한다.
+            // 조용히 끝나면 '고쳤는데 왜 그대로냐' 가 된다.
+            try {
+                if (!validMemberNames(day, State.appConfig).has(member)) {
+                    showToast(`${member} 님은 그날 인원 명부에 없어, 근무시간 집계에는 반영되지 않습니다.`, false);
+                }
+            } catch (_) { /* 명부 확인은 보조 안내일 뿐이다 */ }
+        }
+        if (dateKey === getTodayDateString()) {
+            State.appState.dailyAttendance = { ...(State.appState.dailyAttendance || {}), [member]: 새값 };
+        }
+
+        clearLocalCache();
+        console.info('[updateAttendanceTime]', { date: dateKey, member, ...새값 });
+        showToast(`${member} 님의 출퇴근 시각을 고쳤습니다.`);
+        return true;
+    } catch (e) {
+        console.error('updateAttendanceTime 실패:', e);
+        showToast('출퇴근 시각 저장 실패: ' + (e.message || e), true);
+        return false;
+    }
+}
+
 
 // 💱 과거 환율 소급 입력(백필).
 // history 문서가 있는 날짜 중 환율이 비어있는 날을 날짜별 조회가 되는 무료 API(frankfurter)로 채운다.

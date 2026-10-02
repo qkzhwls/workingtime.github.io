@@ -1,5 +1,5 @@
 // === js/widget-incoming-schedule.js ===
-import { escapeHtml } from './utils.js?v=202610021122';
+import { escapeHtml } from './utils.js?v=202610021228';
 // 🚚 메인 대시보드 "주요 일정 및 알림" 위젯의 입고 예정 섹션.
 // Apps Script Web App에서 JSON을 받아 도착일이 당일 이후인 행을 표시.
 

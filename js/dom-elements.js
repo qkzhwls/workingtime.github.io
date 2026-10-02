@@ -57,6 +57,15 @@ export const editAttendanceDateKeyInput = document.getElementById('edit-attendan
 export const editAttendanceRecordIndexInput = document.getElementById('edit-attendance-record-index');
 export const editAttendanceTimeFields = document.getElementById('edit-attendance-time-fields');
 export const editAttendanceDateFields = document.getElementById('edit-attendance-date-fields');
+// 출퇴근 시각 수정 — dailyAttendance 전용 모달(위의 근태 기록 수정과 다른 저장소다)
+export const editClockInOutModal = document.getElementById('edit-clockinout-modal');
+export const editClockInOutMember = document.getElementById('edit-clockinout-member');
+export const editClockInOutIn = document.getElementById('edit-clockinout-in');
+export const editClockInOutOut = document.getElementById('edit-clockinout-out');
+export const editClockInOutWarn = document.getElementById('edit-clockinout-warn');
+export const editClockInOutDateKey = document.getElementById('edit-clockinout-date-key');
+export const confirmEditClockInOutBtn = document.getElementById('confirm-edit-clockinout-btn');
+export const cancelEditClockInOutBtn = document.getElementById('cancel-edit-clockinout-btn');
 export const connectionStatusEl = document.getElementById('connection-status');
 export const statusDotEl = document.getElementById('status-dot');
 export const teamStatusBoard = document.getElementById('team-status-board');

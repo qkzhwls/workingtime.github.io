@@ -1,23 +1,23 @@
 // === js/listeners-history.js ===
-import * as DOM from './dom-elements.js?v=202610021122';
-import * as State from './state.js?v=202610021122';
-import { showToast, getTodayDateString, toDateString } from './utils.js?v=202610021122';
+import * as DOM from './dom-elements.js?v=202610021228';
+import * as State from './state.js?v=202610021228';
+import { showToast, getTodayDateString, toDateString } from './utils.js?v=202610021228';
 
-import { setupHistoryDownloadListeners, openDownloadFormatModal } from './listeners-history-download.js?v=202610021122';
-import { setupHistoryRecordListeners } from './listeners-history-records.js?v=202610021122';
-import { setupHistoryAttendanceListeners } from './listeners-history-attendance.js?v=202610021122';
-import { setupHistoryInspectionListeners } from './listeners-history-inspection.js?v=202610021122';
+import { setupHistoryDownloadListeners, openDownloadFormatModal } from './listeners-history-download.js?v=202610021228';
+import { setupHistoryRecordListeners } from './listeners-history-records.js?v=202610021228';
+import { setupHistoryAttendanceListeners } from './listeners-history-attendance.js?v=202610021228';
+import { setupHistoryInspectionListeners } from './listeners-history-inspection.js?v=202610021228';
 
-import { loadAndRenderHistoryList, renderHistoryDetail, switchHistoryView, openHistoryQuantityModal, augmentHistoryWithPersistentLeave } from './app-history-logic.js?v=202610021122';
-import { renderAttendanceDailyHistory, renderAttendanceWeeklyHistory, renderAttendanceMonthlyHistory, renderAttendanceYearlyHistory, renderReportDaily, renderReportWeekly, renderReportMonthly, renderReportYearly, renderPersonalReport, renderManagementDaily, renderManagementSummary, renderWeeklyHistory, renderMonthlyHistory, renderYearlyHistory, renderPredictionTab } from './ui-history.js?v=202610021122';
-import { syncTodayToHistory, saveManagementData, backfillFxRates, peekDailyData, recoverDailyDataToHistory, fetchAllHistoryData } from './history-data-manager.js?v=202610021122';
-import { REVENUE_CHANNELS, CHANNEL_METRICS } from './revenue-channels.js?v=202610021122';
+import { loadAndRenderHistoryList, renderHistoryDetail, switchHistoryView, openHistoryQuantityModal, augmentHistoryWithPersistentLeave } from './app-history-logic.js?v=202610021228';
+import { renderAttendanceDailyHistory, renderAttendanceWeeklyHistory, renderAttendanceMonthlyHistory, renderAttendanceYearlyHistory, renderReportDaily, renderReportWeekly, renderReportMonthly, renderReportYearly, renderPersonalReport, renderManagementDaily, renderManagementSummary, renderWeeklyHistory, renderMonthlyHistory, renderYearlyHistory, renderPredictionTab } from './ui-history.js?v=202610021228';
+import { syncTodayToHistory, saveManagementData, backfillFxRates, peekDailyData, recoverDailyDataToHistory, fetchAllHistoryData } from './history-data-manager.js?v=202610021228';
+import { REVENUE_CHANNELS, CHANNEL_METRICS } from './revenue-channels.js?v=202610021228';
 import { doc, getDoc, updateDoc, deleteField } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-import { setupGlobalFilterListeners, setupHistoryTabsListeners, getFilteredHistoryData, getPeriodFilteredData, renderAnalyticsTab } from './listeners-history-tabs.js?v=202610021122';
-import { preloadWeekendPay } from './ui-history-personal.js?v=202610021122';
-import { saveView } from './view-state.js?v=202610021122';
-import { placeOpenDropdown } from './table-filter.js?v=202610021122';
+import { setupGlobalFilterListeners, setupHistoryTabsListeners, getFilteredHistoryData, getPeriodFilteredData, renderAnalyticsTab } from './listeners-history-tabs.js?v=202610021228';
+import { preloadWeekendPay } from './ui-history-personal.js?v=202610021228';
+import { saveView } from './view-state.js?v=202610021228';
+import { placeOpenDropdown } from './table-filter.js?v=202610021228';
 
 let isHistoryMaximized = false;
 
@@ -105,6 +105,26 @@ export function setupHistoryModalListeners() {
         if (!dateKey) return;
         if (viewMode === 'management-daily') renderManagementDaily(dateKey, State.allHistoryData);
         else renderManagementSummary(viewMode, dateKey, State.allHistoryData);
+    };
+
+    // 🕘 출퇴근 시각을 고친 뒤 이력 화면들을 다시 그린다.
+    //    근태 탭만 그리면 인력운영·개인별 집계가 옛 숫자를 계속 보여줘, 수정이 안 먹은 것처럼 보인다.
+    //    (이 함수들은 setupHistoryListeners 안의 클로저라 export 되지 않는다 —
+    //     window.__runFxBackfill 과 같은 방식으로 내보낸다)
+    window.__refreshHistoryViews = async () => {
+        try { await refreshAttendanceView(); } catch (e) { console.warn('근태 탭 갱신 실패:', e); }
+        try { await refreshPersonalView(); } catch (e) { console.warn('개인별 갱신 실패:', e); }
+        try { refreshReportView(); } catch (e) { console.warn('보고서 갱신 실패:', e); }
+        try {
+            // ⚠️ 근무시간 숫자(평균 재실시간·필요인원·근태 손실)를 쓰는 곳은 **인력운영 탭**이고
+            //    그건 위 셋에 없다. 이걸 빠뜨리면 출퇴근을 고쳐도 숫자가 그대로라
+            //    이 기능이 고치려던 '고쳤는데 왜 그대로냐' 가 그대로 재현된다.
+            const mainView = State.context.activeHistoryView || 'rawdata';
+            if (mainView !== 'rawdata') {
+                const gran = State.context.globalGranularity || 'day';
+                renderAnalyticsTab(mainView, getPeriodFilteredData(gran, getSelectedDateKey()));
+            }
+        } catch (e) { console.warn('분석 탭 갱신 실패:', e); }
     };
 
     // 💱 과거 환율 채우기(백필) — 경영지표 표의 버튼에서 호출. 완료 후 화면 갱신.

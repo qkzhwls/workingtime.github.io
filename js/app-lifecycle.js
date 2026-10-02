@@ -1,8 +1,8 @@
 // === js/app-lifecycle.js ===
-import * as State from './state.js?v=202610021122';
-import { getCurrentTime, displayCurrentDate, getTodayDateString, isWeekday, calcElapsedMinutes, formatDuration, showToast } from './utils.js?v=202610021122';
-import { saveProgress, isDayClosedOnServer } from './history-data-manager.js?v=202610021122';
-import { saveStateToFirestore } from './app-data.js?v=202610021122';
+import * as State from './state.js?v=202610021228';
+import { getCurrentTime, displayCurrentDate, getTodayDateString, isWeekday, calcElapsedMinutes, formatDuration, showToast } from './utils.js?v=202610021228';
+import { saveProgress, isDayClosedOnServer } from './history-data-manager.js?v=202610021228';
+import { saveStateToFirestore } from './app-data.js?v=202610021228';
 import { collection, doc, writeBatch, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 let localLunchPauseExecuted = false;
@@ -137,7 +137,9 @@ let autoCloseTimer = null;
 let overtimeOptOut = false;      // [연장 근무 계속하기]를 누른 날은 강제 마감하지 않는다
 let eodFlushCooldownUntil = 0;   // 종료시각 이후 이력 확정 저장 재시도 쿨다운
 
-const AUTO_END_TIME = '17:30';
+// 업무일 종료시각. 이력의 열린 기록 상한도 같은 값을 써야 하므로 단일 출처에서 가져온다
+// (예전엔 두 파일에 따로 박혀 있어, 한쪽만 고치면 조용히 갈라졌다).
+import { AUTO_END_TIME } from './lib/record-close.js?v=202610021228';
 
 // 진행/일시정지 기록을 지정 시각으로 마감(Firestore 배치 + 로컬 미러 갱신)
 async function closeRecordsAt(records, endTime, dayKey) {
