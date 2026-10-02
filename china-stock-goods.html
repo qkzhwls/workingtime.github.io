@@ -95,7 +95,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 10.1</div>
+            <div class="version-badge">🚀 Ver 10.2</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -198,11 +198,6 @@
         <button id="btn-loc-dayclose" title="켜면 비축창고 입고분 중 자리 미지정 줄을 빨간색으로 맨 위에 표시합니다 (다시 누르면 해제)" style="padding:8px 14px; background:#c62828; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔒 마감 (자리지정 확인)</button>
         <button id="btn-loc-download-today" style="padding:8px 14px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
         <span style="font-size:12px; color:#6a1b9a;">※ 위치 지정은 스캐너([📱 입고앱실행])의 '당일 입고분' 모드로. 지정이 끝나면 <b>[🔒 마감]</b>을 눌러 아래 목록의 <b>빨간 줄(자리 미지정)</b>을 확인한 뒤 <b>[⬇️ 옵션추가항목1 다운로드]</b>로 받으세요.</span>
-        <!-- [Ver 10.1] 마감 요약 (마감 켰을 때만 표시) -->
-        <div id="dayclose-bar" style="display:none; width:100%; align-items:center; gap:10px; flex-wrap:wrap; padding:8px 12px; background:#fff; border:1px solid #ef9a9a; border-radius:6px; font-size:13px; line-height:1.6;">
-            <span id="dc-bar-text" style="flex:1; min-width:260px;"></span>
-            <button id="btn-dc-xls" style="padding:6px 12px; background:#6a1b9a; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">📥 미지정 목록 엑셀</button>
-        </div>
     </div>
 
     <div class="list-container">
@@ -508,7 +503,7 @@
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-gate.js?v=202610021700"></script>
-    <script type="module" src="js/china-stock-goods.js?v=202610021700"></script>
+    <script type="module" src="js/china-stock-gate.js?v=202610021800"></script>
+    <script type="module" src="js/china-stock-goods.js?v=202610021800"></script>
 </body>
 </html>
