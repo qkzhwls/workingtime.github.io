@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.9 (설정파일 분리: config.js → china-stock-config.js — 최종관리자 공유 config.js와 충돌 방지. 관리자 인계 PR 준비)
+// 중국제작 미발계산기 Ver 10.3 (위치지정 당일입고: 목록=비축 입고분+당일 위치전송분 전부, 자리 미지정 줄은 항상 빨강·맨 위(마감 버튼 없음), '파일에 없던 상품'=비축 입고파일 기준)
 
 import { initializeFirebase } from './china-stock-config.js?v=202610021228'; // [Ver 9.9] 관리자 공유 config.js와 충돌 방지 — china-stock 전용 설정
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -516,14 +516,33 @@ async function downloadLocMove() {
     const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
     await downloadToDesktop('기존재고_위치값.xls', blob);
 }
+// [Ver 10.3] 당일입고지정: 비축 입고분 중 자리 미지정 줄은 항상 빨간색으로 목록 맨 위 (마감 버튼 없이 바로 보임)
+//   · 목록 = 비축창고 입고분(FLOOR2_STOCK) 전부 + 오늘 위치가 전송된 상품 전부
+//     (선택 출고일 표에 없으면 appendUnregisteredLocation이 행으로 추가)
+//   · 자리지정 판정은 downloadDayLoc와 같은 기준(sub=today && location)
+function isAssignedToday(code) { const a = locationAssignMap[code]; return !!(a && (a.sub || '') === 'today' && a.location); }
 // [Ver 6.9] 당일입고 위치값 다운로드 (현재 표의 상품 + 앱 지정 위치 → 헤더 상품코드/옵션추가항목1, 진짜 .xls)
 async function downloadDayLoc() {
     if (!filteredData.length) return;
+    // [Ver 10.2] 검색·열필터로 화면에서 숨겨져 다운로드에서 빠지는 지정분이 있으면 경고 (자리 미지정은 목록 맨 위 빨간 줄로 확인)
+    const visible = new Set(filteredData.map(d => d.code));
+    const hidden = new Set(tableData.filter(d => isAssignedToday(d.code) && !visible.has(d.code)).map(d => d.code)).size;
+    if (hidden && !confirm(`⚠️ 검색/열필터로 화면에서 숨겨진 지정 상품 ${hidden}건은 다운로드에서 빠집니다.\n(검색·필터를 해제하고 받으면 모두 들어갑니다)\n\n그래도 다운로드할까요?`)) return;
+    // 비축창고(FLOOR2)는 새로 읽어 최신값 기준 ('파일에 없던 상품' 판정용, 실패 시 구독값)
+    let f2 = floor2Map;
+    try {
+        const s = await getDoc(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'));
+        const m = (s.exists() && s.data().map) ? s.data().map : {};
+        f2 = {};
+        for (const c in m) { const q = parseInt(m[c] && m[c].floor2) || 0; if (q > 0) f2[c] = q; }
+    } catch (e) { console.warn('[위치값 다운로드] 비축창고 조회 실패 — 구독값으로 진행:', e); }
     const todayRows = filteredData.filter(r => { const a = locationAssignMap[r.code]; return a && a.location && (a.sub || '') === 'today'; });
     if (!todayRows.length) { alert('당일 입고분으로 위치가 지정된 상품이 없습니다.\n(스캐너 위치모드 "당일 입고분"으로 지정 후 이용하세요)'); return; }
-    // [Ver 8.59] db(오더리스트)에 없던 상품(강제추가분) → '비고'에 '파일에 없던 상품' 표시 (있을 때만 열 추가)
-    const flagged = todayRows.filter(r => r.unregisteredLoc).length;
-    if (flagged && !confirm(`⚠️ 파일(오더리스트)에 없던 상품 ${flagged}건이 포함되어 있습니다.\n이 상품들은 기존 옵션추가항목1 없이 '스캔한 자리만' 내보내져, 이지어드민의 기존값을 덮어쓸 수 있습니다.\n\n그래도 전체 다운로드할까요?`)) return;
+    // [Ver 8.59→10.2] 비축창고 입고파일(FLOOR2)에 없는데 위치가 전송된 상품 → '비고'에 '파일에 없던 상품' (있을 때만 열 추가)
+    //   당일 입고 중 패킹과 다르게 도착한 상품을 찾기 위함 (오더리스트 포함 여부는 기준 아님)
+    const notInFloor2 = r => !((f2[r.code] || 0) > 0);
+    const flagged = todayRows.filter(notInFloor2).length;
+    if (flagged && !confirm(`⚠️ 비축창고 입고파일에 없던 상품 ${flagged}건이 포함되어 있습니다.\n(패킹과 다르게 도착했을 수 있음 — 위치값 파일 '비고'에 '파일에 없던 상품'으로 표시됩니다)\n\n그대로 다운로드할까요?`)) return;
     const hasFlag = flagged > 0;
     const aoa = [hasFlag ? ['상품코드', '옵션추가항목1', '비고'] : ['상품코드', '옵션추가항목1']];
     todayRows.forEach(r => {
@@ -532,7 +551,7 @@ async function downloadDayLoc() {
         const existing = (stockLogData[r.code] && stockLogData[r.code]['옵션추가항목1']) || '';
         const full = mergeCsvLocs(existing, a.location);
         const row = [r.code, orderLocForDownload(full, existing, newLocPosition)];
-        if (hasFlag) row.push(r.unregisteredLoc ? '파일에 없던 상품' : '');
+        if (hasFlag) row.push(notInFloor2(r) ? '파일에 없던 상품' : '');
         aoa.push(row);
     });
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -1195,13 +1214,15 @@ function loadLocationHistory() {
 // [Ver 8.75] 비축창고(FLOOR2_STOCK) 상시 구독 — 당일입고지정 목록을 '비축에 실제 들어가는 상품'으로 필터
 //   floor2Map[code] = 비축 수량(>0). '비축창고 엑셀저장' 다운로드와 동일한 데이터.
 let floor2Map = {};
+let floor2Names = {}; // [Ver 10.1] 비축 상품명 (선택 출고일 표 밖 비축 행 표시용)
 let floor2Subscribed = false;
 function ensureFloor2() { if (!floor2Subscribed) { floor2Subscribed = true; loadFloor2(); } }
 function loadFloor2() {
     onSnapshot(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'), (snap) => {
         const map = (snap.exists() && snap.data() && snap.data().map) ? snap.data().map : {};
-        floor2Map = {};
-        for (const code in map) { const q = parseInt(map[code] && map[code].floor2) || 0; if (q > 0) floor2Map[code] = q; }
+        floor2Map = {}; floor2Names = {};
+        for (const code in map) { const q = parseInt(map[code] && map[code].floor2) || 0; if (q > 0) { floor2Map[code] = q; floor2Names[code] = (map[code] && map[code].name) || ''; } }
+        if (viewMode === 'location' && savedDates.length > 0) appendUnregisteredLocation(); // [Ver 10.1] 표 밖 비축 상품 행도 실시간 반영
         if (viewMode === 'location' && locSubView === 'today') applyFilters(); // 당일입고지정 목록 실시간 갱신
     });
 }
@@ -1766,7 +1787,7 @@ async function syncScanDBCore() {
         await delBatch.commit();
     }
     const CHUNK_SIZE = 500;
-    const syncRows = tableData.filter(d => !d.unregistered); // [Ver 8.52] 미등록 입고분은 스캔DB에서 제외(오더 상품만)
+    const syncRows = tableData.filter(d => !d.unregistered && !d.unregisteredLoc); // [Ver 8.52] 미등록 입고분은 스캔DB에서 제외(오더 상품만) / [Ver 10.1] 위치지정용으로 덧붙인 행(비축 표 밖·강제지정)도 제외
     for (let i = 0; i < syncRows.length; i += CHUNK_SIZE) {
         const batch = writeBatch(db);
         const chunk = syncRows.slice(i, i + CHUNK_SIZE);
@@ -2247,17 +2268,23 @@ function appendUnregisteredInbound() {
 }
 
 // [Ver 8.56] 위치지정 당일입고: 오더리스트에 없는데 강제추가로 위치 지정된 상품도 표에 추가 (없으면 웹 당일입고 표/다운로드에서 안 보임)
+// [Ver 10.2] 목록 = 비축창고 입고분 전부 + 오늘 위치가 전송된 상품 전부 → 선택 출고일 표에 없으면 행으로 추가
+//   (전엔 다른 출고일·도착0 상품이 표에 안 떠서, 비축됐는데 미지정이어도 몰랐고 / 위치를 지정해도 위치값.xls에서 빠졌음)
 function appendUnregisteredLocation() {
     if (viewMode !== 'location') return;
-    tableData = tableData.filter(d => !d.unregisteredLoc); // 실시간 갱신: 기존 미등록 위치행 제거 후 재계산
+    tableData = tableData.filter(d => !d.unregisteredLoc); // 실시간 갱신: 기존 덧붙인 행 제거 후 재계산
     const orderCodes = new Set();
     [orderDataOriginal, orderDataBuy].forEach(rows => (rows || []).forEach(r => { const c = (r['어드민상품코드'] || r['상품코드'] || '').toString().trim(); if (c) orderCodes.add(c); }));
     const inTable = new Set(tableData.map(d => d.code));
-    Object.entries(locationAssignMap).forEach(([code, v]) => {
-        if ((v.sub || '') !== 'today' || !v.location) return;    // 당일입고로 지정된 것만
-        if (inTable.has(code) || orderCodes.has(code)) return;   // 오더리스트/표에 있으면 미등록 아님
+    const addRow = (code, extra) => {
         const log = stockLogData[code] || {};
-        tableData.push({ code, name: log['상품명'] || '', option: '', arrivalQty: 0, mibalQty: 0, totalStock: 0, location: (log['로케이션'] || '').split('/')[0].trim() || '', capacity: 0, confirmed: '', shortage: '', directShip: '', memo: '미등록', unregistered: true, unregisteredLoc: true });
+        tableData.push(Object.assign({ code, name: floor2Names[code] || log['상품명'] || '', option: log['옵션'] || '', arrivalQty: 0, mibalQty: 0, totalStock: 0, location: (log['로케이션'] || '').split('/')[0].trim() || '', capacity: 0, confirmed: '', shortage: '', directShip: '', memo: '', unregisteredLoc: true }, extra));
+        inTable.add(code);
+    };
+    Object.keys(floor2Map).forEach(code => { if (!inTable.has(code)) addRow(code, {}); }); // 비축창고 입고분
+    Object.entries(locationAssignMap).forEach(([code, v]) => {
+        if ((v.sub || '') !== 'today' || !v.location || inTable.has(code)) return; // 당일입고로 지정된 것만
+        addRow(code, orderCodes.has(code) ? {} : { memo: '미등록', unregistered: true }); // 오더리스트에도 없으면 미등록 표시(기존 동작)
     });
 }
 
@@ -2422,7 +2449,9 @@ function renderTable() {
                 tds += `<td>${val}</td>`;
             }
         });
-        html += `<tr${row.unregistered ? ' style="background:#fff3e0;"' : ''}>${tds}</tr>`; // [Ver 8.52] 미등록 입고분 강조
+        // [Ver 8.52] 미등록 입고분 강조 / [Ver 10.3] 당일입고지정: 비축 입고분 자리 미지정 줄은 빨강
+        const dcMiss = viewMode === 'location' && locSubView === 'today' && (floor2Map[row.code] || 0) > 0 && !isAssignedToday(row.code);
+        html += `<tr${dcMiss ? ' style="background:#ffcdd2;"' : (row.unregistered ? ' style="background:#fff3e0;"' : '')}>${tds}</tr>`;
     });
     tbody.innerHTML = html;
 }
@@ -2520,6 +2549,12 @@ function applyFilters() {
         });
     }
     if (sortConfig.key) filteredData.sort(sortComparator());
+    // [Ver 10.3] 당일입고지정: 비축 입고분 중 자리 미지정 줄을 항상 맨 위로 (같은 그룹 안의 순서는 유지)
+    if (viewMode === 'location' && locSubView === 'today') {
+        const miss = [], rest = [];
+        filteredData.forEach(d => ((floor2Map[d.code] || 0) > 0 && !isAssignedToday(d.code) ? miss : rest).push(d));
+        filteredData = miss.concat(rest);
+    }
     renderTable(); updateSummary();
 }
 function applySearch() { applyFilters(); }
@@ -2716,7 +2751,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.9';
+const WEB_VERSION = '10.3';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
