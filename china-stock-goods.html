@@ -95,7 +95,7 @@
     <div class="controls-header">
         <div class="header-left">
             <h2 id="app-title" title="클릭하면 모드 선택 (미발계산기 / 위치지정모드)" style="margin:0; font-size:20px; color:#333;"><span id="app-title-label">🏭 중국제작 미발계산기</span> <span style="font-size:13px; color:#999;">▾</span></h2>
-            <div class="version-badge">🚀 Ver 9.9</div>
+            <div class="version-badge">🚀 Ver 10.0</div>
             <input type="text" id="search-input" placeholder="🔍 상품코드/상품명 검색" style="padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
         </div>
         <div class="header-actions">
@@ -195,8 +195,9 @@
     </div>
     <!-- 당일입고지정 안내 + 다운로드 (당일 서브뷰 전용) -->
     <div id="loc-tools-today" class="loc-today-only" style="gap:10px; align-items:center; flex-wrap:wrap; padding:10px 16px; background:#f3e5f5; border-bottom:1px solid #e1bee7;">
+        <button id="btn-loc-dayclose" title="비축창고 입고분 전체와 당일 자리지정을 대조해 자리 미지정 상품을 보여줍니다" style="padding:8px 14px; background:#c62828; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔒 마감 (자리지정 확인)</button>
         <button id="btn-loc-download-today" style="padding:8px 14px; background:#5e35b1; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
-        <span style="font-size:12px; color:#6a1b9a;">※ 위치 지정은 스캐너([📱 입고앱실행])의 '당일 입고분' 모드로. 아래 표 <b>위치확인</b> 열에서 누락 확인하고, 위 <b>[⬇️ 옵션추가항목1 다운로드]</b>로 받으세요.</span>
+        <span style="font-size:12px; color:#6a1b9a;">※ 위치 지정은 스캐너([📱 입고앱실행])의 '당일 입고분' 모드로. 지정이 끝나면 <b>[🔒 마감]</b>으로 비축창고 입고분 중 <b>자리 미지정</b> 상품을 확인한 뒤 <b>[⬇️ 옵션추가항목1 다운로드]</b>로 받으세요.</span>
     </div>
 
     <div class="list-container">
@@ -499,10 +500,48 @@
         </div>
     </div>
 
+    <!-- [Ver 10.0] 당일 마감: 비축창고 입고분 전체 vs 당일 자리지정 대조 (자리 미지정 상품 표시) -->
+    <div id="dayclose-modal" class="modal-overlay">
+        <div class="modal-content" style="width:820px; max-width:96vw; max-height:90vh; overflow-y:auto;">
+            <h3 style="margin-top:0;">🔒 당일 마감 — 비축창고 입고분 자리지정 확인</h3>
+            <div id="dc-summary" style="font-size:13px; color:#333; background:#fce4ec; border:1px solid #f8bbd0; border-radius:8px; padding:10px 12px; margin-bottom:10px; line-height:1.7;"></div>
+            <div style="font-size:11px; color:#888; margin-bottom:8px; line-height:1.5;">
+                · 기준 목록 = <b>[📥 비축창고 엑셀저장]</b>과 같은 데이터 (비축창고로 입고된 전체 상품)<br>
+                · <b>✅ 지정</b> = 스캐너 '당일 입고분'으로 자리가 전송된 상품 (= 옵션추가항목1 파일에 들어감)<br>
+                · <b>목록에 없던 상품</b> = 오더리스트에 없어 당일입고지정 표에 안 보이던 상품 (예: 강제전송분) — 표만 봐서는 누락을 알 수 없던 상품
+            </div>
+            <div style="display:flex; gap:8px; margin-bottom:8px; align-items:center; flex-wrap:wrap;">
+                <button id="btn-dc-missing" style="padding:7px 13px; border:1px solid #ccc; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px; background:#fff;">⚠️ 미지정만</button>
+                <button id="btn-dc-all" style="padding:7px 13px; border:1px solid #ccc; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px; background:#fff;">전체</button>
+                <button id="btn-dc-refresh" style="padding:7px 13px; border:1px solid #ccc; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px; background:#fff; color:#455a64;">🔄 다시 확인</button>
+                <span style="flex:1;"></span>
+                <button id="btn-dc-xls" style="padding:7px 13px; background:#6a1b9a; color:#fff; border:none; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;">📥 미지정 목록 엑셀</button>
+            </div>
+            <div style="max-height:52vh; overflow:auto; border:1px solid #eee; border-radius:6px;">
+                <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:center;">
+                    <thead><tr>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1; white-space:nowrap;">상태</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1; white-space:nowrap;">상품코드</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">상품명</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">옵션</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1; white-space:nowrap;">비축수량</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1; white-space:nowrap;">지정 위치</th>
+                        <th style="padding:8px 6px; position:sticky; top:0; background:#eceff1; z-index:1;">비고</th>
+                    </tr></thead>
+                    <tbody id="dc-tbody"></tbody>
+                </table>
+            </div>
+            <div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px; border-top:1px solid #eee; padding-top:12px;">
+                <button id="btn-dc-close" style="padding:8px 18px; border:1px solid #ccc; background:#fff; border-radius:4px; cursor:pointer;">닫기</button>
+                <button id="btn-dc-download" style="padding:8px 16px; background:#5e35b1; color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">⬇️ 옵션추가항목1 다운로드</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toast"></div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- ?v= 는 버전 배지와 함께 올려서 브라우저가 옛 JS 캐시를 쓰지 않게 함 -->
-    <script type="module" src="js/china-stock-gate.js?v=202610021122"></script>
-    <script type="module" src="js/china-stock-goods.js?v=202610021122"></script>
+    <script type="module" src="js/china-stock-gate.js?v=202610021600"></script>
+    <script type="module" src="js/china-stock-goods.js?v=202610021600"></script>
 </body>
 </html>
