@@ -1,7 +1,7 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 9.9 (설정파일 분리: config.js → china-stock-config.js — 최종관리자 공유 config.js와 충돌 방지. 관리자 인계 PR 준비)
+// 중국제작 미발계산기 Ver 10.0 (위치지정 당일입고: [🔒 마감] — 비축창고 입고분 전체 vs 당일 자리지정 대조, 자리 미지정 상품 표시 + 다운로드 전 경고)
 
-import { initializeFirebase } from './china-stock-config.js?v=202610021042'; // [Ver 9.9] 관리자 공유 config.js와 충돌 방지 — china-stock 전용 설정
+import { initializeFirebase } from './china-stock-config.js?v=202610021122'; // [Ver 9.9] 관리자 공유 config.js와 충돌 방지 — china-stock 전용 설정
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
@@ -516,9 +516,118 @@ async function downloadLocMove() {
     const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
     await downloadToDesktop('기존재고_위치값.xls', blob);
 }
+// [Ver 10.0] 당일 마감 — 비축창고(FLOOR2_STOCK) 입고분 전체 vs 당일 자리지정(sub=today) 대조
+//   기준 목록은 '비축창고 엑셀저장'(downloadFloor2)과 같은 데이터. 스캔을 놓친 상품은 표에 경고가 안 떠서
+//   옵션추가항목1 다운로드 전에 '비축엔 들어갔는데 자리가 없는 상품'을 따로 보여준다. (읽기 전용 — DB에 쓰지 않음)
+//   자리지정 판정은 downloadDayLoc와 같은 기준(sub=today && location) → 여기서 ✅면 위치값.xls에 들어간다.
+let dayCloseRows = [];
+let dayCloseOnlyMissing = false;
+const DC_TOGGLE_STYLE = 'padding:7px 13px; border:1px solid; border-radius:5px; cursor:pointer; font-weight:bold; font-size:12px;';
+async function computeDayClose() {
+    const s = await getDoc(doc(db, CHINA_COLLECTION, 'FLOOR2_STOCK'));
+    const map = (s.exists() && s.data().map) ? s.data().map : {};
+    const tableByCode = {};
+    tableData.forEach(d => { if (!(d.code in tableByCode)) tableByCode[d.code] = d; });
+    const visible = new Set(filteredData.map(d => d.code));
+    const rows = [];
+    Object.entries(map).forEach(([code, v]) => {
+        const qty = parseInt(v && v.floor2) || 0;
+        if (qty <= 0) return;
+        const t = tableByCode[code];
+        const log = stockLogData[code] || {};
+        const a = locationAssignMap[code];
+        const assigned = !!(a && (a.sub || '') === 'today' && a.location);
+        const notInList = !t;                                   // 오더리스트에 없어 당일입고지정 표에 안 보이던 상품 (예: 강제전송분)
+        const hidden = assigned && !notInList && !visible.has(code); // 지정은 됐지만 검색/필터로 숨겨져 위치값.xls에서 빠짐
+        rows.push({
+            code, qty, assigned, notInList, hidden,
+            name: (v && v.name) || (t && t.name) || log['상품명'] || '',
+            option: (t && t.option) || log['옵션'] || '',
+            locHtml: assigned ? (renderNewLocOnly(a.location, a.base) || escapeHtml(a.location)) : '',
+            note: notInList ? '목록에 없던 상품' : (hidden ? '검색/필터로 숨겨짐 → 다운로드에서 빠짐' : '')
+        });
+    });
+    rows.sort((x, y) => (Number(x.assigned) - Number(y.assigned)) || String(x.code).localeCompare(String(y.code)));
+    return rows;
+}
+async function openDayCloseModal() {
+    const modal = document.getElementById('dayclose-modal');
+    if (!modal) return;
+    showLoading('🔒 마감 확인 중...');
+    try { dayCloseRows = await computeDayClose(); }
+    catch (e) { hideLoading(); alert('비축창고 데이터 불러오기 실패: ' + e.message); return; }
+    hideLoading();
+    dayCloseOnlyMissing = dayCloseRows.some(r => !r.assigned); // 미지정이 있으면 미지정만 먼저 보여줌
+    renderDayClose();
+    modal.style.display = 'flex';
+}
+function closeDayCloseModal() { document.getElementById('dayclose-modal').style.display = 'none'; }
+function renderDayClose() {
+    const rows = dayCloseRows;
+    const total = rows.length;
+    const missing = rows.filter(r => !r.assigned).length;
+    const hiddenCnt = rows.filter(r => r.hidden).length;
+    const sum = document.getElementById('dc-summary');
+    if (sum) {
+        sum.innerHTML = !total
+            ? '비축창고로 입고된 데이터가 없습니다. (입고 스캔 시 미발수량을 다 채운 뒤의 수량이 비축창고로 잡힙니다)'
+            : `비축창고 입고 <b>${total}</b>건 · ✅ 자리지정 <b>${total - missing}</b>건 · `
+              + (missing ? `<b style="color:#c62828;">⚠️ 자리 미지정 ${missing}건</b>` : '<b style="color:#2e7d32;">자리 미지정 0건</b>')
+              + (missing
+                  ? '<br><span style="color:#c62828;">미지정 상품은 비축창고에 들어갔지만 자리가 없습니다 — 스캐너(당일 입고분)로 지정한 뒤 [🔄 다시 확인]을 누르세요.</span>'
+                  : '<br><span style="color:#2e7d32;">비축창고 입고 상품 전부 자리가 지정됐습니다. 옵션추가항목1 다운로드를 진행하세요.</span>')
+              + (hiddenCnt ? `<br><span style="color:#e65100;">검색/필터로 숨겨진 지정 상품 ${hiddenCnt}건은 다운로드에서 빠집니다 — 검색·필터를 해제한 뒤 받으세요.</span>` : '');
+    }
+    const bMiss = document.getElementById('btn-dc-missing');
+    const bAll = document.getElementById('btn-dc-all');
+    const on = 'background:#c62828; color:#fff; border-color:#c62828;', off = 'background:#fff; color:#555; border-color:#ccc;';
+    if (bMiss) { bMiss.textContent = `⚠️ 미지정만 (${missing})`; bMiss.style.cssText = DC_TOGGLE_STYLE + (dayCloseOnlyMissing ? on : off); }
+    if (bAll) { bAll.textContent = `전체 (${total})`; bAll.style.cssText = DC_TOGGLE_STYLE + (dayCloseOnlyMissing ? off : on.replace(/#c62828/g, '#5e35b1')); }
+    const tb = document.getElementById('dc-tbody');
+    if (!tb) return;
+    const list = dayCloseOnlyMissing ? rows.filter(r => !r.assigned) : rows;
+    tb.innerHTML = list.length ? list.map(r => `<tr style="border-bottom:1px solid #f0f0f0;${r.assigned ? '' : ' background:#ffebee;'}">
+        <td style="padding:6px; font-weight:bold; color:${r.assigned ? '#2e7d32' : '#c62828'};">${r.assigned ? '✅ 지정' : '⚠️ 미지정'}</td>
+        <td style="padding:6px; font-family:monospace;">${escapeHtml(r.code)}</td>
+        <td style="padding:6px; text-align:left;">${escapeHtml(r.name)}</td>
+        <td style="padding:6px;">${escapeHtml(r.option)}</td>
+        <td style="padding:6px; font-weight:bold;">${r.qty}</td>
+        <td style="padding:6px;">${r.locHtml || '-'}</td>
+        <td style="padding:6px; color:#e65100; font-size:11px;">${escapeHtml(r.note)}</td>
+    </tr>`).join('')
+        : `<tr><td colspan="7" style="padding:24px; color:#90a4ae;">${dayCloseOnlyMissing && total ? '자리 미지정 상품이 없습니다 ✅' : '비축창고 입고 데이터가 없습니다.'}</td></tr>`;
+}
+async function downloadDayCloseUnassigned() {
+    const miss = dayCloseRows.filter(r => !r.assigned);
+    if (!miss.length) { alert('자리 미지정 상품이 없습니다.'); return; }
+    const aoa = [['상품코드', '상품명', '옵션', '비축수량', '비고'], ...miss.map(r => [r.code, r.name, r.option, r.qty, r.note])];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '자리미지정');
+    const wbout = XLSX.write(wb, { bookType: 'biff8', type: 'array' });
+    await downloadToDesktop('비축_자리미지정.xls', new Blob([wbout], { type: 'application/vnd.ms-excel' }));
+}
+async function dayCloseProceedDownload() {
+    const missing = dayCloseRows.filter(r => !r.assigned).length;
+    if (missing && !confirm(`⚠️ 자리 미지정 ${missing}건이 남아 있습니다.\n이 상품들은 옵션추가항목1 파일에 들어가지 않습니다.\n\n그래도 다운로드할까요?`)) return;
+    closeDayCloseModal();
+    await downloadDayLoc({ skipCloseCheck: true }); // 마감 화면에서 이미 확인했으므로 중복 경고 생략
+}
 // [Ver 6.9] 당일입고 위치값 다운로드 (현재 표의 상품 + 앱 지정 위치 → 헤더 상품코드/옵션추가항목1, 진짜 .xls)
-async function downloadDayLoc() {
+async function downloadDayLoc(opts) {
     if (!filteredData.length) return;
+    // [Ver 10.0] [🔒 마감]을 건너뛰고 받아도, 비축창고 입고분 중 자리 미지정/필터로 숨겨진 지정분이 있으면 경고
+    if (!(opts && opts.skipCloseCheck)) {
+        try {
+            const rows = await computeDayClose();
+            const missing = rows.filter(r => !r.assigned).length;
+            const hidden = rows.filter(r => r.hidden).length;
+            if ((missing || hidden) && !confirm('⚠️ 다운로드 전 확인\n\n'
+                + (missing ? `· 비축창고 입고분 중 자리 미지정 ${missing}건 — 옵션추가항목1에 들어가지 않습니다.\n` : '')
+                + (hidden ? `· 검색/필터로 숨겨진 지정 상품 ${hidden}건 — 다운로드에서 빠집니다.\n` : '')
+                + '\n[🔒 마감]을 누르면 목록을 볼 수 있습니다.\n그래도 다운로드할까요?')) return;
+        } catch (e) { console.warn('[마감 확인] 비축창고 조회 실패 — 경고 없이 진행:', e); }
+    }
     const todayRows = filteredData.filter(r => { const a = locationAssignMap[r.code]; return a && a.location && (a.sub || '') === 'today'; });
     if (!todayRows.length) { alert('당일 입고분으로 위치가 지정된 상품이 없습니다.\n(스캐너 위치모드 "당일 입고분"으로 지정 후 이용하세요)'); return; }
     // [Ver 8.59] db(오더리스트)에 없던 상품(강제추가분) → '비고'에 '파일에 없던 상품' 표시 (있을 때만 열 추가)
@@ -2716,7 +2825,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '9.9';
+const WEB_VERSION = '10.0';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2873,6 +2982,15 @@ function setupEventListeners() {
     document.querySelectorAll('.mode-card').forEach(c => c.addEventListener('click', () => setViewMode(c.dataset.mode)));
     document.querySelectorAll('.loc-subtab').forEach(b => b.addEventListener('click', () => setLocSubView(b.dataset.sub)));
     document.getElementById('btn-loc-download-today')?.addEventListener('click', () => downloadDayLoc());
+    // [Ver 10.0] 당일 마감 (비축창고 입고분 자리지정 확인)
+    document.getElementById('btn-loc-dayclose')?.addEventListener('click', () => openDayCloseModal());
+    document.getElementById('btn-dc-close')?.addEventListener('click', closeDayCloseModal);
+    document.getElementById('dayclose-modal')?.addEventListener('click', (e) => { if (e.target.id === 'dayclose-modal') closeDayCloseModal(); });
+    document.getElementById('btn-dc-missing')?.addEventListener('click', () => { dayCloseOnlyMissing = true; renderDayClose(); });
+    document.getElementById('btn-dc-all')?.addEventListener('click', () => { dayCloseOnlyMissing = false; renderDayClose(); });
+    document.getElementById('btn-dc-refresh')?.addEventListener('click', () => openDayCloseModal());
+    document.getElementById('btn-dc-xls')?.addEventListener('click', () => downloadDayCloseUnassigned());
+    document.getElementById('btn-dc-download')?.addEventListener('click', () => dayCloseProceedDownload());
     applyViewMode(); // 저장된 모드 초기 적용
 
     // 11. #search-input (검색)

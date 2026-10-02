@@ -1,8 +1,8 @@
 // === js/ui-history-milestones.js ===
 // 📍 운영 마일스톤 관리: 변경사항 기록 + before/after KPI 자동 비교
 
-import * as State from './state.js?v=202610021042';
-import { showToast, getTodayDateString, escapeHtml } from './utils.js?v=202610021042';
+import * as State from './state.js?v=202610021122';
+import { showToast, getTodayDateString, escapeHtml } from './utils.js?v=202610021122';
 import {
     doc, collection, getDocs, setDoc, deleteDoc, onSnapshot, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";

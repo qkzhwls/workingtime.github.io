@@ -1,7 +1,7 @@
 // === js/admin-ui.js ===
 // 설명: 관리자 페이지의 UI 렌더링을 전담하는 모듈입니다. (다크모드 지원)
 
-import { withBuiltinMenus } from './menu-catalog.js?v=202610021042';
+import { withBuiltinMenus } from './menu-catalog.js?v=202610021122';
 
 export const DASHBOARD_ITEM_DEFINITIONS = {
     'total-staff': { title: '총원 (직원/알바)' },

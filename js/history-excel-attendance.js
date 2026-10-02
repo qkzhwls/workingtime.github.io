@@ -1,5 +1,5 @@
 // === js/history-excel-attendance.js ===
-import { allHistoryData, LEAVE_TYPES } from './state.js?v=202610021042';
+import { allHistoryData, LEAVE_TYPES } from './state.js?v=202610021122';
 
 // 엑셀 근태 요약의 열 순서. LEAVE_TYPES에 있는데 여기 없는 종류는 뒤에 자동으로 붙는다
 // → 근태 종류가 추가돼도 엑셀에서 누락되지 않는다.
@@ -32,8 +32,8 @@ const newAttRow = (member) => {
     row['총 횟수'] = 0; row['총 결근일수'] = 0; row['총 연차일수'] = 0;
     return row;
 };
-import { formatTimeTo24H, getWeekOfYear, showToast, getTodayDateString } from './utils.js?v=202610021042';
-import { fitToColumn } from './history-excel-utils.js?v=202610021042';
+import { formatTimeTo24H, getWeekOfYear, showToast, getTodayDateString } from './utils.js?v=202610021122';
+import { fitToColumn } from './history-excel-utils.js?v=202610021122';
 
 export const downloadPeriodAttendanceAsExcel = (startDate, endDate, format = 'xlsx') => {
     if (!startDate || !endDate) return showToast('기간을 선택해주세요.', true);

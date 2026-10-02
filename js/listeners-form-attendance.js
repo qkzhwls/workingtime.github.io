@@ -1,14 +1,14 @@
 // === js/listeners-form-attendance.js ===
 // 설명: 근태 설정(연차/외출 등) 및 수정 모달의 폼 로직을 담당합니다.
 
-import * as DOM from './dom-elements.js?v=202610021042';
-import * as State from './state.js?v=202610021042';
-import { isPersistentLeaveType, OTHER_LEAVE_TYPE, leaveTypeLabel } from './state.js?v=202610021042';
-import { notifyLeaveScheduleChanged } from './leave-schedule-sync.js?v=202610021042';
-import { showToast, getTodayDateString, toDateString, getCurrentTime, calculateWorkingDays, isWeekday } from './utils.js?v=202610021042';
-import { saveStateToFirestore } from './app-data.js?v=202610021042';
-import { saveLeaveSchedule } from './config.js?v=202610021042';
-import { renderLeaveTypeModalOptions } from './ui-modals.js?v=202610021042';
+import * as DOM from './dom-elements.js?v=202610021122';
+import * as State from './state.js?v=202610021122';
+import { isPersistentLeaveType, OTHER_LEAVE_TYPE, leaveTypeLabel } from './state.js?v=202610021122';
+import { notifyLeaveScheduleChanged } from './leave-schedule-sync.js?v=202610021122';
+import { showToast, getTodayDateString, toDateString, getCurrentTime, calculateWorkingDays, isWeekday } from './utils.js?v=202610021122';
+import { saveStateToFirestore } from './app-data.js?v=202610021122';
+import { saveLeaveSchedule } from './config.js?v=202610021122';
+import { renderLeaveTypeModalOptions } from './ui-modals.js?v=202610021122';
 import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // 헬퍼: 로컬 이력(allHistoryData)에서 특정 연차 ID 제거/업데이트
@@ -260,7 +260,7 @@ export function setupFormAttendanceListeners() {
                     // 종료 누락된 record가 외출 시간까지 끌고 가는 사고 방지.
                     if (type === '외출' || type === '조퇴') {
                         try {
-                            const { forceEndMemberWork } = await import('./app-sync.js?v=202610021042');
+                            const { forceEndMemberWork } = await import('./app-sync.js?v=202610021122');
                             const r = await forceEndMemberWork(memberName, newDailyEntry.startTime);
                             if (r.ended > 0) {
                                 console.warn(`[외출/조퇴 자동 종료] ${memberName}: ${r.ended}건`, r.summaries);

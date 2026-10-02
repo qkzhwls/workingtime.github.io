@@ -149,9 +149,109 @@ export function decomposeAccuracy(snap, day) {
         },
         /** 기준 UPH 가 없어 계획 시간을 낼 수 없던 업무 — 미착수 판정에서 빠진다 */
         noBaselineKeys,
+        /** 업무별 계획 시간(인시) — 수량형은 물량÷그날 얼린 UPH, 시간형은 투입시간 */
         planHoursByTask,
+        /** 업무별 실제 시간(인시) */
+        actualHoursByTask: actualByTask,
+        /** 그날 '시간으로 잡은' 업무 키 — 물량이 없어 수량 비교가 불가능한 업무다 */
+        timeKeys: Object.keys(s.timeTasks || {}),
+        /** 그날 **계획에 올라 있던** 업무 키.
+         *  ⚠️ planHoursByTask > 0 과 다르다 — 기준 UPH 를 못 얼린 업무는 계획이 있어도
+         *     계획 시간이 0 이다. 그걸 '계획 외' 로 읽으면 거짓이 된다. */
+        plannedKeys: [...plannedKeys],
         auto: s.auto === true
     };
+}
+
+/**
+ * 업무별 누적 — 여러 날의 분해 결과를 업무 단위로 합친다.
+ *
+ * 왜 순수 함수인가
+ *   이 집계에서 **분자와 분모의 날짜 집합이 어긋나는 버그가 두 번** 났다.
+ *   (1) 기준 UPH 가 없던 날은 계획 시간이 0 인데 물량은 그대로라 계획 UPH 가 몇 배로 뛰었다.
+ *   (2) 그걸 고치면서 실제 시간만 빼고 실제 물량은 남겨, 이번엔 실제 UPH 가 2배가 됐다.
+ *   화면 코드 안에 있으면 테스트가 못 잡는다. 규칙은 하나다 —
+ *   **기준 UPH 가 없던 날은 그 업무의 모든 값(물량·시간)을 빼고, 몇 일인지만 남긴다.**
+ *
+ * @param {Array} rows decomposeAccuracy 결과들(화면이 qty 를 덧붙인 것)
+ * @returns {Array} 업무별 누적 + 오차. 계획 업무 먼저(시간 오차 큰 순), 계획 외는 뒤.
+ */
+export function aggregateByTask(rows) {
+    const agg = new Map();
+    const 집 = (k) => {
+        if (!agg.has(k)) {
+            agg.set(k, { key: k, plan: 0, actual: 0, planHours: 0, actualHours: 0,
+                         // 그날 계획에 없던 날의 실적 — 계획과 짝지을 수 없으므로 따로 둔다
+                         offPlanQty: 0, offPlanHours: 0,
+                         noBaseDays: 0, noBaseActualHours: 0, wasPlanned: false, hasQty: false });
+        }
+        return agg.get(k);
+    };
+
+    (Array.isArray(rows) ? rows : []).forEach(r => {
+        if (!r) return;
+        const noBase = new Set(r.noBaselineKeys || []);
+        // ⚠️ '그날' 계획에 있었는지로 가른다. 어떤 날은 계획에 있고 어떤 날은 없는 업무가 흔한데,
+        //    계획에 없던 날의 실적을 계획 통에 더하면 계획을 한 번도 어기지 않은 업무가
+        //    '시간 오차 +19%' 로 빨갛게 뜬다(그 시간은 일별 지표에서 '계획 외 유입' 이다).
+        const planned = new Set(r.plannedKeys || []);
+        planned.forEach(k => { 집(k).wasPlanned = true; });
+
+        Object.entries(r.qty || {}).forEach(([k, v]) => {
+            const e = 집(k);
+            e.hasQty = true;             // 물량으로 재는 업무다(0 이어도 '없음' 과 다르다)
+            if (noBase.has(k)) return;   // 기준 없는 날은 통째로 제외
+            if (!planned.has(k)) { e.offPlanQty += 수(v?.actual); return; }
+            e.plan += 수(v?.plan);
+            e.actual += 수(v?.actual);
+        });
+        Object.entries(r.planHoursByTask || {}).forEach(([k, h]) => {
+            const e = 집(k);
+            if (noBase.has(k)) { e.noBaseDays++; return; }
+            e.planHours += 수(h);
+        });
+        Object.entries(r.actualHoursByTask || {}).forEach(([k, h]) => {
+            const e = 집(k);
+            if (noBase.has(k)) { e.noBaseActualHours += 수(h); return; }
+            if (!planned.has(k)) { e.offPlanHours += 수(h); return; }
+            e.actualHours += 수(h);
+        });
+    });
+
+    const out = [...agg.values()]
+        .filter(e => e.plan > 0 || e.actual > 0 || e.planHours > 0 || e.actualHours > 0
+                     || e.offPlanHours > 0 || e.offPlanQty > 0 || e.noBaseDays > 0)
+        .map(e0 => {
+            // 판정축은 hasQty 하나다 — timeKeys 와 섞어 보다가 '물량 —' 인데 'UPH 470' 이
+            // 같이 뜨는 행이 나온 적이 있다.
+            const e = { ...e0, isTime: !e0.hasQty };
+            const err = (e.hasQty && e.plan > 0) ? (e.actual - e.plan) / e.plan : null;
+            const hourErr = e.planHours > 0 ? (e.actualHours - e.planHours) / e.planHours : null;
+            // 실제·계획 UPH 는 **같은 날짜 집합**에서 나온다(위 규칙).
+            // 계획 외 전용 업무는 계획 쪽 통이 비어 있으므로 계획 외 값으로 본다
+            const 실물량 = e.wasPlanned ? e.actual : e.offPlanQty;
+            const 실시간 = e.wasPlanned ? e.actualHours : e.offPlanHours;
+            const realUPH = (e.hasQty && 실물량 > 0 && 실시간 > 0) ? 실물량 / 실시간 : null;
+            const planUPH = (e.hasQty && e.plan > 0 && e.planHours > 0)
+                ? e.plan / e.planHours : null;
+            const uphErr = (realUPH != null && planUPH > 0) ? (realUPH - planUPH) / planUPH : null;
+            // 계획에 없었는데 실제로만 한 업무.
+            // ⚠️ planHours 가 아니라 **계획 여부**로 본다 — 기준 UPH 를 못 얼린 업무는
+            //    계획이 있어도 계획 시간이 0 이라, 그걸로 판정하면 '계획 외' 로 거짓 표시된다.
+            const unplanned = !e.wasPlanned
+                && (e.offPlanHours > 0 || e.offPlanQty > 0 || e.noBaseActualHours > 0);
+            return { ...e, err, hourErr, realUPH, planUPH, uphErr, unplanned,
+                     // 화면이 그릴 값 — 계획 업무는 계획과 짝이 맞는 쪽, 계획 외는 계획 외 쪽
+                     showQty: e.wasPlanned ? e.actual : e.offPlanQty,
+                     showHours: e.wasPlanned ? e.actualHours : e.offPlanHours };
+        });
+
+    // 계획 업무가 먼저(시간이 많이 어긋난 순), 계획 외는 뒤에 모아 실제 시간 큰 순.
+    // 한 축에 섞으면 '30분짜리 계획 외' 가 '+88% 핵심 업무' 위로 올라오는 역전이 생긴다.
+    const 키 = (t) => (t.hourErr != null ? Math.abs(t.hourErr) : Math.abs(t.err ?? 0));
+    const 계획 = out.filter(t => !t.unplanned).sort((a, b) => 키(b) - 키(a));
+    const 계획외 = out.filter(t => t.unplanned).sort((a, b) => b.showHours - a.showHours);
+    return [...계획, ...계획외];
 }
 
 const 평균 = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;

@@ -1,17 +1,17 @@
 // === js/listeners-history-tabs.js ===
-import * as DOM from './dom-elements.js?v=202610021042';
-import * as State from './state.js?v=202610021042';
-import { showToast, getTodayDateString, getWeekOfYear, buildMemberHourlyWageMap } from './utils.js?v=202610021042';
+import * as DOM from './dom-elements.js?v=202610021122';
+import * as State from './state.js?v=202610021122';
+import { showToast, getTodayDateString, getWeekOfYear, buildMemberHourlyWageMap } from './utils.js?v=202610021122';
 
-import { renderDashboardTab } from './ui-history-dashboard.js?v=202610021042';
-import { renderProductivityTab } from './ui-history-productivity.js?v=202610021042';
-import { renderStaffingTab } from './ui-history-staffing.js?v=202610021042';
+import { renderDashboardTab } from './ui-history-dashboard.js?v=202610021122';
+import { renderProductivityTab } from './ui-history-productivity.js?v=202610021122';
+import { renderStaffingTab } from './ui-history-staffing.js?v=202610021122';
 // 💡 실적 예측 함수 불러오기 추가
-import { renderPredictionTab, renderForecastTab } from './ui-history-prediction.js?v=202610021042';
-import { fetchAndRenderInspectionHistory } from './listeners-history-inspection.js?v=202610021042';
-import * as UILeave from './ui-history-leave.js?v=202610021042';
-import { switchHistoryView, renderHistoryDateListByMode, updateGranularityButtons } from './app-history-logic.js?v=202610021042';
-import { saveView } from './view-state.js?v=202610021042';
+import { renderPredictionTab, renderForecastTab } from './ui-history-prediction.js?v=202610021122';
+import { fetchAndRenderInspectionHistory } from './listeners-history-inspection.js?v=202610021122';
+import * as UILeave from './ui-history-leave.js?v=202610021122';
+import { switchHistoryView, renderHistoryDateListByMode, updateGranularityButtons } from './app-history-logic.js?v=202610021122';
+import { saveView } from './view-state.js?v=202610021122';
 
 // 좌측 트리 단위(globalGranularity) → 각 로우데이터 서브탭의 뷰 이름 매핑
 const SUBTAB_VIEW = {
@@ -191,7 +191,7 @@ export function setupHistoryTabsListeners() {
             // 📍 마일스톤 탭: 처음 들어올 때 1회 구독 + 리스너 바인딩
             if (tabName === 'milestones') {
                 try {
-                    const mod = await import('./ui-history-milestones.js?v=202610021042');
+                    const mod = await import('./ui-history-milestones.js?v=202610021122');
                     mod.subscribeMilestones();
                     mod.bindMilestoneListeners();
                     // 사이드바 숨김 (마일스톤은 자체 리스트 사용)
@@ -206,7 +206,7 @@ export function setupHistoryTabsListeners() {
             // 🧾 팀 결산 보고 탭: 월/분기/년 단위 종합 요약 보고서 (자체 기간 선택 UI 사용)
             if (tabName === 'settlement') {
                 try {
-                    const mod = await import('./ui-history-settlement.js?v=202610021042');
+                    const mod = await import('./ui-history-settlement.js?v=202610021122');
                     await mod.initSettlementReport();
                     const sidebar = document.getElementById('history-global-sidebar');
                     if (sidebar) sidebar.style.display = 'none';

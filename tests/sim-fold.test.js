@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import {
     foldReasonFor, FOLD_REASON_TEXT, shouldSaveQty, shouldSaveTime, normalizeTimeEntry,
     FOLD_OUTLIER_RATIO, FOLD_OUTLIER_MIN_ABS, FOLD_OUTLIER_MIN_SAMPLE,
-} from '../js/lib/sim-fold.js?v=202610021042';
+} from '../js/lib/sim-fold.js?v=202610021122';
 
 /** 자동값 그대로인 평범한 수량 행 */
 const 평범 = (over = {}) => ({

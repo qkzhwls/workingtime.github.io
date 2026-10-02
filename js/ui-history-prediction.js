@@ -3,23 +3,23 @@
 //  - renderPredictionTab: 실적 예측 탭 (차트/KPI)
 //  - renderForecastTab: 업무 예상 탭 (시뮬레이션·요약 카드)
 
-import { predictFutureTrends } from './analysis-logic.js?v=202610021042';
-import { DELIVERY_CHANNELS, channelScope } from './revenue-channels.js?v=202610021042';
-import * as State from './state.js?v=202610021042';
-import { getTodayDateString, getRegularMembersForCount, showToast, getHolidayName, formatHM, getAllTaskKeys, escapeHtml } from './utils.js?v=202610021042';
+import { predictFutureTrends } from './analysis-logic.js?v=202610021122';
+import { DELIVERY_CHANNELS, channelScope } from './revenue-channels.js?v=202610021122';
+import * as State from './state.js?v=202610021122';
+import { getTodayDateString, getRegularMembersForCount, showToast, getHolidayName, formatHM, getAllTaskKeys, escapeHtml } from './utils.js?v=202610021122';
 import { getIncomingQtyByDateFromCache, getIncomingDetailsByDateFromCache,
-         isIncomingCacheFreshToday } from './widget-incoming-schedule.js?v=202610021042';
+         isIncomingCacheFreshToday } from './widget-incoming-schedule.js?v=202610021122';
 import { getPlannedQuantitiesForDate, getPlannedTimeTasksForDate, getPlannedExcludeMinutesForDate,
          fetchPlannedData, savePlannedQuantities,
          saveForecastSnapshot, saveForecastSnapshotIfAbsent, deleteForecastSnapshot, fetchForecastSnapshots,
-         getForecastSnapshotForDate } from './history-data-manager.js?v=202610021042';
-import { decomposeAccuracy, summarizeAccuracyRows } from './forecast-accuracy.js?v=202610021042';
+         getForecastSnapshotForDate } from './history-data-manager.js?v=202610021122';
+import { decomposeAccuracy, summarizeAccuracyRows, aggregateByTask } from './forecast-accuracy.js?v=202610021122';
 import { computeDayProgress, buildProgressRows, projectFinish,
-         nowTimeString, hhmmToMin, minToHhmm } from './forecast-progress.js?v=202610021042';
-import { LUNCH_END_MIN } from './lib/calc.js?v=202610021042';
-import { taskUph, recentDays } from './task-throughput.js?v=202610021042';
+         nowTimeString, hhmmToMin, minToHhmm } from './forecast-progress.js?v=202610021122';
+import { LUNCH_END_MIN } from './lib/calc.js?v=202610021122';
+import { taskUph, recentDays } from './task-throughput.js?v=202610021122';
 import { foldReasonFor, FOLD_REASON_TEXT, shouldSaveQty, shouldSaveTime,
-         normalizeTimeEntry } from './lib/sim-fold.js?v=202610021042';
+         normalizeTimeEntry } from './lib/sim-fold.js?v=202610021122';
 
 /** 해당 날짜·작업의 예정 물량(수동 입력값). 없으면 null → 자동 추정값으로 폴백.
  *  0도 '0으로 하기로 한 값'이므로 그대로 인정한다(키가 아예 없을 때만 자동값). */
@@ -4018,40 +4018,41 @@ const renderAccuracyBody = () => {
     const sum = summarizeAccuracyRows(rows);
 
     // ── 업무별 누적 ────────────────────────────────────────
-    const agg = new Map();      // 업무 → { plan, actual, days, spentMin }
-    rows.forEach(r => {
-        Object.entries(r.qty).forEach(([k, v]) => {
-            const e = agg.get(k) || { key: k, plan: 0, actual: 0, days: 0, spentMin: 0 };
-            e.plan += v.plan; e.actual += v.actual;
-            if (v.plan > 0 || v.actual > 0) e.days++;
-            agg.set(k, e);
-        });
-    });
-    // 실제 UPH를 내기 위해 업무별 실제 투입시간을 모은다
-    days.forEach(d => {
-        if (!snaps[d.id]) return;
-        (d.workRecords || []).forEach(rec => {
-            const e = agg.get(rec?.task);
-            if (!e) return;
-            const m = Number(rec.duration);
-            if (Number.isFinite(m) && m > 0) e.spentMin += m;
-        });
-    });
-
+    // 물량만 보던 표에 **시간**을 넣는다.
+    //   · 시간형 업무(개인담당업무·중국제작(담당) 등)는 물량이 없어 예전에는 이 표에서
+    //     통째로 빠졌다 — 합계 오차에는 들어가는데 어느 업무 때문인지 볼 수가 없었다.
+    //   · 수량은 맞혔는데 시간이 더 걸린 경우도 여기서만 보인다.
+    // 집계·오차 계산은 forecast-accuracy.js 의 순수 함수에 있다(테스트됨) —
+    // 이 자리에서 분자·분모의 날짜 집합이 어긋나는 버그가 두 번 났기 때문이다.
     const stdUPH = computeTaskUPHs(State.allHistoryData);
-    const taskRows = [...agg.values()]
-        .filter(e => e.plan > 0 || e.actual > 0)
-        .map(e => {
-            const err = e.plan > 0 ? (e.actual - e.plan) / e.plan : null;
-            const realUPH = e.spentMin > 0 ? e.actual / (e.spentMin / 60) : null;
-            const base = stdUPH[e.key] || 0;
-            const uphErr = (realUPH != null && base > 0) ? (realUPH - base) / base : null;
-            const label = SIM_TASKS.find(t => t.key === e.key)?.label || e.key;
-            return { ...e, err, realUPH, base, uphErr, label };
-        })
-        .sort((a, b) => Math.abs(b.err ?? 0) - Math.abs(a.err ?? 0));
+    const taskRows = aggregateByTask(rows).map(t => ({
+        ...t,
+        label: SIM_TASKS.find(x => x.key === t.key)?.label
+            || SIM_TIME_TASKS.find(x => x.key === t.key)?.label || t.key,
+        nowUPH: stdUPH[t.key] || 0      // '지금' 기준 UPH 는 참고용으로만 보여 준다
+    }));
 
-    const worst = taskRows.find(t => t.err != null && Math.abs(t.err) > 0.2);
+    // 칩은 '물량' 을 말하므로 물량 기준으로 따로 고른다 — 표 정렬은 시간 기준이라
+    // 첫 행을 집으면 가장 어긋난 업무가 아니다.
+    const worst = taskRows
+        .filter(t => t.err != null && Math.abs(t.err) > 0.2)
+        .sort((a, b) => Math.abs(b.err) - Math.abs(a.err))[0];
+
+    // 기준 UPH 가 없던 날은 계획 시간을 낼 수 없어 계산에서 뺐다 — 그 사실을 칸마다 알린다.
+    // (시간 오차에만 붙이면, 값이 작아지는 '계획 시간'·'실제 시간' 칸에 설명이 없다)
+    const 별표 = (t) => {
+        const 쪽지 = [];
+        if (t.noBaseDays > 0) {
+            쪽지.push(`기준 속도가 없던 ${t.noBaseDays}일은 물량·시간 양쪽에서 빼고 계산했습니다`
+                + (t.noBaseActualHours > 0 ? ` (그 날들의 실제 ${fmtHM(t.noBaseActualHours)} 제외)` : ''));
+        }
+        if (!t.unplanned && (t.offPlanHours > 0 || t.offPlanQty > 0)) {
+            쪽지.push(`계획에 없던 날의 실적은 뺐습니다 (${fmtHM(t.offPlanHours)}`
+                + (t.offPlanQty > 0 ? ` · ${t.offPlanQty.toLocaleString()}개` : '') + ' — 계획 외 유입으로 집계)');
+        }
+        return 쪽지.length === 0 ? ''
+            : `<span class="text-[10px] font-normal text-gray-400" title="${escapeHtml(쪽지.join('\n'))}">*</span>`;
+    };
 
     const stat = (label, value, sub, cls) => `
         <div class="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/30 p-3">
@@ -4089,29 +4090,40 @@ const renderAccuracyBody = () => {
         <section class="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm overflow-hidden">
             <header class="flex items-baseline gap-2 px-3.5 py-2.5 bg-gray-50 dark:bg-gray-900/40 border-b border-gray-200 dark:border-gray-700">
                 <h5 class="text-[12px] font-extrabold text-gray-700 dark:text-gray-200">업무별 누적</h5>
-                <span class="text-[11px] text-gray-400 dark:text-gray-500">계획 물량 대비 실제 · 어긋난 순</span>
+                <span class="text-[11px] text-gray-400 dark:text-gray-500">계획 대비 실제 · 시간이 많이 어긋난 순</span>
             </header>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                     <thead class="text-[11px] text-gray-500 dark:text-gray-400 bg-gray-50/60 dark:bg-gray-900/20">
                         <tr>
                             <th class="py-2 px-3 text-left font-bold">업무</th>
-                            <th class="py-2 px-3 text-right font-bold">계획 합</th>
-                            <th class="py-2 px-3 text-right font-bold">실제 합</th>
-                            <th class="py-2 px-3 text-right font-bold">오차</th>
+                            <th class="py-2 px-3 text-right font-bold">계획 물량</th>
+                            <th class="py-2 px-3 text-right font-bold">실제 물량</th>
+                            <th class="py-2 px-3 text-right font-bold">물량 오차</th>
+                            <th class="py-2 px-3 text-right font-bold"
+                                title="그날 계획한 소요시간(인시). 수량형은 물량 ÷ 그날 기준 UPH, 시간형은 넣어 둔 투입시간입니다.">계획 시간</th>
+                            <th class="py-2 px-3 text-right font-bold" title="그 업무에 실제로 쓴 시간(인시)">실제 시간</th>
+                            <th class="py-2 px-3 text-right font-bold"
+                                title="시간이 계획보다 얼마나 더(덜) 걸렸는가. 물량을 맞혔어도 여기가 틀어질 수 있습니다.">시간 오차</th>
                             <th class="py-2 px-3 text-right font-bold" title="실제 물량 ÷ 실제 투입 인시">실제 UPH</th>
-                            <th class="py-2 px-3 text-right font-bold" title="지금 시뮬레이션이 쓰는 기준 UPH(최근 4주 평균)">기준 UPH</th>
+                            <th class="py-2 px-3 text-right font-bold"
+                                title="그날 계획이 가정한 속도(= 계획 물량 ÷ 계획 시간). 지금 기준이 아니라 그날 얼린 값입니다.">계획 UPH</th>
                         </tr>
                     </thead>
                     <tbody>
                         ${taskRows.map(t => `
                         <tr class="border-t border-gray-100 dark:border-gray-700/60">
-                            <td class="py-2 px-3 font-medium text-gray-700 dark:text-gray-200">${escapeHtml(t.label)}</td>
-                            <td class="py-2 px-3 text-right tabular-nums text-gray-500 dark:text-gray-400">${t.plan.toLocaleString()}</td>
-                            <td class="py-2 px-3 text-right tabular-nums font-bold text-gray-800 dark:text-gray-100">${t.actual.toLocaleString()}</td>
-                            <td class="py-2 px-3 text-right tabular-nums font-bold ${errTone(t.err)}">${pctText(t.err)}</td>
+                            <td class="py-2 px-3 font-medium text-gray-700 dark:text-gray-200">${escapeHtml(t.label)}${t.unplanned
+                                ? ' <span class="text-[10px] font-bold text-violet-500 dark:text-violet-300" title="계획에 없었는데 실제로 진행한 업무입니다">계획 외</span>'
+                                : (t.isTime ? ' <span class="text-[10px] font-bold text-indigo-400 dark:text-indigo-300" title="처리량이 없어 투입시간으로 재는 업무입니다">시간</span>' : '')}</td>
+                            <td class="py-2 px-3 text-right tabular-nums text-gray-500 dark:text-gray-400">${(t.isTime || t.unplanned) ? '—' : t.plan.toLocaleString()}${별표(t)}</td>
+                            <td class="py-2 px-3 text-right tabular-nums font-bold text-gray-800 dark:text-gray-100">${t.isTime ? '—' : t.showQty.toLocaleString()}${별표(t)}</td>
+                            <td class="py-2 px-3 text-right tabular-nums font-bold ${t.isTime ? 'text-gray-300 dark:text-gray-600' : errTone(t.err)}">${(t.isTime || t.unplanned) ? '—' : pctText(t.err)}</td>
+                            <td class="py-2 px-3 text-right tabular-nums text-gray-500 dark:text-gray-400">${t.planHours > 0 ? fmtHM(t.planHours) : '—'}${별표(t)}</td>
+                            <td class="py-2 px-3 text-right tabular-nums font-bold text-gray-800 dark:text-gray-100">${t.showHours > 0 ? fmtHM(t.showHours) : '—'}${별표(t)}</td>
+                            <td class="py-2 px-3 text-right tabular-nums font-bold ${errTone(t.hourErr)}">${pctText(t.hourErr)}${별표(t)}</td>
                             <td class="py-2 px-3 text-right tabular-nums ${t.uphErr != null && Math.abs(t.uphErr) > 0.15 ? 'font-bold ' + errTone(t.uphErr) : 'text-gray-600 dark:text-gray-300'}">${t.realUPH != null ? t.realUPH.toFixed(1) : '—'}</td>
-                            <td class="py-2 px-3 text-right tabular-nums text-gray-400 dark:text-gray-500">${t.base > 0 ? t.base.toFixed(1) : '—'}</td>
+                            <td class="py-2 px-3 text-right tabular-nums text-gray-400 dark:text-gray-500"${t.nowUPH > 0 ? ` title="지금 기준 UPH ${t.nowUPH.toFixed(1)}"` : ''}>${t.planUPH > 0 ? t.planUPH.toFixed(1) : '—'}</td>
                         </tr>`).join('')}
                     </tbody>
                 </table>
@@ -4180,7 +4192,15 @@ const renderAccuracyBody = () => {
               계산한 종전 값이라, 계획이 통째로 어긋난 날도 작게 보입니다 — 두 값이 많이 다른 날은
               <b>계획 외</b>·<b>미착수</b> 칸을 함께 보세요.<br>
             · <b>실제 시간</b>은 그날 업무 기록의 소요시간 합계(인시)입니다.<br>
-            · <b>실제 UPH</b>가 기준보다 꾸준히 높거나 낮으면, 기준 UPH(최근 4주 평균)를 다시 볼 때가 된 것입니다.<br>
+            · <b>시간 오차</b>가 이 표의 핵심입니다 — 물량을 맞혔어도 시간이 틀어질 수 있고,
+              <b>시간으로 재는 업무</b>(<span class="text-indigo-400">시간</span> 표시)는 물량이 없어 여기서만 보입니다.
+              <b>계획 외</b> 업무는 표 아래쪽에 실제 시간이 큰 순으로 모아 둡니다.<br>
+            · <b>*</b> 는 그 업무에서 <b>계산에서 뺀 날</b>이 있다는 뜻입니다 — 기준 속도가 없던 날,
+              또는 그 업무가 그날 계획에 없던 날입니다. 계획과 짝이 맞는 날만 비교해야
+              '계획을 한 번도 어기지 않았는데 오차가 뜨는' 일이 없습니다(표시에 마우스를 올리면 나옵니다).<br>
+            · <b>계획 UPH</b>는 그날 계획이 가정한 속도입니다(지금 기준이 아니라 <b>그날 얼린 값</b>).
+              <b>실제 UPH</b>가 그보다 꾸준히 낮으면 기준 속도를 다시 볼 때가 된 것입니다
+              (지금 기준값은 그 칸에 마우스를 올리면 나옵니다).<br>
             · 잘못 확정한 날은 오른쪽 <b>✕</b>로 비교에서 뺄 수 있습니다(업무 기록·실적은 지워지지 않습니다).
         </p>
       </div>`;

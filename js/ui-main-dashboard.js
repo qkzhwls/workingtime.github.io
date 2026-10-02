@@ -1,9 +1,9 @@
 // === js/ui-main-dashboard.js ===
-import { getAllDashboardDefinitions } from './ui.js?v=202610021042';
-import * as State from './state.js?v=202610021042';
-import { getRegularMembersForCount } from './utils.js?v=202610021042';
-import { withBuiltinMenus } from './menu-catalog.js?v=202610021042';
-import { onEzadminChange, 상태 as ezadmin상태, STALE_분 } from './ezadmin-sync.js?v=202610021042';
+import { getAllDashboardDefinitions } from './ui.js?v=202610021122';
+import * as State from './state.js?v=202610021122';
+import { getRegularMembersForCount } from './utils.js?v=202610021122';
+import { withBuiltinMenus } from './menu-catalog.js?v=202610021122';
+import { onEzadminChange, 상태 as ezadmin상태, STALE_분 } from './ezadmin-sync.js?v=202610021122';
 
 // 확장(ezadmin-bridge)이 postMessage 로 넘겨 주는 값. **폴백 전용.**
 // 확장 payload 에는 시각이 없어서(invoice·delivery 뿐) 받은 시각을 여기서 직접 찍어 둔다.

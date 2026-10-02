@@ -6,7 +6,7 @@
 //   ② 기존 hourErr 가 **바뀌지 않았는지** — 옛 날짜 9일치 숫자가 흔들리면 안 된다
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { decomposeAccuracy, summarizeAccuracyRows } from '../js/forecast-accuracy.js?v=202610021042';
+import { decomposeAccuracy, summarizeAccuracyRows, aggregateByTask } from '../js/forecast-accuracy.js?v=202610021122';
 
 /** duration 은 '분'. 한 업무에 여러 건이 들어오는 게 정상이다(사람·분할). */
 const rec = (task, min, member = 'A') => ({ task, duration: min, member });
@@ -267,4 +267,197 @@ test('summarizeAccuracyRows: noBaselineDays — 미착수 0 이 거짓 안심인
     const s = summarizeAccuracyRows(rows);
     assert.equal(s.noBaselineDays, 1);
     assert.equal(s.missedDays, 1);
+});
+
+test('업무별 시간 비교에 필요한 값을 돌려준다 (시간형 업무 포함)', () => {
+    const snap = {
+        tasks: { 직진배송: 1000 },
+        timeTasks: { '중국제작(담당)': { minutes: 180, workers: 2 } },
+        uph: { 직진배송: 125 },      // 계획 8h
+        totalHours: 11               // 8h + 3h
+    };
+    const day = {
+        id: 'd', taskQuantities: { 직진배송: 1000 },
+        workRecords: [rec('직진배송', 10 * 60), rec('중국제작(담당)', 300)]
+    };
+    const r = decomposeAccuracy(snap, day);
+
+    // 업무별 계획 시간 — 수량형은 물량÷그날 얼린 UPH, 시간형은 투입시간 그대로
+    assert.equal(근(r.planHoursByTask['직진배송']), 8);
+    assert.equal(근(r.planHoursByTask['중국제작(담당)']), 3);
+    // 업무별 실제 시간
+    assert.equal(근(r.actualHoursByTask['직진배송']), 10);
+    assert.equal(근(r.actualHoursByTask['중국제작(담당)']), 5);
+    // 시간형 업무 키 — 물량 비교가 불가능한 업무를 화면이 구분할 수 있어야 한다
+    assert.deepEqual(r.timeKeys, ['중국제작(담당)']);
+
+    // ★ 물량은 정확히 맞혔는데(1000/1000) 시간은 2시간 더 걸렸다 — 이게 안 보이던 경우다
+    assert.equal(r.planHoursByTask['직진배송'] < r.actualHoursByTask['직진배송'], true);
+    assert.equal(근((10 - 8) / 8), 0.25);
+});
+
+test('timeKeys 는 옛 스냅샷(timeTasks 없음)에서도 빈 배열이다', () => {
+    const r = decomposeAccuracy({ tasks: { A: 100 }, totalHours: 2 }, { id: 'd', workRecords: [] });
+    assert.deepEqual(r.timeKeys, []);
+    assert.deepEqual(r.actualHoursByTask, {});
+});
+
+test('plannedKeys — 기준 UPH 가 없어 계획 시간이 0 이어도 "계획에 있었다" 는 유지된다', () => {
+    // 이걸 planHoursByTask 로 판정하면, 계획된 업무가 화면에서 '계획 외' 로 찍힌다
+    const snap = {
+        tasks: { 신규업무: 500, 직진배송: 1000 },
+        timeTasks: { 검수: { minutes: 120, workers: 1 } },
+        uph: { 직진배송: 100 },          // 신규업무는 기준 없음
+        totalHours: 10
+    };
+    const r = decomposeAccuracy(snap, { id: 'd', taskQuantities: {}, workRecords: [] });
+
+    assert.deepEqual(r.plannedKeys.sort(), ['검수', '신규업무', '직진배송'].sort());
+    assert.equal(r.planHoursByTask['신규업무'], 0, '계획 시간은 못 낸다');
+    assert.deepEqual(r.noBaselineKeys, ['신규업무'], '기준이 없다고 따로 알려 준다');
+    // 둘을 섞으면 안 된다 — '계획에 있었다' 와 '계획 시간을 낼 수 있다' 는 다른 질문이다
+    assert.ok(r.plannedKeys.includes('신규업무'));
+});
+
+test('plannedKeys 는 계획 물량이 0 인 업무를 포함하지 않는다', () => {
+    const r = decomposeAccuracy(
+        { tasks: { A: 0, B: 300 }, timeTasks: { C: { minutes: 0, workers: 2 } },
+          uph: { B: 100 }, totalHours: 3 },
+        { id: 'd', workRecords: [] });
+    assert.deepEqual(r.plannedKeys, ['B'], '물량 0·시간 0 은 그날 계획이 아니다');
+});
+
+// ── aggregateByTask — 분자·분모의 날짜 집합이 어긋나는 버그가 두 번 났던 자리 ──
+const 행 = (o = {}) => ({
+    qty: {}, planHoursByTask: {}, actualHoursByTask: {},
+    plannedKeys: [], noBaselineKeys: [], ...o
+});
+
+test('★ 기준 UPH 가 없던 날은 물량·시간을 **모두** 빼고 센다 (UPH 가 뻥튀기되지 않는다)', () => {
+    // 같은 업무를 이틀, 둘 다 1000개를 2시간에 했다. 진짜 속도는 500 UPH.
+    // 둘째 날만 기준 UPH 가 없다(신규 업무라 표본 부족).
+    const rows = [
+        행({ qty: { K: { plan: 1000, actual: 1000 } }, plannedKeys: ['K'],
+             planHoursByTask: { K: 2 }, actualHoursByTask: { K: 2 } }),
+        행({ qty: { K: { plan: 1000, actual: 1000 } }, plannedKeys: ['K'],
+             noBaselineKeys: ['K'],
+             planHoursByTask: { K: 0 }, actualHoursByTask: { K: 2 } })
+    ];
+    const [k] = aggregateByTask(rows);
+
+    assert.equal(k.plan, 1000, '기준 없던 날의 물량은 빼야 한다');
+    assert.equal(k.actual, 1000);
+    assert.equal(근(k.planHours), 2);
+    assert.equal(근(k.actualHours), 2);
+    assert.equal(k.noBaseDays, 1);
+    assert.equal(근(k.noBaseActualHours), 2, '뺀 실제 시간은 따로 남겨 화면이 알릴 수 있게');
+    // ★ 두 UPH 모두 진값 — 예전에는 계획 1000, 실제 1000 으로 둘 다 2배가 나왔다
+    assert.equal(근(k.planUPH), 500);
+    assert.equal(근(k.realUPH), 500);
+    assert.equal(k.uphErr, 0);
+    assert.equal(k.hourErr, 0, '시간 오차도 0 — 예전에는 +100% 로 떴다');
+});
+
+test('계획에 있었으면 계획 시간이 0 이어도 "계획 외" 가 아니다', () => {
+    const rows = [행({
+        qty: { 신규: { plan: 500, actual: 400 } },
+        plannedKeys: ['신규'], noBaselineKeys: ['신규'],
+        planHoursByTask: { 신규: 0 }, actualHoursByTask: { 신규: 3 }
+    })];
+    const [t] = aggregateByTask(rows);
+    assert.equal(t.wasPlanned, true);
+    assert.equal(t.unplanned, false, '기준이 없었을 뿐 계획은 있었다');
+    assert.equal(t.noBaseDays, 1);
+});
+
+test('계획에 없이 실제로만 한 업무는 계획 외로 잡고 뒤로 보낸다', () => {
+    const rows = [행({
+        qty: { 직진배송: { plan: 1000, actual: 900 } },
+        plannedKeys: ['직진배송'],
+        planHoursByTask: { 직진배송: 8 },
+        actualHoursByTask: { 직진배송: 12, 잡일: 6 }   // 잡일은 계획에 없다
+    })];
+    const out = aggregateByTask(rows);
+    assert.equal(out.length, 2);
+    assert.equal(out[0].key, '직진배송', '계획 업무가 먼저');
+    assert.equal(out[1].key, '잡일');
+    assert.equal(out[1].unplanned, true);
+    assert.equal(out[1].isTime, true, '물량이 없으니 수량 칸은 — 로 그린다');
+    assert.equal(out[1].hourErr, null, '계획이 없으니 오차를 낼 수 없다');
+});
+
+test('정렬 — 계획 업무는 시간 오차 큰 순, 계획 외는 뒤에서 실제 시간 큰 순', () => {
+    const rows = [행({
+        qty: { A: { plan: 100, actual: 100 }, B: { plan: 100, actual: 100 } },
+        plannedKeys: ['A', 'B'],
+        planHoursByTask: { A: 10, B: 10 },
+        // A +10% · B +90% · 잡일1 2h · 잡일2 5h
+        actualHoursByTask: { A: 11, B: 19, 잡일1: 2, 잡일2: 5 }
+    })];
+    assert.deepEqual(aggregateByTask(rows).map(t => t.key), ['B', 'A', '잡일2', '잡일1']);
+});
+
+test('시간형 업무도 한 행으로 들어온다 (물량 칸은 비운다)', () => {
+    const rows = [행({
+        plannedKeys: ['개인담당업무'],
+        planHoursByTask: { 개인담당업무: 11 },
+        actualHoursByTask: { 개인담당업무: 9 }
+    })];
+    const [t] = aggregateByTask(rows);
+    assert.equal(t.isTime, true);
+    assert.equal(t.hasQty, false);
+    assert.equal(t.err, null);
+    assert.equal(t.realUPH, null, '물량이 없으니 UPH 를 내지 않는다(예전엔 0.0 이 떴다)');
+    assert.equal(t.planUPH, null);
+    assert.equal(근(t.hourErr), 근((9 - 11) / 11));
+});
+
+test('aggregateByTask: 빈 입력·쓰레기에도 throw 하지 않는다', () => {
+    assert.deepEqual(aggregateByTask([]), []);
+    assert.deepEqual(aggregateByTask(null), []);
+    assert.doesNotThrow(() => aggregateByTask([null, undefined, {}]));
+    assert.deepEqual(aggregateByTask([{}]), []);
+});
+
+test('★ 그날 계획에 없던 날의 실적은 계획 통에 섞지 않는다', () => {
+    // 4일은 계획 8h / 실제 8h 로 완벽히 맞혔고, 5일째는 계획에 없는데 6h 했다.
+    // 섞으면 32h vs 38h = +19% 로, 한 번도 안 어긴 업무가 빨갛게 뜬다.
+    const 맞힌날 = () => 행({
+        qty: { 직진배송: { plan: 1000, actual: 1000 } },
+        plannedKeys: ['직진배송'],
+        planHoursByTask: { 직진배송: 8 }, actualHoursByTask: { 직진배송: 8 }
+    });
+    const 계획없던날 = 행({
+        qty: { 직진배송: { plan: 0, actual: 700 } },
+        plannedKeys: [],                       // 그날은 계획에 없었다
+        planHoursByTask: {}, actualHoursByTask: { 직진배송: 6 }
+    });
+    const [t] = aggregateByTask([맞힌날(), 맞힌날(), 맞힌날(), 맞힌날(), 계획없던날]);
+
+    assert.equal(근(t.planHours), 32);
+    assert.equal(근(t.actualHours), 32, '계획에 없던 날의 6h 는 빠진다');
+    assert.equal(t.hourErr, 0, '★ 한 번도 안 어겼으므로 0% 여야 한다');
+    assert.equal(근(t.offPlanHours), 6, '뺀 시간은 따로 남겨 화면이 알릴 수 있게');
+    assert.equal(t.offPlanQty, 700);
+    assert.equal(t.wasPlanned, true);
+    assert.equal(t.unplanned, false, '계획에 있던 날이 있으므로 계획 외 업무가 아니다');
+    // UPH 도 같은 날짜 집합 — 4000개 ÷ 32h = 125
+    assert.equal(근(t.realUPH), 125);
+    assert.equal(근(t.planUPH), 125);
+    assert.equal(t.uphErr, 0);
+});
+
+test('계획 외 전용 업무는 계획 외 값으로 숫자를 보여 준다', () => {
+    const rows = [행({
+        qty: { 잡일: { plan: 0, actual: 300 } },
+        plannedKeys: [],
+        actualHoursByTask: { 잡일: 5 }
+    })];
+    const [t] = aggregateByTask(rows);
+    assert.equal(t.unplanned, true);
+    assert.equal(t.showQty, 300, '계획 쪽 통은 비어 있으므로 계획 외 값을 보여 준다');
+    assert.equal(근(t.showHours), 5);
+    assert.equal(근(t.realUPH), 60, '300 ÷ 5h');
+    assert.equal(t.planUPH, null);
+    assert.equal(t.hourErr, null);
 });

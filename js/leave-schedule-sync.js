@@ -16,7 +16,7 @@
 //  2) subscribeLeaveSchedule()     — Firestore 문서를 실시간 구독해, 다른 사람·다른 탭에서
 //                                    바뀐 근태도 메모리에 반영하고 같은 알림을 쏜다.
 
-import * as State from './state.js?v=202610021042';
+import * as State from './state.js?v=202610021122';
 import { doc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 export const LEAVE_CHANGED_EVENT = 'leave-schedule-changed';

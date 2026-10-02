@@ -23,7 +23,7 @@
     <!-- 팀 결산 보고 '화면 그대로 PDF' 저장용 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=202610021042">
+    <link rel="stylesheet" href="css/style.css?v=202610021122">
     <style>
         /* 💡 탭 전환 시 hidden 클래스가 충돌하는 문제 방지 */
         .hidden { display: none !important; }
@@ -167,11 +167,11 @@
             ]);
 
             try {
-                const State = await import('./js/state.js?v=202610021042');
-                try { await import('./js/app.js?v=202610021042'); } catch(e) {} 
+                const State = await import('./js/state.js?v=202610021122');
+                try { await import('./js/app.js?v=202610021122'); } catch(e) {} 
                 
-                const { loadAndRenderHistoryList, switchHistoryView } = await import('./js/app-history-logic.js?v=202610021042');
-                const { restoreHistoryView } = await import('./js/view-state.js?v=202610021042');
+                const { loadAndRenderHistoryList, switchHistoryView } = await import('./js/app-history-logic.js?v=202610021122');
+                const { restoreHistoryView } = await import('./js/view-state.js?v=202610021122');
 
                 // 초기 준비(로우데이터 → 일별 → 첫 날짜)를 마친 뒤,
                 // 보고 있던 자리로 되돌린다. 기억된 게 없으면 평소대로 대시보드.
@@ -302,7 +302,7 @@
 
         initHistoryApp();
     </script>
-    <script src="js/connection-banner.js?v=202610021042"></script>
-    <script src="js/modal-esc.js?v=202610021042"></script>
+    <script src="js/connection-banner.js?v=202610021122"></script>
+    <script src="js/modal-esc.js?v=202610021122"></script>
 </body>
 </html>
