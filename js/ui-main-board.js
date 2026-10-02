@@ -1,7 +1,141 @@
 // === js/ui-main-board.js ===
-import { formatTimeTo24H, formatDuration, calcTotalPauseMinutes } from './utils.js';
-import * as State from './state.js';
-import { getLeaveDisplayLabel } from './ui-main-utils.js';
+import { formatTimeTo24H, formatDuration, calcTotalPauseMinutes, getTodayDateString, isMemberActiveOn } from './utils.js?v=202610021042';
+import * as State from './state.js?v=202610021042';
+import { leaveTypeLabel } from './state.js?v=202610021042';
+import { onLeaveScheduleChanged } from './leave-schedule-sync.js?v=202610021042';
+import { getLeaveDisplayLabel } from './ui-main-utils.js?v=202610021042';
+
+// ===== 업무현황 카드 커버플로우(coverflow) 컨트롤러 =====
+// 가운데 업무 카드 1개만 크고 선명하게, 양옆 카드는 작고 흐리게 뒤로 물러남.
+// - 자동 롤링 없음(수동만): 좌우 화살표/하단 점/양옆 카드 클릭으로 이동, 클릭한 카드가 가운데로
+// - _cfIndex(가운데 카드 위치)는 30초 전체 재렌더에도 유지
+// - v4.5: 공통업무/그 외 업무 두 줄로 분리 — rowId('common'|'other')별로 독립 상태 유지
+let _cfIndex = { common: 0, other: 0 };
+let _cfResizeBound = false;
+
+function _cfCards(rowId) {
+    const stage = document.getElementById(`task-coverflow-${rowId}`);
+    return stage ? Array.from(stage.querySelectorAll(':scope > .cf-card')) : [];
+}
+
+function _cfLayout(rowId) {
+    const stage = document.getElementById(`task-coverflow-${rowId}`);
+    if (!stage) return;
+    const cards = _cfCards(rowId);
+    const n = cards.length;
+    if (n === 0) return;
+    _cfIndex[rowId] = Math.max(0, Math.min(_cfIndex[rowId] || 0, n - 1));
+
+    const W = stage.clientWidth || 1;
+    const cw = Math.min(440, Math.max(260, W * 0.42)); // 가운데 카드 폭
+    cards.forEach((card, i) => {
+        card.style.width = cw + 'px';
+        const off = i - _cfIndex[rowId];
+        const a = Math.abs(off);
+        const tx = off * (cw * 0.5);
+        const sc = off === 0 ? 1 : (a === 1 ? 0.84 : 0.7);
+        const op = off === 0 ? 1 : (a === 1 ? 0.5 : 0.24);
+        const bl = off === 0 ? 0 : (a === 1 ? 1.5 : 3);
+        card.style.transform = `translate(-50%,-50%) translateX(${tx}px) scale(${sc})`;
+        card.style.opacity = a >= 3 ? 0 : op;
+        card.style.filter = bl ? `blur(${bl}px)` : 'none';
+        card.style.zIndex = String(100 - a);
+        card.style.pointerEvents = a >= 3 ? 'none' : 'auto';
+        card.style.cursor = off === 0 ? '' : 'pointer';
+        card.classList.toggle('is-center', off === 0);
+    });
+
+    const dotsWrap = document.getElementById(`task-cf-dots-${rowId}`);
+    if (dotsWrap) Array.from(dotsWrap.children).forEach((d, i) => d.classList.toggle('on', i === _cfIndex[rowId]));
+
+    const container = document.getElementById(`task-carousel-${rowId}`);
+    if (container) {
+        const show = n > 1;
+        const prev = container.querySelector('.task-carousel-arrow.prev');
+        const next = container.querySelector('.task-carousel-arrow.next');
+        if (prev) prev.hidden = !show;
+        if (next) next.hidden = !show;
+    }
+}
+
+function _cfGo(rowId, i) {
+    const n = _cfCards(rowId).length;
+    if (n === 0) return;
+    _cfIndex[rowId] = ((i % n) + n) % n;
+    _cfLayout(rowId);
+}
+
+function mountTaskCarousel(rowId) {
+    const container = document.getElementById(`task-carousel-${rowId}`);
+    const stage = document.getElementById(`task-coverflow-${rowId}`);
+    if (!container || !stage) return;
+    const cards = _cfCards(rowId);
+    const n = cards.length;
+
+    if (_cfIndex[rowId] >= n) _cfIndex[rowId] = Math.max(0, n - 1); // 재렌더로 카드 수 변동 시 보정
+
+    // 하단 점 인디케이터
+    const dotsWrap = document.getElementById(`task-cf-dots-${rowId}`);
+    if (dotsWrap) {
+        dotsWrap.innerHTML = '';
+        for (let i = 0; i < n; i++) {
+            const d = document.createElement('button');
+            d.type = 'button';
+            d.className = 'task-cf-dot';
+            d.setAttribute('aria-label', `${i + 1}번 업무로 이동`);
+            d.addEventListener('click', () => _cfGo(rowId, i));
+            dotsWrap.appendChild(d);
+        }
+    }
+
+    // 좌우 화살표
+    const prev = container.querySelector('.task-carousel-arrow.prev');
+    const next = container.querySelector('.task-carousel-arrow.next');
+    if (prev) prev.onclick = () => _cfGo(rowId, _cfIndex[rowId] - 1);
+    if (next) next.onclick = () => _cfGo(rowId, _cfIndex[rowId] + 1);
+
+    // 가운데가 아닌 카드를 클릭하면 그 카드를 가운데로 (버튼 동작은 막고 포커스만)
+    // 캡처 단계에서 처리해 task-status-board의 위임 클릭보다 먼저 가로챈다.
+    stage.addEventListener('click', (e) => {
+        const card = e.target.closest('.cf-card');
+        if (!card) return;
+        const idx = _cfCards(rowId).indexOf(card);
+        if (idx !== -1 && idx !== _cfIndex[rowId]) {
+            e.preventDefault();
+            e.stopPropagation();
+            _cfGo(rowId, idx);
+        }
+    }, true);
+
+    // 모바일 손가락 좌우 스와이프로 카드 넘기기 (세로 스크롤은 유지)
+    let _sx = 0, _sy = 0, _st = 0;
+    stage.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        _sx = e.touches[0].clientX;
+        _sy = e.touches[0].clientY;
+        _st = Date.now();
+    }, { passive: true });
+    stage.addEventListener('touchend', (e) => {
+        const t = e.changedTouches[0];
+        if (!t) return;
+        const dx = t.clientX - _sx;
+        const dy = t.clientY - _sy;
+        const dt = Date.now() - _st;
+        // 가로 이동이 충분하고(40px+) 세로보다 우세하며 빠른 제스처일 때만 스와이프로 처리
+        if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy) * 1.3 && dt < 800) {
+            e.preventDefault(); // 스와이프 직후 클릭(카드 포커스) 발생 방지
+            if (dx < 0) _cfGo(rowId, _cfIndex[rowId] + 1); // 왼쪽으로 밀면 다음
+            else _cfGo(rowId, _cfIndex[rowId] - 1);        // 오른쪽으로 밀면 이전
+        }
+    }, { passive: false });
+
+    _cfLayout(rowId);
+
+    if (!_cfResizeBound) {
+        _cfResizeBound = true;
+        window.addEventListener('resize', () => { _cfLayout('common'); _cfLayout('other'); });
+    }
+}
 
 export const renderAttendanceToggle = (appState) => {
     const currentUser = appState.currentUser;
@@ -25,11 +159,7 @@ export const renderAttendanceToggle = (appState) => {
 };
 
 export const renderRealtimeStatus = (appState, teamGroups = [], keyTasks = [], isMobileTaskViewExpanded = false, isMobileMemberViewExpanded = false) => {
-    
-    const taskToggleBtn = document.getElementById('toggle-all-tasks-mobile');
-    if (taskToggleBtn && taskToggleBtn.textContent === '간략히') {
-        isMobileTaskViewExpanded = true;
-    }
+
     const memberToggleBtn = document.getElementById('toggle-all-members-mobile');
     if (memberToggleBtn && memberToggleBtn.textContent === '간략히') {
         isMobileMemberViewExpanded = true;
@@ -41,7 +171,7 @@ export const renderRealtimeStatus = (appState, teamGroups = [], keyTasks = [], i
     const taskStatusBoard = document.getElementById('task-status-board');
     const memberStatusBoard = document.getElementById('member-status-board');
     if (!taskStatusBoard || !memberStatusBoard) return;
-    
+
     taskStatusBoard.innerHTML = '';
     memberStatusBoard.innerHTML = '';
 
@@ -56,26 +186,60 @@ export const renderRealtimeStatus = (appState, teamGroups = [], keyTasks = [], i
     );
     const onLeaveMemberNames = new Set(onLeaveStatusMap.keys());
 
-    const presetTaskContainer = document.createElement('div');
-    const presetGrid = document.createElement('div');
-    presetGrid.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5';
-    if (isMobileTaskViewExpanded) presetGrid.classList.add('mobile-expanded');
-
     const baseTasks = keyTasks.length > 0 ? keyTasks : ['국내배송', '중국제작', '직진배송', '채우기', '개인담당업무'];
-    
-    const ongoingRecords = (appState.workRecords || []).filter(r => 
+
+    const ongoingRecords = (appState.workRecords || []).filter(r =>
         (r.status === 'ongoing' || r.status === 'paused') && !onLeaveMemberNames.has(r.member)
     );
-    const tasksToRender = [...new Set([...baseTasks, ...ongoingRecords.map(r => r.task)])];
 
-    tasksToRender.forEach(task => {
+    // 카드 정렬 — 1) 본인 진행 업무 → 2) 참여 인원 많은 진행 업무 → 3) 기본 순서
+    const allTaskCandidates = [...new Set([...baseTasks, ...ongoingRecords.map(r => r.task)])];
+
+    // task → 고유 참여 멤버 수
+    const taskMemberMap = new Map();
+    ongoingRecords.forEach(r => {
+        if (!taskMemberMap.has(r.task)) taskMemberMap.set(r.task, new Set());
+        taskMemberMap.get(r.task).add(r.member);
+    });
+    const countOf = (task) => (taskMemberMap.get(task)?.size || 0);
+
+    // 현재 사용자가 진행/휴식 중인 업무
+    const userOngoingTasks = new Set(
+        currentUserName
+            ? ongoingRecords.filter(r => r.member === currentUserName).map(r => r.task)
+            : []
+    );
+
+    const tier1 = []; // 본인이 진행 중인 업무
+    const tier2 = []; // 그 외 진행 중인 업무 (참여 인원 많은 순)
+    const tier3 = []; // 진행 없는 기본 업무 (baseTasks 원본 순서 유지)
+    allTaskCandidates.forEach(task => {
+        if (userOngoingTasks.has(task)) tier1.push(task);
+        else if (countOf(task) > 0) tier2.push(task);
+        else tier3.push(task);
+    });
+    tier1.sort((a, b) => countOf(b) - countOf(a));
+    tier2.sort((a, b) => countOf(b) - countOf(a));
+
+    const tasksToRender = [...tier1, ...tier2, ...tier3];
+
+    // v4.5: 공통업무 vs 그 외 업무(담당/기타/남직원/관리 등) 두 줄로 분리
+    // taskGroups(관리자 설정)에서 이름이 '공통'인 그룹의 업무만 위쪽 줄, 나머지는 전부 아래 줄로.
+    const taskGroups = State.appConfig?.taskGroups || [];
+    const commonGroup = taskGroups.find(g => g && g.name === '공통');
+    const commonTaskSet = new Set(commonGroup?.tasks || []);
+    const commonTasksToRender = tasksToRender.filter(task => commonTaskSet.has(task));
+    const otherTasksToRender = tasksToRender.filter(task => !commonTaskSet.has(task));
+
+    // 업무 카드 1개 생성 (공통/그외 두 줄에서 공용으로 사용)
+    const buildTaskCard = (task) => {
         const card = document.createElement('div');
         const groupRecords = ongoingRecords.filter(r => r.task === task);
         const isCurrentUserWorkingOnThisTask = groupRecords.some(r => r.member === currentUserName);
         const isPaused = groupRecords.length > 0 && groupRecords.every(r => r.status === 'paused');
         const isOngoing = groupRecords.some(r => r.status === 'ongoing');
-        const mobileVisibilityClass = (isCurrentUserWorkingOnThisTask || isMobileTaskViewExpanded) ? 'flex' : 'hidden md:flex mobile-task-hidden';
-        
+        const mobileVisibilityClass = 'flex'; // 캐러셀: 모든 카드를 트랙에 포함하고 롤링으로 노출 제한
+
         if (groupRecords.length > 0) {
             const firstRecord = groupRecords[0];
             const headerColor = isPaused ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800';
@@ -170,23 +334,134 @@ export const renderRealtimeStatus = (appState, teamGroups = [], keyTasks = [], i
                 <p class="text-xs text-gray-400 dark:text-gray-500 mt-2 font-medium">클릭하여 인원 선택</p>
             `;
         }
-        presetGrid.appendChild(card);
+        card.classList.add('cf-card'); // 커버플로우 카드 (className 할당 이후에 추가)
+        return card;
+    };
+
+    const buildOtherTaskCard = () => {
+        const otherTaskCard = document.createElement('div');
+        otherTaskCard.className = `flex flex-col justify-center items-center min-h-[280px] bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-all group`;
+        otherTaskCard.classList.add('cf-card');
+        otherTaskCard.dataset.action = 'other';
+        otherTaskCard.innerHTML = `
+            <div class="w-14 h-14 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-full shadow-sm flex items-center justify-center text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 group-hover:bg-gray-100 dark:group-hover:bg-gray-600 transition-all mb-4 text-xl">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <h3 class="font-bold text-lg text-gray-600 dark:text-gray-300">기타 업무</h3>
+            <p class="text-xs text-gray-400 dark:text-gray-500 mt-2 font-medium">새로운 업무 만들기</p>
+        `;
+        return otherTaskCard;
+    };
+
+    // 커버플로우 한 줄(row) 생성 — rowId별 독립 DOM/상태('common'|'other')
+    const buildCarouselRow = (rowId, label, tasks, appendOtherCard) => {
+        const rowWrap = document.createElement('div');
+        rowWrap.className = 'task-carousel-row';
+
+        const rowLabel = document.createElement('div');
+        rowLabel.className = 'task-row-label';
+        rowLabel.textContent = label;
+        rowWrap.appendChild(rowLabel);
+
+        const presetTaskContainer = document.createElement('div');
+        presetTaskContainer.className = 'task-carousel relative';
+        presetTaskContainer.id = `task-carousel-${rowId}`;
+        presetTaskContainer.innerHTML = `
+            <button type="button" class="task-carousel-arrow prev" aria-label="이전 업무" hidden>
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <button type="button" class="task-carousel-arrow next" aria-label="다음 업무" hidden>
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </button>`;
+
+        const presetGrid = document.createElement('div');
+        presetGrid.className = 'task-coverflow';
+        presetGrid.id = `task-coverflow-${rowId}`;
+
+        tasks.forEach(task => presetGrid.appendChild(buildTaskCard(task)));
+        if (appendOtherCard) presetGrid.appendChild(buildOtherTaskCard());
+
+        if (presetGrid.children.length === 0) {
+            const emptyNote = document.createElement('div');
+            emptyNote.className = 'task-row-empty';
+            emptyNote.textContent = '표시할 업무가 없습니다.';
+            presetGrid.appendChild(emptyNote);
+        }
+
+        presetTaskContainer.appendChild(presetGrid);
+        rowWrap.appendChild(presetTaskContainer);
+
+        const cfDots = document.createElement('div');
+        cfDots.className = 'task-cf-dots';
+        cfDots.id = `task-cf-dots-${rowId}`;
+        rowWrap.appendChild(cfDots);
+
+        return rowWrap;
+    };
+
+    const carouselStack = document.createElement('div');
+    carouselStack.className = 'task-carousel-stack';
+    carouselStack.appendChild(buildCarouselRow('common', '공통업무', commonTasksToRender, false));
+    carouselStack.appendChild(buildCarouselRow('other', '그 외 업무', otherTasksToRender, true));
+
+    // ── 우측 빠른시작 리스트: 진행중 업무(이름카드, 공통/그외 두 줄) + 기타 업무 ──
+    const quickList = document.createElement('div');
+    quickList.className = 'task-quick-list';
+    const ongoingTasks = [...tier1, ...tier2]; // 진행 중인 업무 (본인 → 참여 많은 순)
+    const ongoingCommon = ongoingTasks.filter(task => commonTaskSet.has(task));
+    const ongoingOther = ongoingTasks.filter(task => !commonTaskSet.has(task));
+
+    // 빠른시작 항목 1개 HTML (커버플로우 카드 클릭과 동일한 data-cf-focus 위임)
+    const buildQuickItem = (task) => {
+        const grp = ongoingRecords.filter(r => r.task === task);
+        const cnt = new Set(grp.map(r => r.member)).size;
+        const paused = grp.length > 0 && grp.every(r => r.status === 'paused');
+        return `
+            <div class="task-quick-card" data-cf-focus="${task}" title="'${task}' 업무 카드 보기">
+                <span class="task-quick-dot ${paused ? 'is-paused' : 'is-on'}"></span>
+                <span class="task-quick-name">${task}</span>
+                <span class="task-quick-badge">${cnt}</span>
+            </div>`;
+    };
+
+    let quickHtml = `<div class="task-quick-title">공통업무</div>`;
+    quickHtml += ongoingCommon.length > 0
+        ? ongoingCommon.map(buildQuickItem).join('')
+        : `<div class="task-quick-empty">진행 중인 공통업무가 없습니다</div>`;
+
+    quickHtml += `<div class="task-quick-title task-quick-title-second">그 외 업무</div>`;
+    quickHtml += ongoingOther.length > 0
+        ? ongoingOther.map(buildQuickItem).join('')
+        : `<div class="task-quick-empty">진행 중인 업무가 없습니다</div>`;
+
+    // 기타 업무(새 업무 시작) — data-action="other" 위임 핸들러 재사용
+    quickHtml += `
+        <div class="task-quick-card task-quick-other" data-action="other" title="새 업무 시작">
+            <span class="task-quick-plus">+</span>
+            <span class="task-quick-name">기타 업무</span>
+        </div>`;
+    quickList.innerHTML = quickHtml;
+
+    // 진행중 항목 클릭 → 해당 업무가 속한 줄(공통/그외)의 커버플로우에서 그 업무 카드를 가운데로
+    quickList.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-cf-focus]');
+        if (!item) return;
+        const task = item.dataset.cfFocus;
+        const rowId = commonTaskSet.has(task) ? 'common' : 'other';
+        const idx = _cfCards(rowId).findIndex(c => c.dataset.task === task);
+        if (idx >= 0) _cfGo(rowId, idx);
     });
 
-    const otherTaskCard = document.createElement('div');
-    otherTaskCard.className = `flex flex-col justify-center items-center min-h-[280px] bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-all group`;
-    otherTaskCard.dataset.action = 'other';
-    otherTaskCard.innerHTML = `
-        <div class="w-14 h-14 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-full shadow-sm flex items-center justify-center text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300 group-hover:bg-gray-100 dark:group-hover:bg-gray-600 transition-all mb-4 text-xl">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-        </div>
-        <h3 class="font-bold text-lg text-gray-600 dark:text-gray-300">기타 업무</h3>
-        <p class="text-xs text-gray-400 dark:text-gray-500 mt-2 font-medium">새로운 업무 만들기</p>
-    `;
-    presetGrid.appendChild(otherTaskCard);
-    presetTaskContainer.appendChild(presetGrid);
-    
-    taskStatusBoard.appendChild(presetTaskContainer);
+    // ── 좌(커버플로우 두 줄) + 우(빠른시작) 레이아웃 ──
+    const boardLayout = document.createElement('div');
+    boardLayout.className = 'task-board-layout';
+    boardLayout.appendChild(carouselStack);
+    boardLayout.appendChild(quickList);
+
+    taskStatusBoard.appendChild(boardLayout);
+
+    mountTaskCarousel('common');
+    mountTaskCarousel('other');
 
     const allMembersContainer = document.createElement('div');
     allMembersContainer.id = 'all-members-container';
@@ -210,6 +485,7 @@ export const renderRealtimeStatus = (appState, teamGroups = [], keyTasks = [], i
         groupGrid.className = 'flex flex-wrap gap-2.5';
         
         [...new Set(group.members)].forEach(member => {
+            if (!isMemberActiveOn(member, null, State.appConfig)) return; // 🚪 퇴사자(오늘 기준 비활성) 제외
             const card = document.createElement('button');
             const leaveInfo = onLeaveStatusMap.get(member);
             const isOnLeave = !!leaveInfo;
@@ -371,6 +647,84 @@ export const renderRealtimeStatus = (appState, teamGroups = [], keyTasks = [], i
     memberStatusBoard.appendChild(allMembersContainer);
 
     renderAttendanceToggle(appState);
+    renderLeaveScheduleWidget();
+};
+
+// 🔗 근태가 어디서 바뀌든(연차관리 모달·캘린더·데이터관리·다른 사용자) 이 위젯을 다시 그린다.
+onLeaveScheduleChanged('leave-widget', () => {
+    try { renderLeaveScheduleWidget(); } catch (e) { console.warn('근태예정 위젯 갱신 실패:', e); }
+});
+
+// 🗓️ 근태 예정 리스트 위젯 (전체 팀원 현황 옆) — 당일 포함 예정된 근태만 표시
+export const renderLeaveScheduleWidget = () => {
+    const el = document.getElementById('leave-schedule-widget');
+    if (!el) return;
+    const today = getTodayDateString();
+    const leaves = (State.persistentLeaveSchedule && State.persistentLeaveSchedule.onLeaveMembers) || [];
+
+    const items = leaves.map(l => {
+        const start = l.startDate || l.date || (l.startTime ? String(l.startTime).substring(0, 10) : '');
+        const end = l.endDate || start;
+        return { member: l.member || l.name || '', type: l.type || '', customLabel: l.customLabel || '', start, end };
+    }).filter(l => l.start && l.end >= today)
+      .sort((a, b) => (a.start || '').localeCompare(b.start || '')
+                   || (a.end || '').localeCompare(b.end || '')
+                   || (a.member || '').localeCompare(b.member || ''));
+
+    if (!items.length) {
+        el.innerHTML = '<div class="text-xs text-gray-400 dark:text-gray-500 italic py-3 text-center">예정된 근태가 없습니다.</div>';
+        return;
+    }
+
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    const mk = (ds) => { const p = String(ds).split('-'); return `${Number(p[1])}/${Number(p[2])}`; };
+    const dLabel = (start, end) => {
+        const diff = Math.round((new Date(start) - new Date(today)) / 86400000);
+        let head = diff === 0 ? '오늘' : (diff === 1 ? '내일' : mk(start));
+        if (end && end !== start) head += `~${mk(end)}`;
+        return head;
+    };
+    const tone = (t) => {
+        if (t.includes('연차') || t.includes('반차')) return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
+        if (t.includes('출장') || t.includes('외근') || t.includes('외출')) return 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300';
+        if (t.includes('결근')) return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
+        if (t.includes('재택')) return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300';
+        if (t.includes('매장')) return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
+        if (t.includes('휴직')) return 'bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-200';
+        return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300';
+    };
+
+    // 같은 시작일(+기간)은 한 줄에 묶어서 표시 — 날짜를 근태마다 반복하지 않는다.
+    const groups = [];
+    const byKey = new Map();
+    items.forEach(l => {
+        const key = `${l.start}|${l.end}`;
+        let g = byKey.get(key);
+        if (!g) {
+            g = { start: l.start, end: l.end, members: [] };
+            byKey.set(key, g);
+            groups.push(g);
+        }
+        g.members.push({ member: l.member, type: l.type, customLabel: l.customLabel });
+    });
+
+    el.innerHTML = groups.map((g, i) => {
+        const isToday = g.start <= today && g.end >= today;
+        // 같은 날짜 안의 근태는 세로로 한 줄씩 쌓는다.
+        // 한 줄 = [날짜] [이름 … 유형배지] — 두 열 모두 고정 폭이라
+        // 행이 달라도 이름 시작과 배지 오른쪽 끝이 같은 자리에 선다.
+        const chips = g.members.map(m => `
+            <span class="flex items-center gap-1.5 w-full min-h-[18px]">
+                <span class="text-xs font-bold text-gray-800 dark:text-gray-200 truncate" title="${esc(m.member)}">${esc(m.member)}</span>
+                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ml-auto ${tone(m.type)}" title="${esc(leaveTypeLabel(m))}">${esc(leaveTypeLabel(m))}</span>
+            </span>`).join('');
+        // 날짜 그룹 사이를 가로선으로 나눈다(마지막 줄은 제외).
+        const divider = (i < groups.length - 1) ? ' border-b border-gray-100 dark:border-gray-700' : '';
+        return `<div class="flex items-start gap-2 px-2 py-2${divider} ${isToday ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-700/40'} transition-colors">
+            <span class="text-[10px] font-bold tabular-nums whitespace-nowrap ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'} w-[66px] shrink-0 pt-1">${esc(dLabel(g.start, g.end))}</span>
+            <span class="flex-1 min-w-0 flex flex-col gap-1">${chips}</span>
+        </div>`;
+    }).join('');
 };
 
 export const renderCompletedWorkLog = (appState) => {

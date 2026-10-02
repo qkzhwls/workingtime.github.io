@@ -1,12 +1,13 @@
 // === js/listeners-form-team.js ===
 // 설명: 팀원 선택 및 알바 관리(추가/수정/삭제) 관련 리스너를 담당합니다.
 
-import * as DOM from './dom-elements.js';
-import * as State from './state.js';
-import { showToast, getCurrentTime, getTodayDateString } from './utils.js';
-import { generateId, debouncedSaveState } from './app-data.js';
-import { renderTeamSelectionModalContent } from './ui-modals.js';
-import { startWorkGroup, addMembersToWorkGroup } from './app-logic.js';
+import * as DOM from './dom-elements.js?v=202610021042';
+import * as State from './state.js?v=202610021042';
+import { showToast, getCurrentTime, getTodayDateString } from './utils.js?v=202610021042';
+import { generateId, debouncedSaveState, updateDailyData } from './app-data.js?v=202610021042';
+import { markDataAsDirty } from './app-lifecycle.js?v=202610021042';
+import { renderTeamSelectionModalContent } from './ui-modals.js?v=202610021042';
+import { startWorkGroup, addMembersToWorkGroup } from './app-logic.js?v=202610021042';
 import { collection, query, where, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // 헬퍼 변수
@@ -106,16 +107,26 @@ export function setupFormTeamListeners() {
                     if(!confirm(`'${partTimer.name}' 님을 삭제하시겠습니까?`)) return;
 
                     State.appState.partTimers = State.appState.partTimers.filter(p => p.id !== partTimerId);
-                    
+
                     if (State.appState.dailyAttendance && State.appState.dailyAttendance[partTimer.name]) {
                         delete State.appState.dailyAttendance[partTimer.name];
                     }
 
-                    debouncedSaveState();
+                    // 🛡️ 즉시 firestore에 영구 저장 (추가/수정 핸들러와 동일 패턴)
+                    try {
+                        await updateDailyData({
+                            partTimers: State.appState.partTimers,
+                            dailyAttendance: State.appState.dailyAttendance
+                        });
+                    } catch (e) {
+                        console.error('알바 삭제 저장 실패:', e);
+                        markDataAsDirty();
+                    }
+
                     renderTeamSelectionModalContent(State.context.selectedTaskForStart, State.appState, State.appConfig.teamGroups);
                     showToast(`${partTimer.name}님이 삭제되었습니다.`);
                 }
-                return; 
+                return;
             }
 
             // E. 알바 추가 버튼
@@ -132,7 +143,8 @@ export function setupFormTeamListeners() {
                 const newPartTimer = {
                     id: generateId(),
                     name: newName,
-                    wage: State.appConfig.defaultPartTimerWage || 10000
+                    wage: State.appConfig.defaultPartTimerWage || 10000,
+                    isPartTimer: true // 자동 지각 등 분기용 메타데이터
                 };
 
                 if (!State.appState.dailyAttendance) State.appState.dailyAttendance = {};
@@ -142,12 +154,25 @@ export function setupFormTeamListeners() {
                     status: 'active'
                 };
                 State.appState.partTimers.push(newPartTimer);
-                
-                debouncedSaveState(); 
+
+                // 🛡️ 즉시 firestore에 영구 저장 (debounce 우회).
+                // 이전엔 debouncedSaveState만 호출했는데, isDataDirty 플래그가
+                // 안 켜져 있어 saveStateToFirestore가 일찍 return → 다른 사람의
+                // daily_data sync에 의해 알바가 메모리에서도 사라지는 문제 발생.
+                try {
+                    await updateDailyData({
+                        partTimers: State.appState.partTimers,
+                        dailyAttendance: State.appState.dailyAttendance
+                    });
+                } catch (e) {
+                    console.error('알바 추가 저장 실패:', e);
+                    // 실패 시 dirty 플래그라도 켜서 다음 디바운스 저장이 작동하도록
+                    markDataAsDirty();
+                }
 
                 renderTeamSelectionModalContent(State.context.selectedTaskForStart, State.appState, State.appConfig.teamGroups);
                 showToast(`'${newName}'이(가) 추가되고 출근 처리되었습니다.`);
-                return; 
+                return;
             }
 
             // F. 업무 시작 / 추가 확인 버튼
@@ -221,7 +246,7 @@ export function setupFormTeamListeners() {
                     delete State.appState.dailyAttendance[oldName];
                 }
 
-                // DB 업데이트 (workRecords 내의 member 이름 변경)
+                // DB 업데이트 (workRecords 내의 member 이름 변경 + daily_data partTimers/dailyAttendance 즉시 저장)
                 try {
                     const today = getTodayDateString();
                     const workRecordsColRef = collection(State.db, 'artifacts', 'team-work-logger-v2', 'daily_data', today, 'workRecords');
@@ -232,12 +257,38 @@ export function setupFormTeamListeners() {
                         querySnapshot.forEach(doc => batch.update(doc.ref, { member: newName }));
                         await batch.commit();
                     }
-                    debouncedSaveState(); 
+
+                    // 🛡️ 즉시 firestore에 영구 저장 (debounce 우회).
+                    // 이전엔 debouncedSaveState만 호출했는데 isDataDirty 플래그가
+                    // 안 켜져 있어 partTimers/dailyAttendance 저장이 누락됨 →
+                    // 다른 사람의 daily_data sync로 옛 이름이 다시 메모리에 덮어쓰여
+                    // "업무카드는 새 이름, 인원 현황은 옛 이름" 불일치 발생.
+                    await updateDailyData({
+                        partTimers: State.appState.partTimers,
+                        dailyAttendance: State.appState.dailyAttendance
+                    });
+
+                    // 🛡️ activeLock(트랜잭션 락) doc id가 oldName이라면 그것도 갱신 필요.
+                    try {
+                        const { doc: fbDoc, deleteDoc, setDoc, getDoc } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js");
+                        const lockColRef = collection(State.db, 'artifacts', 'team-work-logger-v2', 'daily_data', today, 'activeLocks');
+                        const oldLockRef = fbDoc(lockColRef, oldName);
+                        const oldLockSnap = await getDoc(oldLockRef);
+                        if (oldLockSnap.exists()) {
+                            const data = oldLockSnap.data();
+                            await setDoc(fbDoc(lockColRef, newName), { ...data, member: newName });
+                            await deleteDoc(oldLockRef);
+                        }
+                    } catch (e) {
+                        console.warn('activeLock 이름 갱신 실패 (자동 복구로 처리):', e);
+                    }
+
                     showToast(`'${oldName}'님을 '${newName}'(으)로 수정했습니다.`);
                 } catch (e) {
                     console.error("알바 이름 변경 중 DB 오류: ", e);
                     showToast("이름 변경 중 DB 저장에 실패했습니다.", true);
                     partTimer.name = oldName; // 롤백
+                    markDataAsDirty();
                 }
             }
             document.getElementById('edit-part-timer-modal').classList.add('hidden');

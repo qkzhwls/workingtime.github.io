@@ -39,7 +39,23 @@
         <div class="p-6 text-center">
             <svg class="mx-auto mb-4 text-yellow-400 w-12 h-12" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 11V6m0 8h.01M19 10a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
             <h3 id="end-shift-confirm-title" class="mb-5 text-lg font-normal text-gray-700">진행 중인 업무가 있습니다</h3>
-            <p id="end-shift-confirm-message" class="mb-6 text-sm text-gray-500">모든 진행 중인 업무를 종료하고 마감하시겠습니까?</p>
+            <p id="end-shift-confirm-message" class="mb-4 text-sm text-gray-500">모든 진행 중인 업무를 종료하고 마감하시겠습니까?</p>
+
+            <!-- 🕐 마감 기준시각.
+                 이 시각이 아직 퇴근을 찍지 않은 사람 전원의 퇴근시각이 된다.
+                 늦게 누르는 날 '누른 시각'이 그대로 확정되는 것을 막기 위해 지정할 수 있다. -->
+            <div class="mb-3 text-left bg-gray-50 border border-gray-200 rounded-xl p-3">
+                <label for="end-shift-time" class="block text-xs font-bold text-gray-600 mb-1">마감 기준시각</label>
+                <input type="time" id="end-shift-time"
+                       class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:ring-2 focus:ring-red-400 focus:outline-none">
+                <p class="mt-1 text-[11px] leading-snug text-gray-500">
+                    퇴근을 아직 찍지 않은 분들의 퇴근시각이 이 시각으로 확정됩니다.
+                </p>
+            </div>
+
+            <!-- 미리보기: 무엇이 마감되고 무엇이 삭제되는지. 마감은 되돌릴 수 없다. -->
+            <div id="end-shift-preview" class="mb-4 text-left text-xs leading-relaxed text-gray-600"></div>
+
             <div class="flex justify-center gap-3">
                 <button type="button" id="confirm-end-shift-btn" class="text-white bg-red-600 hover:bg-red-700 focus:ring-4 focus:outline-none focus:ring-red-800 font-medium rounded-lg text-sm inline-flex items-center px-5 py-2.5 text-center">종료 후 마감</button>
                 <button type="button" id="cancel-end-shift-btn" class="text-gray-700 bg-white hover:bg-gray-100 focus:ring-4 focus:outline-none focus:ring-gray-200 rounded-lg border border-gray-200 text-sm font-medium px-5 py-2.5 hover:text-gray-900 focus:z-10">취소</button>

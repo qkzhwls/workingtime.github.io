@@ -1,7 +1,7 @@
 // === js/ui-history-reports-productivity.js ===
-import { isWeekday, getTodayDateString } from './utils.js';
-import { getAsArray } from './ui-history-reports-utils.js';
-import { calculateReportKPIs, calculateReportAggregations, calculateStandardThroughputs } from './ui-history-reports-calculations.js';
+import { isWeekday, getTodayDateString, toDateString, buildMemberHourlyWageMap } from './utils.js?v=202610021042';
+import { getAsArray } from './ui-history-reports-utils.js?v=202610021042';
+import { calculateReportKPIs, calculateReportAggregations, calculateStandardThroughputs } from './ui-history-reports-calculations.js?v=202610021042';
 
 export const calculateBenchmarkOEE = (allHistoryData, appConfig) => {
     if (!allHistoryData || allHistoryData.length === 0) return null;
@@ -13,7 +13,7 @@ export const calculateBenchmarkOEE = (allHistoryData, appConfig) => {
     const standardThroughputs = calculateStandardThroughputs(allHistoryData);
 
     recentData.forEach(day => {
-        const wageMap = { ...(appConfig.memberWages || {}) };
+        const wageMap = buildMemberHourlyWageMap(appConfig.memberWages); // 월기본급 → 시급(÷209)
         getAsArray(day.partTimers).forEach(pt => { if (pt && pt.name && !wageMap[pt.name]) wageMap[pt.name] = pt.wage || 0; });
         const dayAggr = calculateReportAggregations(day, appConfig, wageMap, new Map());
         const productivity = calculateAdvancedProductivity([day], dayAggr, standardThroughputs, appConfig, wageMap);
@@ -317,61 +317,3 @@ export const generateProductivityDiagnosis = (metrics, prevMetrics, benchmarkOEE
     return { diagnosis, commentHtml: comments.join('<br>') };
 };
 
-export const calculateSimulationThroughputs = (allHistoryData) => {
-    const todayKey = getTodayDateString();
-    const todayDate = new Date(todayKey + 'T00:00:00');
-    
-    const yesterdayDate = new Date(todayDate);
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterdayKey = yesterdayDate.toISOString().slice(0, 10);
-    
-    const twoMonthsAgoDate = new Date(yesterdayDate);
-    twoMonthsAgoDate.setMonth(twoMonthsAgoDate.getMonth() - 2);
-    const twoMonthsAgoKey = twoMonthsAgoDate.toISOString().slice(0, 10);
-
-    const pastTwoMonthsData = allHistoryData.filter(d => d.id >= twoMonthsAgoKey && d.id <= yesterdayKey);
-
-    const taskDailySpeeds = {};
-
-    pastTwoMonthsData.forEach(day => {
-        const records = getAsArray(day.workRecords);
-        const quantities = day.taskQuantities || {};
-        const dailyTaskStats = {};
-
-        records.forEach(r => {
-            const duration = Number(r.duration) || 0;
-            if (r.task && duration > 0) {
-                if (!dailyTaskStats[r.task]) dailyTaskStats[r.task] = { duration: 0, quantity: 0 };
-                dailyTaskStats[r.task].duration += duration;
-            }
-        });
-
-        Object.entries(quantities).forEach(([task, qty]) => {
-            const q = Number(qty) || 0;
-            if (q > 0) {
-                if (!dailyTaskStats[task]) dailyTaskStats[task] = { duration: 0, quantity: 0 };
-                dailyTaskStats[task].quantity += q;
-            }
-        });
-
-        Object.entries(dailyTaskStats).forEach(([task, stats]) => {
-            if (stats.duration >= 10 && stats.quantity > 0) { 
-                const speed = stats.quantity / stats.duration;
-                if (!taskDailySpeeds[task]) taskDailySpeeds[task] = [];
-                taskDailySpeeds[task].push(speed);
-            }
-        });
-    });
-
-    const standards = {};
-    Object.keys(taskDailySpeeds).forEach(task => {
-        const speeds = taskDailySpeeds[task];
-        if (speeds.length > 0) {
-            const avg = speeds.reduce((a, b) => a + b, 0) / speeds.length;
-            standards[task] = avg;
-        } else {
-            standards[task] = 0;
-        }
-    });
-    return standards;
-};

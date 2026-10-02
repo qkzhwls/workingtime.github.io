@@ -1,5 +1,6 @@
 // === js/ui-history-reports-trends.js ===
-import { predictFutureTrends } from './analysis-logic.js'; 
+import { predictFutureTrends } from './analysis-logic.js?v=202610021042';
+import { channelScope } from './revenue-channels.js?v=202610021042';
 
 let trendChartInstance = null; 
 
@@ -7,7 +8,16 @@ export const renderTrendReport = (historyData) => {
     const container = document.getElementById('trend-analysis-panel');
     if (!container) return;
 
+    // 매출은 전체(총계) 기준, 물량은 '국내배송'만 보여주는 화면이라
+    // 배송량은 일반배송(카페24) 스코프로 따로 계산한다.
     const trendData = predictFutureTrends(historyData, 14);
+    const domesticTrend = predictFutureTrends(historyData, 14, channelScope('cafe24'));
+    if (trendData && domesticTrend) {
+        trendData.prediction.delivery = domesticTrend.prediction.delivery;
+        trendData.prediction.rangeDelivery = domesticTrend.prediction.rangeDelivery;
+        trendData.prediction.tomorrow.delivery = domesticTrend.prediction.tomorrow.delivery;
+        trendData.historical.delivery = domesticTrend.historical.delivery;
+    }
 
     if (!trendData || !trendData.prediction) {
         container.innerHTML = '<div class="text-center text-gray-500 py-10">예측을 위한 과거 데이터가 부족합니다. (최소 7일 필요)</div>';

@@ -1,10 +1,88 @@
 // === js/ui-history-management.js ===
 // 설명: 경영 지표(재고, 매출 등)의 입력 및 기간별 분석 리포트 렌더링을 담당합니다.
 
-import { formatDuration, getWeekOfYear, isWeekday } from './utils.js';
-import { getDiffHtmlForMetric, analyzeUnitCost } from './ui-history-reports-logic.js';
-import { appConfig } from './state.js';
+import { formatDuration, getWeekOfYear, isWeekday, toDateString, buildMemberHourlyWageMap } from './utils.js?v=202610021042';
+import { getDiffHtmlForMetric, analyzeUnitCost } from './ui-history-reports-logic.js?v=202610021042';
+import { appConfig } from './state.js?v=202610021042';
+import {
+    REVENUE_CHANNELS, CHANNEL_METRICS,
+    revenueTotalOf, orderCountTotalOf, isLegacyRevenue, isLegacyOrderCount
+} from './revenue-channels.js?v=202610021042';
 // predictFutureTrends import 제거됨
+
+// 💰 채널별 입력 블록 (일반배송(카페24) / 직진배송 / 도착보장 / 기타)
+//    매출액·주문 건수 두 지표 모두 같은 방식으로 만들어진다.
+//    합계는 입력할 때마다 즉시 다시 계산해 화면에 보여준다.
+// ⚠️ 아래 스크립트 문자열은 oninput="..." 속성 안에 들어가므로 큰따옴표를 쓰면 안 된다.
+const recalcTotalJs = (metricKey, fieldOf) => `(function(){` +
+    `var ids=[${REVENUE_CHANNELS.map(c => `'mgmt-input-${fieldOf(c)}'`).join(',')}];` +
+    `var sum=ids.reduce(function(s,id){var el=document.getElementById(id);` +
+    `return s+(Number(((el&&el.value)||'0').replace(/[^0-9]/g,''))||0);},0);` +
+    `var out=document.getElementById('mgmt-${metricKey}-total');` +
+    `if(out) out.textContent=sum.toLocaleString();})();`;
+
+const legacyNoteHtml = (isLegacy, total, unit) => isLegacy
+    ? `<p class="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded p-2 leading-relaxed">
+         ⚠️ 이 날짜는 채널 구분 이전에 입력된 데이터입니다. 총계 <b>${formatCurrency(total)}${unit}</b>만 남아 있어
+         채널별 값이 비어 있습니다. 채널별로 나눠 입력한 뒤 저장하면 합계가 새로 계산됩니다.
+       </p>`
+    : '';
+
+// 채널 한 줄에 [채널명 | 매출액 | 주문 건수]를 나란히 배치한다.
+// (지표별로 블록을 나누면 같은 채널의 매출/건수를 눈으로 맞춰보기 어려워서 한 행으로 합침)
+const channelGridHtml = (mgmt, prevMgmt, formatVal, onInputHandler) => {
+    const diffKindOf = (m) => m.key === 'revenue' ? 'totalCost' : 'quantity';
+    const totalOf = (m, src) => m.key === 'revenue' ? revenueTotalOf(src) : orderCountTotalOf(src);
+
+    const header = `
+        <div class="grid grid-cols-[5.5rem_1fr_1fr] gap-2 items-end px-0.5">
+            <span></span>
+            ${CHANNEL_METRICS.map(m => `<span class="text-[11px] font-bold text-gray-500 text-right pr-1">${m.label} (${m.unit})</span>`).join('')}
+        </div>`;
+
+    const rows = REVENUE_CHANNELS.map(c => `
+        <div class="grid grid-cols-[5.5rem_1fr_1fr] gap-2 items-center">
+            <span class="flex items-center gap-1.5 text-[13px] text-gray-600 min-w-0">
+                <span class="inline-block w-2 h-2 rounded-full shrink-0" style="background:${c.color}"></span>
+                <span class="truncate" title="${c.label}">${c.shortLabel}</span>
+            </span>
+            ${CHANNEL_METRICS.map(m => {
+                const field = m.fieldOf(c);
+                return `<div>
+                    <input type="text" id="mgmt-input-${field}" data-channel="${c.id}" data-metric="${m.key}"
+                        class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-right font-bold text-gray-800"
+                        placeholder="0" value="${formatVal(mgmt[field])}"
+                        oninput="${onInputHandler} ${recalcTotalJs(m.key, m.fieldOf)}">
+                    <div class="text-[11px] font-medium text-right mt-0.5">
+                        ${getDiffHtmlForMetric(diffKindOf(m), mgmt[field], prevMgmt[field])}
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>`).join('');
+
+    const totalRow = `
+        <div class="grid grid-cols-[5.5rem_1fr_1fr] gap-2 items-center pt-2 border-t border-blue-100">
+            <span class="text-sm font-bold text-blue-800">합계</span>
+            ${CHANNEL_METRICS.map(m => `
+                <div class="text-right pr-1">
+                    <span id="mgmt-${m.key}-total" class="text-base font-black text-blue-800">${formatCurrency(totalOf(m, mgmt))}</span>
+                    <div class="text-[11px] font-medium mt-0.5">
+                        ${getDiffHtmlForMetric(diffKindOf(m), totalOf(m, mgmt), totalOf(m, prevMgmt))}
+                    </div>
+                </div>`).join('')}
+        </div>`;
+
+    // 채널 구분 이전 데이터 안내는 지표별로 한 번씩만
+    const notes = CHANNEL_METRICS.map(m => m.key === 'revenue'
+        ? legacyNoteHtml(isLegacyRevenue(mgmt), Number(mgmt.revenue), m.unit)
+        : legacyNoteHtml(isLegacyOrderCount(mgmt), Number(mgmt.orderCount), m.unit)).join('');
+
+    // 칸을 비우고 저장하면 '변경 없음'으로 처리돼 기존 값이 그대로 남는다.
+    // 자동입력이 잘못 넣은 값을 지우려는 사람이 여기서 막히므로 미리 알려 둔다.
+    const clearHint = `<p class="text-[10px] text-gray-400 pt-1">값을 지우려면 칸을 비우지 말고 <b>0</b>을 입력하세요.</p>`;
+
+    return `<div class="space-y-2">${notes}${header}${rows}${totalRow}${clearHint}</div>`;
+};
 
 // 헬퍼: 숫자를 통화 형식(콤마)으로 변환
 const formatCurrency = (num) => {
@@ -23,8 +101,33 @@ const calculateTurnoverRatio = (totalRevenue, avgInventoryAmt) => {
     return totalRevenue / avgInventoryAmt;
 };
 
+// 💰 총 매출 / 총 주문건수 카드 안에 채널별 구성비를 함께 보여준다.
+//    metricKey: 'revenue' | 'orderCount'
+const channelBreakdownHtml = (stats, metricKey) => {
+    const isRevenue = metricKey === 'revenue';
+    const total = Number(isRevenue ? stats.revenue : stats.orderCount) || 0;
+    if (total <= 0) return '';
+
+    const byChannel = isRevenue ? stats.revenueByChannel : stats.orderCountByChannel;
+    const unclassified = Number(isRevenue ? stats.revenueUnclassified : stats.orderCountUnclassified) || 0;
+    const pct = (v) => ((v / total) * 100).toFixed(1);
+
+    const row = (label, value, color, muted = false) => `
+        <div class="flex items-center justify-between gap-2">
+            <span class="flex items-center gap-1.5 ${muted ? 'text-gray-400' : 'text-gray-600'}">
+                <span class="inline-block w-2 h-2 rounded-full" style="background:${color}"></span>${label}
+            </span>
+            <span class="font-bold ${muted ? 'text-gray-500' : 'text-gray-700'}">${formatCurrency(value)}<span class="text-gray-400 font-normal ml-1">(${pct(value)}%)</span></span>
+        </div>`;
+
+    const rows = REVENUE_CHANNELS.map(c => row(c.label, Number(byChannel?.[c.id]) || 0, c.color)).join('');
+    const legacy = unclassified > 0 ? row('채널 미구분', unclassified, '#d1d5db', true) : '';
+
+    return `<div class="mt-3 pt-3 border-t border-gray-100 space-y-1 text-xs">${rows}${legacy}</div>`;
+};
+
 // 헬퍼: 데이터 집계 함수
-const aggregateManagementData = (dataList) => {
+export const aggregateManagementData = (dataList) => {
     const result = {
         revenue: 0,
         orderCount: 0,
@@ -32,14 +135,28 @@ const aggregateManagementData = (dataList) => {
         inventoryAmtSum: 0,
         daysWithInventory: 0,
         avgInventoryQty: 0,
-        avgInventoryAmt: 0
+        avgInventoryAmt: 0,
+        usdRateSum: 0, cnyRateSum: 0, daysWithFx: 0,
+        avgUsdRate: 0, avgCnyRate: 0,
+        // 💰 채널별 매출·주문건수 합계 (일반배송(카페24) / 직진배송 / 도착보장 / 기타)
+        revenueByChannel: REVENUE_CHANNELS.reduce((a, c) => ({ ...a, [c.id]: 0 }), {}),
+        orderCountByChannel: REVENUE_CHANNELS.reduce((a, c) => ({ ...a, [c.id]: 0 }), {}),
+        revenueUnclassified: 0,   // 채널 구분 이전에 입력된 총액
+        orderCountUnclassified: 0 // 채널 구분 이전에 입력된 총 건수
     };
 
     dataList.forEach(day => {
         const mgmt = day.management || {};
-        result.revenue += (Number(mgmt.revenue) || 0);
-        result.orderCount += (Number(mgmt.orderCount) || 0);
-        
+        result.revenue += revenueTotalOf(mgmt);
+        result.orderCount += orderCountTotalOf(mgmt);
+
+        REVENUE_CHANNELS.forEach(c => {
+            result.revenueByChannel[c.id] += (Number(mgmt[c.field]) || 0);
+            result.orderCountByChannel[c.id] += (Number(mgmt[c.orderField]) || 0);
+        });
+        if (isLegacyRevenue(mgmt)) result.revenueUnclassified += (Number(mgmt.revenue) || 0);
+        if (isLegacyOrderCount(mgmt)) result.orderCountUnclassified += (Number(mgmt.orderCount) || 0);
+
         const invQty = Number(mgmt.inventoryQty) || 0;
         const invAmt = Number(mgmt.inventoryAmt) || 0;
 
@@ -48,11 +165,23 @@ const aggregateManagementData = (dataList) => {
             result.inventoryAmtSum += invAmt;
             result.daysWithInventory++;
         }
+
+        const usd = Number(mgmt.usdRate) || 0;
+        const cny = Number(mgmt.cnyRate) || 0;
+        if (usd > 0 || cny > 0) {
+            result.usdRateSum += usd;
+            result.cnyRateSum += cny;
+            result.daysWithFx++;
+        }
     });
 
     if (result.daysWithInventory > 0) {
         result.avgInventoryQty = result.inventoryQtySum / result.daysWithInventory;
         result.avgInventoryAmt = result.inventoryAmtSum / result.daysWithInventory;
+    }
+    if (result.daysWithFx > 0) {
+        result.avgUsdRate = result.usdRateSum / result.daysWithFx;
+        result.avgCnyRate = result.cnyRateSum / result.daysWithFx;
     }
 
     return result;
@@ -120,7 +249,7 @@ const generateCostAnalysisHTML = (analysis) => {
                         </div>
                         
                         <div class="flex justify-between items-center text-purple-700">
-                            <span>직진배송 화물비 <span class="text-xs">(${costs.directDeliveryCount}회)</span></span>
+                            <span>ZG&AB배송 화물비 <span class="text-xs">(${costs.directDeliveryCount}회)</span></span>
                             <span class="font-semibold">+ ${Math.round(costs.directDelivery).toLocaleString()}원</span>
                         </div>
 
@@ -168,7 +297,7 @@ export const renderManagementDaily = (dateKey, allHistoryData) => {
     };
     const onInputHandler = "this.value = this.value.replace(/[^0-9]/g, '').replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');";
 
-    const wageMap = { ...appConfig.memberWages };
+    const wageMap = buildMemberHourlyWageMap(appConfig.memberWages); // 월기본급 → 시급(÷209)
     (dayData?.partTimers || []).forEach(pt => {
         if (pt.name) wageMap[pt.name] = pt.wage || 0;
     });
@@ -177,7 +306,7 @@ export const renderManagementDaily = (dateKey, allHistoryData) => {
         dayData || { workRecords: [], taskQuantities: {} }, 
         appConfig, 
         wageMap, 
-        Number(mgmt.revenue) || 0
+        revenueTotalOf(mgmt)
     );
 
     const analysisHtml = generateCostAnalysisHTML(analysis);
@@ -204,33 +333,27 @@ export const renderManagementDaily = (dateKey, allHistoryData) => {
                     <h4 class="font-bold text-blue-800 mb-4 flex items-center">
                         💰 매출 현황
                     </h4>
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">일 매출액 (원)</label>
-                            <div class="flex items-center gap-2">
-                                <input type="text" id="mgmt-input-revenue" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-right font-bold text-gray-800" 
-                                    placeholder="0" value="${formatVal(mgmt.revenue)}" oninput="${onInputHandler}">
-                                <span class="text-sm font-medium w-20 text-right">
-                                    ${getDiffHtmlForMetric('totalCost', mgmt.revenue, prevMgmt.revenue)}
-                                </span>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">주문 건수 (건)</label>
-                            <div class="flex items-center gap-2">
-                                <input type="text" id="mgmt-input-orderCount" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-right font-bold text-gray-800" 
-                                    placeholder="0" value="${formatVal(mgmt.orderCount)}" oninput="${onInputHandler}">
-                                <span class="text-sm font-medium w-20 text-right">
-                                    ${getDiffHtmlForMetric('quantity', mgmt.orderCount, prevMgmt.orderCount)}
-                                </span>
-                            </div>
-                        </div>
-                        <div class="pt-3 border-t mt-2">
-                            <div class="flex justify-between text-sm">
-                                <span class="text-gray-600">건당 평균 매출 (객단가)</span>
-                                <span class="font-bold text-gray-800">
-                                    ${(Number(mgmt.orderCount) > 0) ? Math.round(Number(mgmt.revenue) / Number(mgmt.orderCount)).toLocaleString() : '0'} 원
-                                </span>
+                    <div class="space-y-5">
+                        ${channelGridHtml(mgmt, prevMgmt, formatVal, onInputHandler)}
+                        <div class="pt-3 border-t">
+                            <div class="text-sm font-bold text-gray-700 mb-2">건당 평균 매출 (객단가)</div>
+                            <div class="space-y-1 text-sm">
+                                ${REVENUE_CHANNELS.map(c => {
+                                    const rev = Number(mgmt[c.field]) || 0;
+                                    const ord = Number(mgmt[c.orderField]) || 0;
+                                    return `<div class="flex justify-between">
+                                        <span class="flex items-center gap-1.5 text-gray-600 text-[13px]">
+                                            <span class="inline-block w-2 h-2 rounded-full" style="background:${c.color}"></span>${c.label}
+                                        </span>
+                                        <span class="font-bold text-gray-700">${ord > 0 ? formatCurrency(Math.round(rev / ord)) : '0'} 원</span>
+                                    </div>`;
+                                }).join('')}
+                                <div class="flex justify-between pt-1.5 border-t border-gray-100">
+                                    <span class="text-gray-800 font-bold">전체</span>
+                                    <span class="font-bold text-gray-800">
+                                        ${orderCountTotalOf(mgmt) > 0 ? formatCurrency(Math.round(revenueTotalOf(mgmt) / orderCountTotalOf(mgmt))) : '0'} 원
+                                    </span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -265,14 +388,34 @@ export const renderManagementDaily = (dateKey, allHistoryData) => {
                             <div class="flex justify-between text-sm">
                                 <span class="text-gray-600">재고 순환율 (매출/재고)</span>
                                 <span class="font-bold text-indigo-600">
-                                    ${(Number(mgmt.inventoryAmt) > 0) ? (Number(mgmt.revenue) / Number(mgmt.inventoryAmt) * 100).toFixed(1) : '0.0'} %
+                                    ${(Number(mgmt.inventoryAmt) > 0) ? (revenueTotalOf(mgmt) / Number(mgmt.inventoryAmt) * 100).toFixed(1) : "0.0"} %
                                 </span>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="mt-8 p-4 bg-yellow-50 border border-yellow-100 rounded-lg text-sm text-yellow-800">
+                <div class="mt-6 bg-white p-6 rounded-xl border border-emerald-100 shadow-sm">
+                    <h4 class="font-bold text-emerald-800 mb-4 flex items-center justify-between">
+                        <span>💱 환율 (원)</span>
+                        <span class="text-[11px] font-medium text-gray-400">${mgmt.fxAt ? '자동입력 ' + new Date(mgmt.fxAt).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '매일 오전 9시 자동입력'}</span>
+                    </h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">달러 (1 USD = 원)</label>
+                            <input type="text" id="mgmt-input-usdRate" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-right font-bold text-gray-800"
+                                placeholder="0" value="${formatVal(mgmt.usdRate)}" oninput="${onInputHandler}">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">위안화 (1 CNY = 원)</label>
+                            <input type="text" id="mgmt-input-cnyRate" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 text-right font-bold text-gray-800"
+                                placeholder="0" value="${formatVal(mgmt.cnyRate)}" oninput="${onInputHandler}">
+                        </div>
+                    </div>
+                    <div class="text-[11px] text-gray-400 mt-2">매일 오전 9시 그날의 환율이 자동 입력됩니다. 필요 시 직접 수정 후 [저장]하세요.</div>
+                </div>
+
+                <div class="mt-6 p-4 bg-yellow-50 border border-yellow-100 rounded-lg text-sm text-yellow-800">
                     💡 <strong>Tip:</strong> 입력한 데이터는 우측 상단 <strong>[저장]</strong> 버튼을 눌러야 반영됩니다. 저장된 데이터는 주간/월간 리포트에서 합산되어 분석됩니다.
                 </div>
             </div>
@@ -327,6 +470,18 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
         }
     }
 
+    // 💱 환율 전기간 비교 (주: 직전 7일, 월/년: 기존 prevStats 재사용)
+    let prevFxStats = prevStats;
+    let fxCompareLabel = prevKey ? `vs ${prevKey}` : '';
+    if (viewMode === 'management-weekly' && filteredData.length > 0) {
+        const earliest = filteredData[0].id;
+        const s = new Date(earliest + 'T00:00:00'); s.setDate(s.getDate() - 7);
+        const e = new Date(earliest + 'T00:00:00'); e.setDate(e.getDate() - 1);
+        const lo = toDateString(s), hi = toDateString(e);
+        const pd = allHistoryData.filter(d => d.id >= lo && d.id <= hi);
+        if (pd.length > 0) { prevFxStats = aggregateManagementData(pd); fxCompareLabel = 'vs 직전주'; }
+    }
+
     const turnoverRatio = calculateTurnoverRatio(currentStats.revenue, currentStats.avgInventoryAmt);
     const prevTurnoverRatio = prevStats ? calculateTurnoverRatio(prevStats.revenue, prevStats.avgInventoryAmt) : 0;
     
@@ -352,15 +507,22 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
                     <td class="px-4 py-3 text-right">${invAmt > 0 ? formatCurrency(invAmt) : '-'}</td>
                     <td class="px-4 py-3 text-right">${invQty > 0 ? formatCurrency(invQty) : '-'}</td>
                     <td class="px-4 py-3 text-right font-mono text-purple-600">${dailyTurnover > 0 ? dailyTurnover.toFixed(1) + '%' : '-'}</td>
+                    <td class="px-4 py-3 text-right text-emerald-700">${(Number(m.usdRate) || 0) > 0 ? formatCurrency(Number(m.usdRate)) : '-'}</td>
+                    <td class="px-4 py-3 text-right text-emerald-700">${(Number(m.cnyRate) || 0) > 0 ? formatCurrency(Number(m.cnyRate)) : '-'}</td>
                 </tr>
             `;
         }).join('');
 
         dailyTableHtml = `
             <div class="bg-white rounded-xl border border-gray-200 overflow-hidden mt-8 shadow-sm">
-                <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center gap-2 flex-wrap">
                     <h4 class="font-bold text-gray-800">📅 일자별 상세 내역</h4>
-                    <span class="text-xs text-gray-500">일별 회전율은 (매출/재고금액)% 로 계산됩니다.</span>
+                    <div class="flex items-center gap-2">
+                        <button type="button" onclick="window.__runFxBackfill && window.__runFxBackfill('2026-06-01')"
+                                class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-1.5 px-3 rounded-md shadow-sm"
+                                title="환율이 비어있는 과거 날짜를 과거 시세로 일괄 채웁니다 (2026-06-01부터)">💱 과거 환율 채우기</button>
+                        <span class="text-xs text-gray-500">일별 회전율은 (매출/재고금액)% 로 계산됩니다.</span>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm text-left">
@@ -373,6 +535,8 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
                                 <th class="px-4 py-3 text-right">재고금액</th>
                                 <th class="px-4 py-3 text-right">재고량</th>
                                 <th class="px-4 py-3 text-right">회전율(%)</th>
+                                <th class="px-4 py-3 text-right">달러(원)</th>
+                                <th class="px-4 py-3 text-right">위안(원)</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100">
@@ -387,6 +551,8 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
                                 <td class="px-4 py-3 text-right">${formatCurrency(Math.round(currentStats.avgInventoryAmt))} (평균)</td>
                                 <td class="px-4 py-3 text-right">${formatCurrency(Math.round(currentStats.avgInventoryQty))} (평균)</td>
                                 <td class="px-4 py-3 text-right">-</td>
+                                <td class="px-4 py-3 text-right text-emerald-700">${currentStats.avgUsdRate > 0 ? formatCurrency(Math.round(currentStats.avgUsdRate)) + ' (평균)' : '-'}</td>
+                                <td class="px-4 py-3 text-right text-emerald-700">${currentStats.avgCnyRate > 0 ? formatCurrency(Math.round(currentStats.avgCnyRate)) + ' (평균)' : '-'}</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -398,7 +564,7 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
     // 기간별 원가 분석
     const aggregatedWorkRecords = [];
     const aggregatedQuantities = {};
-    const aggregatedWageMap = { ...appConfig.memberWages };
+    const aggregatedWageMap = buildMemberHourlyWageMap(appConfig.memberWages); // 월기본급 → 시급(÷209)
 
     filteredData.forEach(day => {
         (day.workRecords || []).forEach(r => {
@@ -428,6 +594,16 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
 
     let comparisonTitle = prevKey ? `(vs ${prevKey})` : '(이전 데이터 없음)';
 
+    // 환율 증감액 표시 (상승=빨강▲, 하락=파랑▼)
+    const fxDiff = (cur, prev) => {
+        if (!cur || cur <= 0) return '';
+        if (!prev || prev <= 0) return '<span class="text-xs text-gray-400">이전 데이터 없음</span>';
+        const d = Math.round(cur - prev);
+        if (d === 0) return '<span class="text-xs text-gray-500">변동 없음</span>';
+        const up = d > 0;
+        return `<span class="text-xs font-bold ${up ? 'text-red-500' : 'text-blue-500'}">${up ? '▲' : '▼'} ${Math.abs(d).toLocaleString()}원</span>`;
+    };
+
     container.innerHTML = `
         <div class="max-w-6xl mx-auto pb-10">
             <h3 class="text-xl font-bold text-gray-800 mb-6 text-center">
@@ -446,6 +622,7 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
                     <div class="text-sm">
                         ${getDiffHtmlForMetric('totalCost', currentStats.revenue, prevStats?.revenue)}
                     </div>
+                    ${channelBreakdownHtml(currentStats, 'revenue')}
                 </div>
 
                 <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden group hover:border-green-400 transition">
@@ -459,6 +636,7 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
                     <div class="text-sm">
                         ${getDiffHtmlForMetric('quantity', currentStats.orderCount, prevStats?.orderCount)}
                     </div>
+                    ${channelBreakdownHtml(currentStats, 'orderCount')}
                 </div>
 
                 <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden group hover:border-purple-400 transition">
@@ -476,8 +654,27 @@ export const renderManagementSummary = (viewMode, key, allHistoryData) => {
                 </div>
             </div>
 
+            <div class="bg-white rounded-xl border border-emerald-100 shadow-sm mb-8 overflow-hidden">
+                <div class="px-6 py-4 border-b border-emerald-50 bg-emerald-50/50 flex justify-between items-center">
+                    <h4 class="font-bold text-emerald-800 flex items-center gap-2">💱 환율 (기간 평균)</h4>
+                    <span class="text-xs text-gray-500">${currentStats.daysWithFx}일 기록${fxCompareLabel ? ' · ' + fxCompareLabel : ''}</span>
+                </div>
+                <div class="grid grid-cols-2 divide-x divide-gray-100">
+                    <div class="p-5 text-center">
+                        <div class="text-sm text-gray-500 mb-1">달러 (1 USD = 원)</div>
+                        <div class="text-2xl font-extrabold text-gray-800">${currentStats.avgUsdRate > 0 ? Math.round(currentStats.avgUsdRate).toLocaleString() : '-'}<span class="text-sm font-medium text-gray-500 ml-1">원</span></div>
+                        <div class="mt-1">${fxDiff(currentStats.avgUsdRate, prevFxStats?.avgUsdRate)}</div>
+                    </div>
+                    <div class="p-5 text-center">
+                        <div class="text-sm text-gray-500 mb-1">위안화 (1 CNY = 원)</div>
+                        <div class="text-2xl font-extrabold text-gray-800">${currentStats.avgCnyRate > 0 ? Math.round(currentStats.avgCnyRate).toLocaleString() : '-'}<span class="text-sm font-medium text-gray-500 ml-1">원</span></div>
+                        <div class="mt-1">${fxDiff(currentStats.avgCnyRate, prevFxStats?.avgCnyRate)}</div>
+                    </div>
+                </div>
+            </div>
+
             ${generateCostAnalysisHTML(analysis)}
-            
+
             ${dailyTableHtml}
         </div>
     `;

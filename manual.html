@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>업무 매뉴얼 - 물류팀 시스템</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="업무관리">
+    <title>업무 매뉴얼 및 도구 - 물류팀 시스템</title>
     
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script>
@@ -61,7 +66,7 @@
     <aside id="sidebar" class="absolute md:relative w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col z-40 shadow-2xl md:shadow-none shrink-0 transition-transform duration-300 h-full transform -translate-x-full md:translate-x-0">
         <div class="p-5 border-b border-gray-100 dark:border-gray-700 flex flex-col gap-4 shrink-0 pt-16 md:pt-5">
             <div class="flex items-center justify-between">
-                <h1 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><span>📚</span> 업무 매뉴얼</h1>
+                <h1 class="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2"><span>📚</span> 업무 매뉴얼 및 도구</h1>
                 <button id="btn-close-window" class="text-xs text-gray-500 hover:text-gray-800 dark:hover:text-white bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded transition font-bold hidden md:block">창 닫기</button>
                 <button id="mobile-close-btn" class="md:hidden p-1 text-gray-500 hover:text-gray-800 dark:hover:text-white">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -85,10 +90,66 @@
             </button>
         </div>
         
+        <div class="px-3 pt-3 shrink-0 border-b border-gray-100 dark:border-gray-700">
+            <div class="flex items-center justify-between mb-2">
+                <button id="tools-toggle" class="flex items-center gap-1.5 text-sm font-bold text-gray-700 dark:text-gray-200">
+                    <span id="tools-chevron" class="text-[10px] transition-transform">▶</span> 🛠️ 업무 도구
+                    <span id="tools-count" class="text-[11px] font-normal text-gray-400"></span>
+                </button>
+                <button id="btn-add-tool" class="hidden text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded transition">+ 도구</button>
+            </div>
+            <div id="tools-list" class="hidden space-y-1.5 pb-3 max-h-64 overflow-y-auto custom-scrollbar"></div>
+        </div>
+
         <div class="flex-1 overflow-y-auto p-3 custom-scrollbar" id="manual-list-container">
             <div class="flex justify-center items-center h-full text-gray-400 text-sm">목록을 불러오는 중...</div>
         </div>
     </aside>
+
+    <!-- 🛠️ 도구 추가/편집 모달 -->
+    <div id="tool-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden items-center justify-center z-[120] p-4">
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md flex flex-col" onclick="event.stopPropagation()">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                <h3 class="text-base font-bold text-gray-800 dark:text-gray-100" id="tool-modal-title">🛠️ 도구 추가</h3>
+                <button id="tool-modal-close" class="text-gray-400 hover:text-gray-700 text-lg">✕</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <input type="hidden" id="tool-edit-id">
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1">도구 이름</label>
+                    <input type="text" id="tool-name" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 text-sm dark:text-white" placeholder="예: 출고자동화통합">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1">설명 (선택)</label>
+                    <input type="text" id="tool-desc" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 text-sm dark:text-white" placeholder="예: 출고 데이터 자동 통합 프로그램">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1">유형</label>
+                    <div class="flex gap-3 text-sm">
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="tool-type" value="download" checked class="tool-type-radio"> 📎 파일 업로드(다운로드용)</label>
+                        <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="tool-type" value="link" class="tool-type-radio"> 🔗 웹 링크(열기)</label>
+                    </div>
+                </div>
+                <div id="tool-file-row">
+                    <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1">프로그램 파일 (.exe/.zip 등)</label>
+                    <input type="file" id="tool-file" class="w-full text-sm">
+                    <div id="tool-file-current" class="text-[11px] text-gray-400 mt-1"></div>
+                </div>
+                <div id="tool-link-row" class="hidden">
+                    <label class="block text-[11px] font-bold text-gray-500 dark:text-gray-400 mb-1">웹 주소(URL)</label>
+                    <input type="url" id="tool-link" class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded bg-gray-50 dark:bg-gray-900 text-sm dark:text-white" placeholder="https://...">
+                </div>
+                <p class="text-[11px] text-gray-400 leading-relaxed">※ 브라우저 보안상 프로그램을 <b>자동 실행</b>할 수는 없습니다. 파일은 업로드해 두면 팀원이 <b>다운로드 후 실행</b>합니다. 웹 도구는 링크로 등록하면 바로 열립니다.</p>
+            </div>
+            <div class="p-3 border-t border-gray-200 dark:border-gray-700 flex justify-between gap-2">
+                <button id="tool-delete-btn" class="hidden bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg text-sm">🗑️ 삭제</button>
+                <div class="flex gap-2 ml-auto">
+                    <button id="tool-cancel-btn" class="bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-bold py-2 px-4 rounded-lg text-sm">취소</button>
+                    <button id="tool-save-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg text-sm">💾 저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <div id="mobile-dim" class="fixed inset-0 bg-black bg-opacity-50 z-30 hidden transition-opacity"></div>
 
@@ -248,6 +309,8 @@
         if(mobileDim) mobileDim.addEventListener('click', toggleSidebar);
     </script>
 
-    <script type="module" src="js/manual.js"></script>
+    <script type="module" src="js/manual.js?v=202610021042"></script>
+    <script src="js/connection-banner.js?v=202610021042"></script>
+    <script src="js/modal-esc.js?v=202610021042"></script>
 </body>
 </html>

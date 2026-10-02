@@ -1,7 +1,9 @@
 // === js/ui-modals.js ===
 
-import { appState, appConfig, persistentLeaveSchedule } from './state.js';
-import { calculateDateDifference, getTodayDateString } from './utils.js';
+import { appState, appConfig, persistentLeaveSchedule, OTHER_LEAVE_TYPE, TIME_BASED_LEAVE_TYPES, isPersistentLeaveType, leaveTypeLabel } from './state.js?v=202610021042';
+// ✅ getCurrentTime 유틸 함수 추가 임포트
+import { calculateDateDifference, getTodayDateString, calculateWorkingDays, getCurrentTime, isMemberActiveOn } from './utils.js?v=202610021042';
+import { onLeaveScheduleChanged } from './leave-schedule-sync.js?v=202610021042';
 
 // 근속연수 계산 헬퍼 함수 (#년 #개월 #일째)
 const calculateTenure = (joinDateStr) => {
@@ -31,7 +33,7 @@ const calculateTenure = (joinDateStr) => {
     return `${years}년 ${months}개월 ${days + 1}일째`;
 };
 
-// [신규] 근무 개월 수 계산 헬퍼
+// 근무 개월 수 계산 헬퍼
 const calculateMonthsWorked = (joinDateStr) => {
     if (!joinDateStr || joinDateStr === '-') return 0;
     const start = new Date(joinDateStr);
@@ -45,55 +47,46 @@ const calculateMonthsWorked = (joinDateStr) => {
     return Math.max(0, months);
 };
 
-// 연차 사용 내역 계산 & 자동 병합 로직 (초기화 기준일 적용 + 자동 발생 로직)
+// 연차 사용 내역 계산 & 자동 병합 로직
 const calculateLeaveUsage = (memberName) => {
     const leaveSettings = (appConfig.memberLeaveSettings && appConfig.memberLeaveSettings[memberName]) || { totalLeave: 15, joinDate: '-', leaveResetDate: '', expirationDate: '' };
     let totalLeave = leaveSettings.totalLeave;
     const joinDate = leaveSettings.joinDate;
-    const leaveResetDate = leaveSettings.leaveResetDate; // 적용 시작일
-    const expirationDate = leaveSettings.expirationDate; // 만료일
+    const leaveResetDate = leaveSettings.leaveResetDate; 
+    const expirationDate = leaveSettings.expirationDate; 
 
     let isAutoCalculated = false;
 
-    // ✅ [수정] 우선순위 로직 적용
-    // 1순위: 관리자가 '적용 시작일(leaveResetDate)'을 직접 설정한 경우 -> 자동 계산 무시하고 설정값(totalLeave) 우선 사용
+    // 1순위: 관리자가 '적용 시작일'을 직접 설정한 경우 (우선 사용)
     if (leaveResetDate && leaveResetDate !== '') {
         isAutoCalculated = false;
-        // totalLeave는 leaveSettings.totalLeave 그대로 유지
     } 
-    // 2순위: 입사일이 있고, 12개월 미만 근속자인 경우 -> 근무 개월 수만큼 연차 자동 부여
+    // 2순위: 12개월 미만 근속자인 경우 -> 근무 개월 수만큼 자동 부여
     else if (joinDate && joinDate !== '-') {
         const monthsWorked = calculateMonthsWorked(joinDate);
-        if (monthsWorked < 12) { // 13개월 -> 12개월로 변경됨
-            totalLeave = monthsWorked; // 1개월 만근 시 1개, 2개월 시 2개...
+        if (monthsWorked < 12) { 
+            totalLeave = monthsWorked; 
             isAutoCalculated = true;
         }
-        // 12개월 이상인 경우: 관리자가 설정한 totalLeave(기본값 등) 유지
     }
 
-    // 1. 해당 멤버의 '연차' 기록 필터링 & 날짜순 정렬
-    // leaveResetDate(초기화 기준일)가 설정되어 있으면 그 이후의 기록만 가져옴
     const rawHistory = (persistentLeaveSchedule.onLeaveMembers || [])
         .filter(item => {
             if (item.member !== memberName || item.type !== '연차') return false;
-            // 초기화 기준일 적용
             if (leaveResetDate && item.startDate < leaveResetDate) return false;
             return true;
         })
         .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
 
-    // 2. 중복/연속된 날짜 병합 (Merge Intervals)
     const mergedHistory = [];
     if (rawHistory.length > 0) {
-        // 첫 번째 기록으로 초기화
         let current = {
             ...rawHistory[0],
             startDate: rawHistory[0].startDate,
             endDate: rawHistory[0].endDate || rawHistory[0].startDate,
-            ids: [rawHistory[0].id] // 원본 ID들을 배열로 관리 (삭제 시 사용)
+            ids: [rawHistory[0].id] 
         };
         
-        // 날짜 비교를 위한 Date 객체 생성
         let currentEndObj = new Date(current.endDate);
 
         for (let i = 1; i < rawHistory.length; i++) {
@@ -101,21 +94,16 @@ const calculateLeaveUsage = (memberName) => {
             const nextStartObj = new Date(next.startDate);
             const nextEndObj = new Date(next.endDate || next.startDate);
             
-            // '현재 구간의 끝 + 1일' 계산 (연속된 날짜 판별용)
             const dayAfterCurrentEnd = new Date(currentEndObj);
             dayAfterCurrentEnd.setDate(dayAfterCurrentEnd.getDate() + 1);
 
-            // 겹치거나(Overlap) 바로 이어지는(Adjacent) 경우 병합
             if (nextStartObj <= dayAfterCurrentEnd) {
-                // 종료일 연장 (더 늦은 날짜로)
                 if (nextEndObj > currentEndObj) {
                     currentEndObj = nextEndObj;
                     current.endDate = next.endDate || next.startDate;
                 }
-                // ID 병합
                 current.ids.push(next.id);
             } else {
-                // 끊기면 현재 구간 저장 후 새로 시작
                 mergedHistory.push(current);
                 current = {
                     ...next,
@@ -129,26 +117,24 @@ const calculateLeaveUsage = (memberName) => {
         mergedHistory.push(current);
     }
 
-    // 3. 차수(Nth) 및 총 사용일 계산
     let realUsedCount = 0;
     let cumulativeDays = 0;
 
     const finalHistory = mergedHistory.map((item) => {
-        const days = calculateDateDifference(item.startDate, item.endDate);
+        const days = calculateWorkingDays(item.startDate, item.endDate);
         realUsedCount += days;
         
         const startNth = cumulativeDays + 1;
         const endNth = cumulativeDays + days;
         cumulativeDays += days;
 
-        // 1일이면 "1", 2일 이상이면 "1~3" 형태로 표시
         const nthStr = (days > 1) ? `${startNth}~${endNth}` : `${startNth}`;
 
         return {
             ...item,
             days,
             nth: nthStr,
-            isMerged: item.ids.length > 1 // 병합된 기록인지 여부
+            isMerged: item.ids.length > 1
         };
     });
 
@@ -157,10 +143,10 @@ const calculateLeaveUsage = (memberName) => {
         used: realUsedCount,
         remaining: totalLeave - realUsedCount,
         joinDate: joinDate,
-        leaveResetDate: leaveResetDate, // 반환
-        expirationDate: expirationDate, // 반환
-        isAutoCalculated: isAutoCalculated, // ✅ 자동 계산 여부 반환
-        history: finalHistory.reverse() // 최신순 정렬
+        leaveResetDate: leaveResetDate, 
+        expirationDate: expirationDate, 
+        isAutoCalculated: isAutoCalculated, 
+        history: finalHistory.reverse() 
     };
 };
 
@@ -168,6 +154,9 @@ export const renderQuantityModalInputs = (sourceQuantities = {}, quantityTaskTyp
     const container = document.getElementById('modal-task-quantity-inputs');
     if (!container) return;
     container.innerHTML = '';
+
+    // 예정 물량 모드 전용 안내는 기본적으로 숨긴다(예정 모드에서 다시 켬)
+    document.getElementById('planned-auto-hint')?.classList.add('hidden');
 
     const missingTaskSet = new Set(missingTasksList);
     const confirmedZeroSet = new Set(confirmedZeroTasks);
@@ -263,9 +252,11 @@ export const renderTeamSelectionModalContent = (task, appState, teamGroups = [])
         ...(appState.dateBasedOnLeaveMembers || [])
     ];
 
+    // 지각은 이벤트성 기록(도착 시각)이라 "현재 휴무 상태"가 아님.
+    // 외출도 endTime이 있으면 이미 복귀한 것.
     const onLeaveMemberMap = new Map(
         combinedOnLeaveMembers
-            .filter(item => !(item.type === '외출' && item.endTime))
+            .filter(item => !(item.type === '외출' && item.endTime) && item.type !== '지각')
             .map(item => [item.member, item])
     );
 
@@ -294,6 +285,7 @@ export const renderTeamSelectionModalContent = (task, appState, teamGroups = [])
         memberList.dataset.groupName = group.name;
 
         [...new Set(group.members)].forEach(member => {
+            if (!isMemberActiveOn(member, null, appConfig)) return; // 🚪 퇴사자(오늘 기준 비활성) 제외
             const isOngoing = ongoingMembers.has(member);
             const isPaused = pausedMembers.has(member);
             const leaveEntry = onLeaveMemberMap.get(member);
@@ -392,6 +384,7 @@ export const renderTeamSelectionModalContent = (task, appState, teamGroups = [])
 export const renderLeaveTypeModalOptions = (leaveTypes = [], initialTab = 'setting') => {
     const container = document.getElementById('leave-type-options');
     const dateInputsDiv = document.getElementById('leave-date-inputs');
+    const timeInputsDiv = document.getElementById('leave-time-inputs'); // ✅ 추가된 영역
     const confirmBtn = document.getElementById('confirm-leave-btn');
     
     const tabSetting = document.getElementById('tab-leave-setting');
@@ -400,11 +393,10 @@ export const renderLeaveTypeModalOptions = (leaveTypes = [], initialTab = 'setti
     const panelStatus = document.getElementById('panel-leave-status');
     const memberNameEl = document.getElementById('leave-member-name');
     
-    if (!container || !dateInputsDiv) return;
+    if (!container) return;
 
     const memberName = memberNameEl ? memberNameEl.textContent : '';
 
-    // --- 현황판 데이터 업데이트 함수 ---
     const updateStatusView = () => {
         const stats = calculateLeaveUsage(memberName);
         const today = getTodayDateString();
@@ -416,7 +408,6 @@ export const renderLeaveTypeModalOptions = (leaveTypes = [], initialTab = 'setti
         const historyListEl = document.getElementById('status-history-list');
 
         if (totalEl) {
-            // ✅ [신규] 자동 계산 여부 표시
             const autoCalcBadge = stats.isAutoCalculated ? '<span class="text-xs text-blue-500 block font-normal">(12개월 미만 자동 계산)</span>' : '';
             totalEl.innerHTML = `${stats.total}일 ${autoCalcBadge}`;
         }
@@ -425,7 +416,6 @@ export const renderLeaveTypeModalOptions = (leaveTypes = [], initialTab = 'setti
         if (remainEl) {
             remainEl.className = stats.remaining < 0 ? "text-3xl font-bold text-red-600" : "text-3xl font-bold text-blue-600";
             
-            // 사용 가능 기한 표시 (잔여 연차 하단에 작게)
             let periodHtml = '';
             if (stats.leaveResetDate || stats.expirationDate) {
                 const start = stats.leaveResetDate || '';
@@ -445,7 +435,6 @@ export const renderLeaveTypeModalOptions = (leaveTypes = [], initialTab = 'setti
             const tenureText = calculateTenure(stats.joinDate);
             let dateText = stats.joinDate && stats.joinDate !== '-' ? stats.joinDate : '-';
             
-            // 하단에 표시되던 시작일/만료일 제거됨
             joinDateEl.innerHTML = `${dateText} <span class="text-blue-600 font-bold ml-1">(${tenureText})</span>`;
         }
 
@@ -478,28 +467,108 @@ export const renderLeaveTypeModalOptions = (leaveTypes = [], initialTab = 'setti
         }
     };
 
+    // 일정 등록 탭 우측 패널: 해당 멤버의 모든 예정 근태 (오늘 포함, 모든 유형)
+    const updateUpcomingLeaveView = () => {
+        const upcomingListEl = document.getElementById('status-upcoming-list');
+        const upcomingCountEl = document.getElementById('status-upcoming-count');
+        if (!upcomingListEl) return;
+
+        const today = getTodayDateString();
+        const TYPE_STYLE = {
+            '연차':    'bg-blue-50 text-blue-700 border-blue-200',
+            '출장':    'bg-purple-50 text-purple-700 border-purple-200',
+            '결근':    'bg-red-50 text-red-700 border-red-200',
+            '기타':    'bg-gray-100 text-gray-700 border-gray-300',
+            '휴직':    'bg-gray-100 text-gray-700 border-gray-300',
+            '매장근무': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            '재택근무': 'bg-teal-50 text-teal-700 border-teal-200',
+            '외근':    'bg-amber-50 text-amber-700 border-amber-200'
+        };
+
+        const upcoming = (persistentLeaveSchedule.onLeaveMembers || [])
+            .filter(item => {
+                if (!item || item.member !== memberName) return false;
+                if (!item.startDate) return false; // 시간성(외출·조퇴·지각)은 일자 문서에 저장 — 제외
+                const end = item.endDate || item.startDate;
+                return end >= today; // 오늘 포함 이후
+            })
+            .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+
+        if (upcomingCountEl) upcomingCountEl.textContent = upcoming.length > 0 ? `총 ${upcoming.length}건` : '';
+
+        upcomingListEl.innerHTML = '';
+        if (upcoming.length === 0) {
+            upcomingListEl.innerHTML = '<li class="text-center text-gray-400 py-8 text-xs">예정된 근태가 없습니다.</li>';
+            return;
+        }
+        upcoming.forEach(item => {
+            const endStr = item.endDate || item.startDate;
+            const days = calculateWorkingDays(item.startDate, endStr);
+            const rangeText = (endStr && endStr !== item.startDate) ? `${item.startDate} ~ ${endStr}` : item.startDate;
+            const isInProgress = item.startDate <= today && today <= endStr;
+            const progressBadge = isInProgress ? '<span class="text-[9px] text-orange-700 font-bold bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded">진행중</span>' : '';
+            const typeStyle  = TYPE_STYLE[item.type] || 'bg-gray-50 text-gray-700 border-gray-200';
+            upcomingListEl.innerHTML += `
+                <li class="flex justify-between items-center bg-gray-50 p-2 rounded border border-gray-100 gap-2">
+                    <div class="flex items-center gap-2 flex-1 min-w-0">
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded border shrink-0 ${typeStyle}">${item.type}</span>
+                        <span class="text-xs font-medium text-gray-700 truncate">${rangeText}</span>
+                        ${progressBadge}
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <span class="text-[10px] text-gray-400 mr-0.5">${days}일</span>
+                        <button type="button" class="btn-edit-leave-history text-[11px] font-bold text-blue-600 hover:text-blue-800 px-1.5 py-0.5 rounded hover:bg-blue-50" data-id="${item.id}">수정</button>
+                        <button type="button" class="btn-delete-leave-history text-[11px] font-bold text-red-500 hover:text-red-700 px-1.5 py-0.5 rounded hover:bg-red-50" data-ids="${item.id}">삭제</button>
+                    </div>
+                </li>`;
+        });
+    };
+    // 삭제·수정 후 목록 즉시 갱신용으로 노출(모달 열려있는 동안만 유효)
+    window.__refreshUpcomingLeave = updateUpcomingLeaveView;
+
+    // 🔗 캘린더·데이터관리 등 다른 화면에서 근태가 바뀌어도 이 목록을 최신으로 유지
+    onLeaveScheduleChanged('my-leave-modal', () => {
+        try { window.__refreshUpcomingLeave && window.__refreshUpcomingLeave(); } catch (e) {}
+    });
+
     const activateTab = (tab) => {
         if (tab === 'status') {
             tabStatus.className = "flex-1 py-3 text-sm font-semibold text-blue-600 border-b-2 border-blue-600 transition";
             tabSetting.className = "flex-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 transition";
             panelStatus.classList.remove('hidden');
             panelSetting.classList.add('hidden');
-            if(confirmBtn) confirmBtn.classList.add('hidden'); 
+            if(confirmBtn) confirmBtn.classList.add('hidden');
             updateStatusView();
         } else {
             tabSetting.className = "flex-1 py-3 text-sm font-semibold text-blue-600 border-b-2 border-blue-600 transition";
             tabStatus.className = "flex-1 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 transition";
             panelSetting.classList.remove('hidden');
             panelStatus.classList.add('hidden');
+
+            // 우측 예정 근태 리스트 갱신
+            updateUpcomingLeaveView();
+
+            // ✅ [추가 로직] 설정 탭으로 올 때 값 초기화 및 기본값 설정
             if(confirmBtn) {
                 confirmBtn.classList.remove('hidden');
                 confirmBtn.textContent = '설정 저장';
                 delete confirmBtn.dataset.editingId;
+
                 const sInput = document.getElementById('leave-start-date-input');
                 const eInput = document.getElementById('leave-end-date-input');
-                if(sInput) sInput.value = '';
+                const stInput = document.getElementById('leave-start-time-input');
+                const etInput = document.getElementById('leave-end-time-input');
+
+                if(sInput) sInput.value = getTodayDateString(); // 기본값: 오늘 날짜
                 if(eInput) eInput.value = '';
+                if(stInput) stInput.value = getCurrentTime(); // 기본값: 현재 시간
+                if(etInput) etInput.value = '';
+
                 document.querySelectorAll('input[name="leave-type"]').forEach((r,i) => r.checked = i===0);
+
+                // 첫 라디오 버튼 선택 후 체인지 이벤트 발생시켜 화면 갱신
+                const firstRadio = container.querySelector('input[type="radio"]');
+                if(firstRadio) firstRadio.dispatchEvent(new Event('change', { bubbles: true }));
             }
         }
     };
@@ -509,49 +578,80 @@ export const renderLeaveTypeModalOptions = (leaveTypes = [], initialTab = 'setti
 
     activateTab(initialTab);
 
+    // 라디오 버튼 생성
     container.innerHTML = '';
     leaveTypes.forEach((type, index) => {
         const div = document.createElement('div');
-        div.className = 'flex items-center';
+        div.className = 'flex items-center p-3 border border-gray-200 rounded-xl bg-white hover:bg-blue-50 hover:border-blue-200 transition cursor-pointer shadow-sm';
         div.innerHTML = `
-            <input id="leave-type-${index}" name="leave-type" type="radio" value="${type}" class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500 leave-type-radio">
-            <label for="leave-type-${index}" class="ml-2 block text-sm font-medium text-gray-700">${type}</label>
+            <input id="leave-type-${index}" name="leave-type" type="radio" value="${type}" class="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2 cursor-pointer leave-type-radio">
+            <label for="leave-type-${index}" class="w-full ml-2 text-sm font-bold text-gray-700 cursor-pointer select-none">${type}</label>
         `;
         container.appendChild(div);
     });
 
+    // ✅ [추가 로직] 클릭한 종류에 따라 날짜 입력창 vs 시간 입력창 노출 분기 처리
     container.addEventListener('change', (e) => {
         if (e.target.classList.contains('leave-type-radio')) {
             const selectedType = e.target.value;
-            if (selectedType === '연차' || selectedType === '출장' || selectedType === '결근') {
-                dateInputsDiv.classList.remove('hidden');
+            
+            // '기타'를 고르면 항목명 직접 입력칸을 연다.
+            const otherWrap = document.getElementById('leave-other-label-wrap');
+            const otherInput = document.getElementById('leave-other-label-input');
+            if (otherWrap) {
+                const isOther = (selectedType === OTHER_LEAVE_TYPE);
+                otherWrap.classList.toggle('hidden', !isOther);
+                if (isOther && otherInput) setTimeout(() => otherInput.focus(), 30);
+                if (!isOther && otherInput) otherInput.value = '';
+            }
+
+            // 기간(날짜) 선택형 / 시간 선택형 — 종류 목록은 state.js 한 곳에서만 관리한다.
+            const timeTypes = TIME_BASED_LEAVE_TYPES;
+
+            if (isPersistentLeaveType(selectedType)) {
+                if(dateInputsDiv) dateInputsDiv.classList.remove('hidden');
+                if(timeInputsDiv) timeInputsDiv.classList.add('hidden');
+                
+                const sInput = document.getElementById('leave-start-date-input');
+                if(sInput && !sInput.value) sInput.value = getTodayDateString();
+
+            } else if (timeTypes.includes(selectedType)) {
+                if(dateInputsDiv) dateInputsDiv.classList.add('hidden');
+                if(timeInputsDiv) timeInputsDiv.classList.remove('hidden');
+                
+                const stInput = document.getElementById('leave-start-time-input');
+                if(stInput && !stInput.value) stInput.value = getCurrentTime();
+                
             } else {
-                dateInputsDiv.classList.add('hidden');
+                if(dateInputsDiv) dateInputsDiv.classList.add('hidden');
+                if(timeInputsDiv) timeInputsDiv.classList.add('hidden');
             }
         }
     });
 
+    // 렌더링 직후 첫 번째 옵션 기본 트리거
     const firstRadio = container.querySelector('input[type="radio"]');
     if (firstRadio) {
         firstRadio.checked = true;
-        if (firstRadio.value === '연차' || firstRadio.value === '출장' || firstRadio.value === '결근') {
-            dateInputsDiv.classList.remove('hidden');
-        } else {
-            dateInputsDiv.classList.add('hidden');
-        }
+        firstRadio.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     const sInput = document.getElementById('leave-start-date-input');
     const eInput = document.getElementById('leave-end-date-input');
     const preview = document.getElementById('leave-count-preview');
     
+    // 미리보기 업데이트 
     const updatePreview = () => {
         if (!preview) return;
-        if (sInput.value && eInput.value) {
-            const diff = calculateDateDifference(sInput.value, eInput.value);
-            preview.textContent = `총 ${diff}일 차감 예정`;
-        } else if (sInput.value) {
-            preview.textContent = `1일 차감 예정`;
+        const sVal = sInput ? sInput.value : '';
+        const eVal = eInput ? eInput.value : '';
+        
+        if (sVal && eVal) {
+            const diff = calculateWorkingDays(sVal, eVal);
+            preview.textContent = `총 ${diff}일(평일) 적용 예정`; 
+        } else if (sVal) {
+            const diff = calculateWorkingDays(sVal, sVal);
+            preview.textContent = diff > 0 ? `1일 적용 예정` : `0일 적용 예정 (주말/휴일)`;
         } else {
             preview.textContent = '';
         }

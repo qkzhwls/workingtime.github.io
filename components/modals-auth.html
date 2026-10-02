@@ -1,24 +1,38 @@
-<div id="login-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[99] p-4 hidden">
-    <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm">
-        <h2 class="text-xl font-bold mb-4">로그인</h2>
-        <p class="mb-4 text-sm text-gray-600">관리자 페이지에서 등록한 이메일과<br>Firebase 콘솔에서 생성한 비밀번호를 입력하세요.</p>
+<!-- 로그인 모달
+     ⚠️ 모바일에서 키보드가 올라오면 보이는 높이가 350~400px 로 줄어든다.
+        예전에는 바깥 div 가 'flex items-center' 로 가운데 정렬만 하고 스크롤이 없어서,
+        박스(약 590px)가 화면보다 커지면 로그인 버튼이 화면 밖으로 밀려 나가 누를 수가 없었다.
+        → 바깥은 스크롤 되는 상자, 안쪽에서 가운데 정렬. 짧은 화면에서는 위에서부터 보이고 스크롤된다. -->
+<div id="login-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 z-[99] hidden overflow-y-auto overscroll-contain">
+    <div class="min-h-full flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-lg shadow-xl w-full max-w-sm my-auto">
+            <!-- 화면이 낮을 때는 로고를 줄여 버튼이 먼저 보이게 한다 -->
+            <img src="assets/logo.png?v=4" alt="GGS Logistics Team 물류팀"
+                 class="w-40 sm:w-56 max-w-full mx-auto mb-3 sm:mb-4 object-contain">
+            <h2 class="text-xl font-bold mb-3 sm:mb-4 text-center">로그인</h2>
+            <p class="mb-4 text-sm text-gray-600 text-center">관리자 페이지에서 등록한 이메일과<br>Firebase 콘솔에서 생성한 비밀번호를 입력하세요.</p>
 
-        <form id="login-form">
-            <div class="mb-3">
-                <label for="login-email" class="block text-sm font-medium text-gray-700">이메일</label>
-                <input type="email" id="login-email" class="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
-            </div>
-            <div class="mb-4">
-                <label for="login-password" class="block text-sm font-medium text-gray-700">비밀번호</label>
-                <input type="password" id="login-password" class="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
-            </div>
+            <form id="login-form">
+                <div class="mb-3">
+                    <label for="login-email" class="block text-sm font-medium text-gray-700">이메일</label>
+                    <input type="email" id="login-email" inputmode="email" autocomplete="username"
+                           autocapitalize="none" autocorrect="off" spellcheck="false"
+                           class="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                </div>
+                <div class="mb-4">
+                    <label for="login-password" class="block text-sm font-medium text-gray-700">비밀번호</label>
+                    <input type="password" id="login-password" autocomplete="current-password"
+                           autocapitalize="none" autocorrect="off" spellcheck="false"
+                           class="mt-1 w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500" required>
+                </div>
 
-            <p id="login-error-message" class="text-sm text-red-500 mb-3 hidden"></p>
+                <p id="login-error-message" class="text-sm text-red-500 mb-3 hidden"></p>
 
-            <button type="submit" id="login-submit-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
-                <span id="login-button-text">로그인</span>
-                <span id="login-button-spinner" class="hidden animate-spin">⌛</span>
-            </button>
-        </form>
+                <button type="submit" id="login-submit-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                    <span id="login-button-text">로그인</span>
+                    <span id="login-button-spinner" class="hidden animate-spin">⌛</span>
+                </button>
+            </form>
+        </div>
     </div>
 </div>

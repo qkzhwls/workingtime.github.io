@@ -1,6 +1,7 @@
 // === js/ui-history-reports-calculations.js ===
-import { isWeekday, getTodayDateString } from './utils.js';
-import { getAsArray } from './ui-history-reports-utils.js';
+import { isWeekday, getTodayDateString, getRegularMembersForCount } from './utils.js?v=202610021042';
+import { taskSpeedPerMinute } from './task-throughput.js?v=202610021042';
+import { getAsArray } from './ui-history-reports-utils.js?v=202610021042';
 
 export const calculateReportKPIs = (data, appConfig, wageMap) => {
     if (!data) {
@@ -39,7 +40,7 @@ export const calculateReportKPIs = (data, appConfig, wageMap) => {
     const overallAvgCostPerItem = totalQuantity > 0 ? (totalCost / totalQuantity) : 0;
     const coqPercentage = (totalCost > 0) ? (totalQualityCost / totalCost) * 100 : 0;
 
-    const allRegularMembers = new Set((appConfig.teamGroups || []).flatMap(g => g.members));
+    const allRegularMembers = getRegularMembersForCount(appConfig, data.id); // 해당 날짜 재직 인원(퇴사자 과거 보존)
     const systemAccounts = new Set(appConfig.systemAccounts || []);
     
     const onLeaveMemberNames = onLeaveMemberEntries.map(entry => entry.member);
@@ -164,106 +165,20 @@ export const aggregateDaysToSingleData = (daysData, id) => {
     return aggregated;
 };
 
-export const calculateStandardThroughputs = (allHistoryData) => {
-    const todayKey = getTodayDateString();
-    
-    const sortedHistory = [...allHistoryData].sort((a, b) => a.id.localeCompare(b.id));
-    const taskDailySpeeds = {};
-
-    sortedHistory.forEach(day => {
-        if (day.id === todayKey) return;
-
-        const records = getAsArray(day.workRecords);
-        const quantities = day.taskQuantities || {};
-        const dailyTaskStats = {};
-
-        records.forEach(r => {
-            const duration = Number(r.duration) || 0;
-            if (r.task && duration > 0) {
-                if (!dailyTaskStats[r.task]) dailyTaskStats[r.task] = { duration: 0, quantity: 0 };
-                dailyTaskStats[r.task].duration += duration;
-            }
-        });
-
-        Object.entries(quantities).forEach(([task, qty]) => {
-            const q = Number(qty) || 0;
-            if (q > 0) {
-                if (!dailyTaskStats[task]) dailyTaskStats[task] = { duration: 0, quantity: 0 };
-                dailyTaskStats[task].quantity += q;
-            }
-        });
-
-        Object.entries(dailyTaskStats).forEach(([task, stats]) => {
-            if (stats.duration >= 10 && stats.quantity > 0) {
-                const speed = stats.quantity / stats.duration;
-                if (!taskDailySpeeds[task]) taskDailySpeeds[task] = [];
-                taskDailySpeeds[task].push(speed);
-            }
-        });
+/** 🎯 기준(목표) 속도 — 단위 **개/분**.
+ *  전 기간의 일별 속도 중 빠른 순 20일 평균이라 '잘 돌아갔을 때의 속도'다.
+ *  평상시 실적보다 높게 나오는 것이 정상이며, 이 값과 비교하면 대체로 '저하'로 보인다.
+ *  실적 평균이 필요하면 calculatePeriodThroughputs(개/분) 나
+ *  task-throughput.taskUph(개/시) 를 쓸 것. */
+export const calculateStandardThroughputs = (allHistoryData) =>
+    taskSpeedPerMinute(allHistoryData, {
+        mode: 'bestDays', topN: 20, minMinutes: 10, skipDate: getTodayDateString()
     });
 
-    const standards = {};
-    Object.keys(taskDailySpeeds).forEach(task => {
-        const speeds = taskDailySpeeds[task];
-        
-        speeds.sort((a, b) => b - a);
-        const top20 = speeds.slice(0, 20);
-        
-        if (top20.length > 0) {
-            const avgTop = top20.reduce((a, b) => a + b, 0) / top20.length;
-            standards[task] = avgTop;
-        } else {
-            standards[task] = 0;
-        }
-    });
-    return standards;
-};
-
-export const calculatePeriodThroughputs = (daysData) => {
-    const taskDailySpeeds = {};
-
-    daysData.forEach(day => {
-        const records = getAsArray(day.workRecords);
-        const quantities = day.taskQuantities || {};
-        const dailyTaskStats = {};
-
-        records.forEach(r => {
-            const duration = Number(r.duration) || 0;
-            if (r.task && duration > 0) {
-                if (!dailyTaskStats[r.task]) dailyTaskStats[r.task] = { duration: 0, quantity: 0 };
-                dailyTaskStats[r.task].duration += duration;
-            }
-        });
-
-        Object.entries(quantities).forEach(([task, qty]) => {
-            const q = Number(qty) || 0;
-            if (q > 0) {
-                if (!dailyTaskStats[task]) dailyTaskStats[task] = { duration: 0, quantity: 0 };
-                dailyTaskStats[task].quantity += q;
-            }
-        });
-
-        Object.entries(dailyTaskStats).forEach(([task, stats]) => {
-            if (stats.duration > 0 && stats.quantity > 0) {
-                const speed = stats.quantity / stats.duration;
-                if (!taskDailySpeeds[task]) taskDailySpeeds[task] = [];
-                taskDailySpeeds[task].push(speed);
-            }
-        });
-    });
-
-    const periodStandards = {};
-    Object.keys(taskDailySpeeds).forEach(task => {
-        const speeds = taskDailySpeeds[task];
-        if (speeds.length > 0) {
-            const avgPeriod = speeds.reduce((a, b) => a + b, 0) / speeds.length;
-            periodStandards[task] = avgPeriod;
-        } else {
-            periodStandards[task] = 0;
-        }
-    });
-    return periodStandards;
-};
+/** 📊 그 기간의 실적 평균 속도 — 단위 **개/분**.
+ *  일별 속도를 낸 뒤 단순 평균(모든 날을 같은 무게로 본다). */
+export const calculatePeriodThroughputs = (daysData) =>
+    taskSpeedPerMinute(daysData, { mode: 'dailyAvg', minMinutes: 0 });
 
 export const calculateAverageStaffing = (allHistoryData) => {
     if (!allHistoryData) return {};

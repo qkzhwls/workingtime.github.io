@@ -1,21 +1,52 @@
-import { initializeFirebase, loadAppConfig } from './config.js';
+import { initializeFirebase, loadAppConfig } from './config.js?v=202610021042';
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, writeBatch, getDocs, query, where, documentId, deleteField } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { escapeHtml as escAttr } from './utils.js?v=202610021042';
+
+// 🔐 onclick="fn('...')" 안에 데이터를 넣을 때 반드시 통과시킬 것.
+//    작은따옴표만 막으면 상품명에 " < 역슬래시가 들어올 때 버튼이 동작하지 않거나
+//    마크업이 깨진다(상품명·옵션은 외부 시트에서 들어오는 임의 문자열이다).
+//    JS 문자열로 한 번, HTML 속성으로 한 번 — 두 겹을 다 막는다.
+const jsArg = (v) => String(v == null ? '' : v)
+    .replace(/\\/g, '\\\\')     // 역슬래시
+    .replace(/'/g, "\\'")        // JS 문자열 종료
+    .replace(/\r?\n/g, ' ')       // 줄바꿈은 속성 안에서 깨진다
+    .replace(/&/g, '&amp;')      // 여기부터 HTML 속성 이스케이프
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+// 🗓️ Date → 'YYYY-MM-DD' (로컬 기준).
+//    toISOString().slice(0,10) 을 쓰면 UTC 로 바뀌어 한국시간 오전 9시 이전에는 '어제'가 된다.
+//    입고 목록 필터·정리 로그 날짜가 하루 밀리던 원인이라 이 헬퍼로 통일한다.
+const toDateStr = (date = new Date()) => {
+    const d = (date instanceof Date) ? date : new Date(date);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// 피킹용이 아닌 자리(대분류 '기타' = 비축·SAM·A-1-R 형식 등) 판정 — 여러 화면이 같은 기준을 쓴다.
+function isEtcLocation(d) {
+    const id = String((d && d.id) || '').trim();
+    return String((d && d.category) || '피킹용').trim() === '기타' || /^비축/.test(id) || /^SAM/i.test(id);
+}
 
 const { db, auth } = initializeFirebase();
 const LOC_COLLECTION = 'Locations';
 
 let originalData = []; 
-let zikjinData = {}; 
-let weeklyData = {}; 
-let incomingData = {}; 
+let zikjinData = {}; // ZG&AB 출고 (직진+에이블리 합본)
+let weeklyData = {}; // 주차별
+let incomingData = {};
 let incomingTotalByCode = {}; // ★ 상품코드별 입고대기 합계 (오더+사입)
 let customTooltips = {}; // ★ v3.53: 사용자 정의 툴팁 { key: html_content, "__deleted__keyName": true }
 let sortConfig = { key: 'id', direction: 'asc' };
 // ★ v3.57: 모든 필터를 배열로 통일 (다중 선택 지원)
 // loc: 구역 prefix, code: ['empty','not-empty'] 중복 불가
 // reserved/preassigned: ['only'] 또는 [] (토글)
-let filters = { loc: [], code: [], stock: [], stock2f: [], dong: [], pos: [], reserved: [], preassigned: [] };
+let filters = { loc: [], code: [], stock: [], stock2f: [], category: [], dong: [], pos: [], reserved: [], preassigned: [] };
+// 헤더 검색창 입력으로 테이블을 부분일치 필터링 (컬럼키 → 검색어)
+let colTextSearch = {};
 
 const RESERVE_EXPIRE_MS = Infinity; 
 
@@ -27,8 +58,10 @@ window.capacity2F = 200000;
 window.sheetUrlOrder = ''; 
 window.sheetUrlBuy = ''; 
 
-window.visibleColumns = ['std_dong', 'std_pos', 'std_id', 'std_code', 'std_name', 'std_option', 'std_stock'];
-window.excelHeaders = []; 
+window.visibleColumns = ['std_category', 'std_dong', 'std_pos', 'std_id', 'std_code', 'std_name', 'std_option', 'std_stock'];
+
+// (컬럼 순서는 헤더 드래그앤드롭으로 사용자가 직접 정한다 → 대분류 강제 고정 규칙 제거)
+window.excelHeaders = [];
 
 window.isPreAssignMode = false;
 window.selectedPreAssignItem = null;
@@ -37,7 +70,7 @@ window.currentRecommendations = [];
 // v4.1: 단독 추천용 별도 데이터 변수
 window.currentSingleRecommendations = [];
 
-window.recommendRatios = { zikjin: 50, weekly: 30, trend: 20 };
+window.recommendRatios = { zikjin: 60, weekly: 20, trend: 20 }; // zikjin=ZG&AB 출고(직진+에이블리), weekly=주차별, trend=상승세
 window.recommendPriorities = {
     zones: { 0: ['★'], 1: ['A','B','C','D','E','F','G','H','I'], 2: ['Z'], 3: ['L','M','N','O','P','Q','R','S','T'] },
     dongs: ['★', '1', '2', '3', '4', '5', '6'],
@@ -113,11 +146,18 @@ window.hideLoading = function() {
 function setupRealtimeListenerB() {
     onSnapshot(collection(db, 'ZikjinData'), (snapshot) => {
         zikjinData = {};
-        snapshot.forEach(docSnap => { 
+        let maxAt = 0, rowCount = 0;
+        snapshot.forEach(docSnap => {
             let data = docSnap.data();
+            // 청크에 저장된 updatedAt으로 '전송 일시' 역산 (메타 저장 이전 업로드분도 표시)
+            if (data.updatedAt) {
+                const t = data.updatedAt.toMillis ? data.updatedAt.toMillis() : new Date(data.updatedAt).getTime();
+                if (t && t > maxAt) maxAt = t;
+            }
             if(data.dataStr) {
                 try {
                     let chunk = JSON.parse(data.dataStr);
+                    rowCount += chunk.length;
                     chunk.forEach(row => {
                         let code = (row['상품코드'] || row['어드민상품코드'] || row['대표상품코드'] || row['품목코드'] || row['바코드'] || row['상품번호']);
                         if(code) zikjinData[code] = row;
@@ -125,6 +165,18 @@ function setupRealtimeListenerB() {
                 } catch(e){}
             }
         });
+        _zikjinDerivedMeta = maxAt > 0 ? { at: maxAt, count: rowCount } : null;
+
+        // 직진/에이블리 소스별 합계 (버튼·상세에서 구분 표시용)
+        _zikjinSourceTotals = { zikjin: 0, ably: 0, unknown: 0 };
+        Object.values(zikjinData).forEach(item => {
+            const sp = _zikjinSourceSplit(item);
+            _zikjinSourceTotals.zikjin += sp.zikjin;
+            _zikjinSourceTotals.ably += sp.ably;
+            _zikjinSourceTotals.unknown += sp.unknown;
+        });
+
+        updateZikjinInfoDisplay();
         applyFiltersAndSort();
     }, (error) => console.error("직진배송 오류:", error));
 
@@ -144,12 +196,12 @@ function setupRealtimeListenerB() {
         });
         applyFiltersAndSort();
     }, (error) => console.error("주차별데이터 오류:", error));
-    
+
     onSnapshot(collection(db, 'IncomingData'), (snapshot) => {
         incomingData = {};
         incomingTotalByCode = {}; // ★ 합계 초기화
         // ★ v3.53: 오늘 날짜 (YYYY-MM-DD)
-        const _today = new Date().toISOString().slice(0, 10);
+        const _today = toDateStr();
         snapshot.forEach(docSnap => { 
             let data = docSnap.data();
             if(data.dataStr) {
@@ -174,14 +226,262 @@ function setupRealtimeListenerB() {
     }, (error) => console.error("입고예정데이터 오류:", error));
 }
 
+// 🕒 마지막 데이터 최신화 시각 표시 (상단 헤더)
+function updateLastUpdateDisplay(ts) {
+    const el = document.getElementById('last-data-update');
+    if (!el) return;
+    if (!ts) { el.textContent = '🕒 최신화: 기록 없음'; return; }
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, '0');
+    el.textContent = `🕒 최신화: ${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    el.title = '마지막 데이터 최신화: ' + d.toLocaleString('ko-KR');
+}
+
+// 📂 직진·에이블리(ZG&AB 출고) 전송 기록 간략 표시 (언제/얼마나 + 상세 링크)
+let _zikjinSourceTotals = { zikjin: 0, ably: 0, unknown: 0 }; // 소스별 출고량 합계
+let _zikjinMeta = null;         // 상세 모달에서 쓰는 '유효' 메타
+let _zikjinConfigMeta = null;   // INFO_CONFIG.zikjinMeta (메타 기능 이후 업로드분)
+let _zikjinDerivedMeta = null;  // ZikjinData 청크의 updatedAt/건수로 역산(메타 이전 업로드분 대응)
+function updateZikjinInfoDisplay() {
+    // ⚠️ 두 메타 중 '더 최신'을 쓴다. (예전엔 INFO_CONFIG 메타를 무조건 우선했다)
+    //   - _zikjinConfigMeta : 이 앱의 업로드 버튼으로 올렸을 때만 기록됨
+    //   - _zikjinDerivedMeta: ZikjinData 청크의 updatedAt에서 역산 — 실제 데이터가 언제 들어왔는지의 사실
+    // 외부(스크립트 등)에서 ZikjinData만 직접 갱신하면 INFO_CONFIG 메타는 옛날 값 그대로 남아
+    // "오늘 전송했는데 어제 날짜로 표시"되는 문제가 있었다.
+    const zMeta = [_zikjinConfigMeta, _zikjinDerivedMeta]
+        .filter(m => m && m.at)
+        .sort((a, b) => b.at - a.at)[0] || null;
+    _zikjinMeta = (zMeta && zMeta.at) ? zMeta : null;
+    const el = document.getElementById('zikjin-update-info');
+    if (!el) return;
+
+    // 기본(정상) 스타일
+    const setTone = (bg, border, color) => {
+        el.style.background = bg;
+        el.style.borderColor = border;
+        el.style.color = color;
+    };
+
+    if (!zMeta || !zMeta.at) {
+        el.innerHTML = '⚠️ ZG&AB 출고: 전송 기록 없음';
+        el.title = '직진·에이블리(ZG&AB) 출고 데이터가 아직 업로드되지 않았습니다.\n[📂 1-1. ZG&AB 출고 데이터 업로드]에서 파일을 올려주세요.';
+        setTone('#ffebee', '#ef9a9a', '#c62828');
+        return;
+    }
+
+    const d = new Date(zMeta.at);
+    const p = n => String(n).padStart(2, '0');
+    const cnt = Number(zMeta.count || 0).toLocaleString();
+
+    // 🔔 최신성 경고 — ZG&AB 출고 데이터는 자동으로 들어오지 않고 '수동 업로드'로만 갱신된다.
+    //    올리는 걸 잊으면 로케이션 변경 추천이 옛날 출고량으로 계산되므로, 지난 날짜면 눈에 띄게 표시한다.
+    const startOfDay = (dt) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
+    const now = new Date();
+    const daysAgo = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+
+    let prefix = '📂', warn = '';
+    if (daysAgo <= 0) {
+        setTone('#e8f5e9', '#a5d6a7', '#2e7d32'); // 오늘 — 정상
+    } else if (daysAgo === 1) {
+        prefix = '⚠️';
+        warn = ' <b>· 어제 자료</b>';
+        setTone('#fff8e1', '#ffcc80', '#e65100');
+    } else {
+        prefix = '⚠️';
+        warn = ` <b>· ${daysAgo}일 지남</b>`;
+        setTone('#ffebee', '#ef9a9a', '#c62828');
+    }
+
+    // 직진/에이블리 구분 요약 (데이터가 있을 때만)
+    const st = _zikjinSourceTotals || { zikjin: 0, ably: 0 };
+    const splitTxt = (st.zikjin > 0 || st.ably > 0)
+        ? ` <span style="font-weight:800; color:#1976d2;">직진 ${st.zikjin.toLocaleString()}</span>`
+          + `<span style="color:#b0bec5;"> / </span>`
+          + `<span style="font-weight:800; color:#c2185b;">에이블리 ${st.ably.toLocaleString()}</span>`
+        : '';
+
+    el.innerHTML = `${prefix} ZG&AB 출고: ${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())} · ${cnt}건${warn}${splitTxt} <span style="text-decoration:underline; color:#1976d2;">상세</span>`;
+    el.title = `직진·에이블리(ZG&AB) 출고 전송: ${d.toLocaleString('ko-KR')} · ${zMeta.count}건`
+        + ((st.zikjin > 0 || st.ably > 0)
+            ? `
+
+출고량 — 직진배송 ${st.zikjin.toLocaleString()} / 에이블리 ${st.ably.toLocaleString()}`
+              + (st.unknown > 0 ? ` / 구분없음 ${st.unknown.toLocaleString()}` : '')
+            : '')
+        + (daysAgo > 0
+            ? `\n\n⚠️ 오늘 올라온 자료가 아닙니다(${daysAgo}일 지남).\nZG&AB 출고 데이터는 자동 전송되지 않고 수동 업로드로만 갱신됩니다.\n출고 작업을 했다면 [📂 1-1. ZG&AB 출고 데이터 업로드]에서 파일을 올려주세요.`
+            : '')
+        + `\n\n클릭 시 전송 데이터 상세 보기`;
+}
+
+// 구분 뱃지(헤더 요약용) / 태그(표 행용)
+function _zikBadge(label, qty, count, fg, bg) {
+    return `<span style="display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:800;
+        color:${fg}; background:${bg}; border:1px solid ${fg}33; border-radius:6px; padding:3px 8px;">
+        ${label} <b style="font-weight:900;">${Number(qty || 0).toLocaleString()}</b>
+        <span style="font-weight:600; opacity:.75;">(${Number(count || 0).toLocaleString()}종)</span></span>`;
+}
+function _zikTag(label, qty, fg, bg) {
+    return `<span style="display:inline-block; font-size:10.5px; font-weight:800; color:${fg}; background:${bg};
+        border-radius:5px; padding:2px 6px;">${label} ${Number(qty || 0).toLocaleString()}</span>`;
+}
+
+// 📂 ZG&AB 출고(직진·에이블리) 전송 데이터 상세 모달
+window.openZikjinDetail = function () {
+    const existing = document.getElementById('zikjin-detail-overlay');
+    if (existing) existing.remove();
+
+    const rows = Object.entries(zikjinData).map(([code, item]) => {
+        const sp = _zikjinSourceSplit(item);
+        return {
+            code,
+            name: (item['상품명'] || item['상품명칭'] || '').toString(),
+            qty: _ablyQtyFromItem(item),
+            zikjin: sp.zikjin,
+            ably: sp.ably,
+            unknown: sp.unknown
+        };
+    }).sort((a, b) => b.qty - a.qty);
+    const total = rows.reduce((s, r) => s + r.qty, 0);
+
+    // 소스별 합계 — 직진 / 에이블리 / 구분없음(구버전 업로드분)
+    const sumZ = rows.reduce((s, r) => s + r.zikjin, 0);
+    const sumA = rows.reduce((s, r) => s + r.ably, 0);
+    const sumU = rows.reduce((s, r) => s + r.unknown, 0);
+    const cntZ = rows.filter(r => r.zikjin > 0).length;
+    const cntA = rows.filter(r => r.ably > 0).length;
+    const cntU = rows.filter(r => r.unknown > 0 && r.zikjin === 0 && r.ably === 0).length;
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    // 전송 일시 (몇일 몇시)
+    const _days = ['일', '월', '화', '수', '목', '금', '토'];
+    const _p = n => String(n).padStart(2, '0');
+    const fmtAt = (ms) => {
+        const d = new Date(ms);
+        return `${d.getFullYear()}-${_p(d.getMonth() + 1)}-${_p(d.getDate())}(${_days[d.getDay()]}) ${_p(d.getHours())}:${_p(d.getMinutes())}`;
+    };
+
+    let sentLine = '';
+    if (_zikjinMeta && _zikjinMeta.at) {
+        sentLine = `<div style="font-size:12.5px; color:#37474f; margin-top:4px; font-weight:700;">🕒 전송 일시: ${fmtAt(_zikjinMeta.at)}</div>`;
+    } else {
+        sentLine = `<div style="font-size:12px; color:#90a4ae; margin-top:4px;">🕒 전송 일시: 기록 없음</div>`;
+    }
+
+    // 🔎 진단: "오늘 보냈는데 왜 어제로 보이지?"를 바로 확인할 수 있게 두 소스를 함께 보여준다.
+    //   업로드 기록 = 이 앱의 업로드 버튼으로 올린 시각
+    //   데이터 반영 = ZikjinData 문서가 실제로 마지막으로 쓰인 시각(외부 자동 전송 포함)
+    const todayKey = (() => { const d = new Date(); return `${d.getFullYear()}-${_p(d.getMonth() + 1)}-${_p(d.getDate())}`; })();
+    const isToday = (ms) => ms && fmtAt(ms).slice(0, 10) === todayKey;
+    const srcLine = (label, meta) => meta && meta.at
+        ? `<span style="color:${isToday(meta.at) ? '#2e7d32' : '#90a4ae'};">${label} ${fmtAt(meta.at)}${isToday(meta.at) ? ' <b>(오늘)</b>' : ''} · ${Number(meta.count || 0).toLocaleString()}건</span>`
+        : `<span style="color:#b0bec5;">${label} 없음</span>`;
+    const diagLine = `<div style="font-size:11px; margin-top:4px; line-height:1.7;">
+        ${srcLine('· 업로드 기록:', _zikjinConfigMeta)}<br>
+        ${srcLine('· 데이터 반영:', _zikjinDerivedMeta)}
+      </div>`;
+
+    const body = rows.length === 0
+        ? '<div style="padding:36px; text-align:center; color:#888;">전송된 ZG&AB 출고 데이터가 없습니다.</div>'
+        : `<table style="width:100%; border-collapse:collapse; font-size:13px;">
+             <thead><tr style="position:sticky; top:0; background:#eceff1; z-index:1;">
+               <th style="text-align:left; padding:8px;">상품코드</th>
+               <th style="text-align:left; padding:8px;">상품명</th>
+               <th style="text-align:center; padding:8px; width:150px;">구분</th>
+               <th style="text-align:right; padding:8px;">출고량</th>
+             </tr></thead>
+             <tbody>${rows.map(r => {
+               // 한 상품이 직진·에이블리 양쪽에서 나갈 수 있으므로 각각 표시한다.
+               const tags = [];
+               if (r.zikjin > 0) tags.push(_zikTag('직진', r.zikjin, '#1976d2', '#e3f2fd'));
+               if (r.ably > 0) tags.push(_zikTag('에이블리', r.ably, '#c2185b', '#fce4ec'));
+               if (tags.length === 0) tags.push(_zikTag('구분없음', r.unknown || r.qty, '#90a4ae', '#eceff1'));
+               const src = (r.zikjin > 0 && r.ably > 0) ? 'both' : (r.zikjin > 0 ? 'zikjin' : (r.ably > 0 ? 'ably' : 'unknown'));
+               return `<tr class="zik-row" data-src="${src}" style="border-bottom:1px solid #eee;">
+                 <td style="padding:6px 8px; font-family:monospace;">${esc(r.code)}</td>
+                 <td style="padding:6px 8px;">${esc(r.name)}</td>
+                 <td style="padding:6px 8px; text-align:center; white-space:nowrap;">${tags.join(' ')}</td>
+                 <td style="padding:6px 8px; text-align:right; font-weight:600;">${r.qty.toLocaleString()}</td>
+               </tr>`;
+             }).join('')}</tbody>
+           </table>`;
+
+    // 구분 필터 (전체 / 직진 / 에이블리)
+    const filterBar = rows.length === 0 ? '' : `
+      <div style="padding:8px 18px; border-bottom:1px solid #eee; background:#fafafa; display:flex; gap:6px; align-items:center;">
+        <span style="font-size:11px; font-weight:700; color:#78909c; margin-right:2px;">구분 보기</span>
+        ${['전체', '직진', '에이블리'].map((label, i) => {
+          const key = ['all', 'zikjin', 'ably'][i];
+          return `<button type="button" data-zik-filter="${key}" onclick="window.__zikFilter && window.__zikFilter('${key}')"
+            style="font-size:11px; font-weight:700; padding:4px 10px; border-radius:6px; cursor:pointer;
+                   border:1px solid ${key === 'all' ? '#1976d2' : '#cfd8dc'};
+                   background:${key === 'all' ? '#1976d2' : '#fff'}; color:${key === 'all' ? '#fff' : '#546e7a'};">${label}</button>`;
+        }).join('')}
+        <span id="zik-filter-count" style="font-size:11px; color:#90a4ae; margin-left:4px;"></span>
+      </div>`;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'zikjin-detail-overlay';
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:99999; display:flex; align-items:center; justify-content:center; padding:20px;';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+      <div style="background:#fff; border-radius:12px; width:100%; max-width:760px; max-height:85vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.3);">
+        <div style="padding:14px 18px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:16px; font-weight:800; color:#1976d2;">📂 ZG&AB 출고(직진·에이블리) 전송 데이터</div>
+            <div style="font-size:12px; color:#607d8b; margin-top:2px;">총 ${rows.length.toLocaleString()}개 상품 · 출고량 합계 ${total.toLocaleString()}</div>
+            <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+              ${_zikBadge('직진배송', sumZ, cntZ, '#1976d2', '#e3f2fd')}
+              ${_zikBadge('에이블리', sumA, cntA, '#c2185b', '#fce4ec')}
+              ${sumU > 0 ? _zikBadge('구분없음', sumU, cntU, '#607d8b', '#eceff1') : ''}
+            </div>
+            ${sentLine}
+            ${diagLine}
+          </div>
+          <button onclick="document.getElementById('zikjin-detail-overlay').remove()" style="border:none; background:none; font-size:22px; cursor:pointer; color:#888;">✕</button>
+        </div>
+        ${filterBar}
+        <div style="overflow:auto; flex:1;">${body}</div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    // 구분 필터: 행을 보이고/숨기고 버튼 색을 바꾼다.
+    window.__zikFilter = (key) => {
+        const ov = document.getElementById('zikjin-detail-overlay');
+        if (!ov) return;
+        let shown = 0;
+        ov.querySelectorAll('.zik-row').forEach(tr => {
+            const src = tr.dataset.src;
+            const hit = key === 'all'
+                || (key === 'zikjin' && (src === 'zikjin' || src === 'both'))
+                || (key === 'ably' && (src === 'ably' || src === 'both'));
+            tr.style.display = hit ? '' : 'none';
+            if (hit) shown++;
+        });
+        ov.querySelectorAll('[data-zik-filter]').forEach(btn => {
+            const on = btn.dataset.zikFilter === key;
+            btn.style.background = on ? '#1976d2' : '#fff';
+            btn.style.color = on ? '#fff' : '#546e7a';
+            btn.style.borderColor = on ? '#1976d2' : '#cfd8dc';
+        });
+        const cnt = ov.querySelector('#zik-filter-count');
+        if (cnt) cnt.textContent = key === 'all' ? '' : `${shown.toLocaleString()}개 상품`;
+    };
+};
+
 function setupRealtimeListenerA() {
     onSnapshot(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), (docSnap) => {
         if(docSnap.exists()) {
             const conf = docSnap.data();
+            updateLastUpdateDisplay(conf.lastDataUpdate);
+            _zikjinConfigMeta = conf.zikjinMeta || null;
+            updateZikjinInfoDisplay();
+            if (Array.isArray(conf.dupLocations)) window.__dupLocations = conf.dupLocations;
             if (conf.capacity2F) window.capacity2F = conf.capacity2F;
             if (conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrlOrder;
             if (conf.sheetUrlBuy) window.sheetUrlBuy = conf.sheetUrlBuy;
             if (conf.sheetUrl && !conf.sheetUrlOrder) window.sheetUrlOrder = conf.sheetUrl;
+            // ★ 사용자가 헤더를 드래그해 정한 순서를 그대로 사용 (대분류 강제 고정 해제)
             if (conf.visibleColumns) window.visibleColumns = conf.visibleColumns;
             if (conf.excelHeaders) window.excelHeaders = conf.excelHeaders.filter(h => h && !h.includes('<') && !h.includes('>') && !h.includes('='));
             
@@ -238,6 +538,13 @@ function setupRealtimeListenerA() {
                     } else if (!locObj.rawData) {
                         locObj.rawData = {};
                     }
+                    // 비축(2층 창고) 재고: 엑셀 열 이름이 '비축창고재고' 로 바뀌어 stock2f 가 비어 있는 자료 보정.
+                    // 기타(비축·SAM) 칸은 같은 수량을 '정상재고' 쪽에 담으므로 건드리지 않는다(이중 계상 방지).
+                    if (!Number(locObj.stock2f || 0) && !isEtcLocation(locObj)) {
+                        const _b = locObj.rawData['비축창고재고'] ?? locObj.rawData['2층창고재고'];
+                        const _n = String(_b == null ? '' : _b).replace(/[^0-9.-]/g, '');
+                        if (_n !== '' && Number(_n)) locObj.stock2f = _n;
+                    }
                     
                     tempLocMap[locId] = locObj; 
                 }
@@ -281,9 +588,9 @@ window.onload = () => {
     if (typeof window.loadOrderPairsCache === 'function') {
         window.loadOrderPairsCache();
     }
-    // v4.4: 종합 대시보드 + 재고 스냅샷 초기화 (history 리스너 + 사후 보정)
+    // v4.4 종합 대시보드 UI는 제거됐으나, 대시보드의 '재고 회전율' 지표를 위해
+    // 재고 스냅샷 파이프라인(load/snapshot)은 유지한다.
     if (typeof window._v44_init === 'function') {
-        // 다른 리스너들이 먼저 초기화될 시간을 주기 위해 약간 지연
         setTimeout(() => { window._v44_init(); }, 1500);
     }
 };
@@ -386,7 +693,7 @@ window.openRatioModal = function(e) {
                     <h4 style="margin:0 0 10px 0; color:#333;">📊 점수 반영 비율 (총합 100%)</h4>
                     <div style="display:flex; justify-content:space-around; align-items:center; gap:5px;">
                         <label style="display:flex; flex-direction:column; align-items:center; font-size:12px; font-weight:bold;">
-                            직진배송
+                            ZG&AB 출고
                             <div style="margin-top:5px; display:flex; align-items:center;">
                                 <input type="number" id="mod-ratio-zikjin" style="width:50px; text-align:right; padding:6px; border:1px solid #ccc; border-radius:4px; font-weight:bold;">
                                 <span style="margin-left:4px; color:#555;">%</span>
@@ -579,7 +886,7 @@ window.downloadMainExcel = function() {
     }
     
     // 헤더 구성
-    const stdHeaders = ['로케이션', '동', '위치', '상품코드', '상품명', '옵션', '정상재고', '2층창고재고'];
+    const stdHeaders = ['로케이션', '동', '위치', '상품코드', '상품명', '옵션', '정상재고', '비축창고재고'];
     const cusHeaders = (window.excelHeaders || []).filter(h => h && !h.includes('<') && !h.includes('>') && !h.includes('='));
     const allHeaders = [...stdHeaders, ...cusHeaders];
     
@@ -672,12 +979,71 @@ window.openRecommendModal = function() {
 };
 
 
+// ★ 피킹용/기타 구분 — 기타(비축·샘플·SAM 등)는 실제 피킹 랙이 아님.
+//   한 상품이 피킹용과 기타 두 군데에 있으면 '피킹용이 메인'이므로 피킹용만 기준으로 삼는다.
+//   (피킹용에 전혀 없고 기타에만 있는 상품은 기타를 기준으로 폴백)
+//   ※ 페어추천(showRecommendation)·단독추천(showSingleRecommendation) 양쪽에서 공용으로 사용.
+const isEtcLocObj = (d) => String(d.category || '피킹용').trim() === '기타' || /^SAM/i.test(String(d.id || '').trim());
+const getBaseLocsForCode = (code) => {
+    const all = originalData.filter(d => d.code === code);
+    const picking = all.filter(d => !isEtcLocObj(d));
+    return picking.length > 0 ? picking : all;
+};
+
+// 에이블리 출고량 계산. '수량/기간배송수량' 총량 컬럼이 있으면 사용하고,
+// 없으면(에이블리 파일이 상품코드 + 날짜별 컬럼만 있는 경우) 날짜별(YYYYMMDD) 컬럼 합계를 출고량으로 사용.
+// 📦 ZG&AB 출고 행의 소스별(직진/에이블리) 수량 분해.
+//   출고 자동화 프로그램이 각 행에 _q: { 소스ID: 수량 } 을 남긴다.
+//     ZG  = 직진 일반   / ZGF = 직진 즉시출고
+//     AB  = 에이블리 일반 / ABF = 에이블리 즉시출고
+//     LEGACY = 소스 구분이 없던 시절(앱에서 엑셀 직접 업로드)분
+function _zikjinSourceSplit(item) {
+    const q = (item && typeof item._q === 'object' && item._q) ? item._q : null;
+    if (!q) return { zikjin: 0, ably: 0, unknown: _ablyQtyFromItem(item) };
+    const num = v => Number(v) || 0;
+    return {
+        zikjin: num(q.ZG) + num(q.ZGF),
+        ably:   num(q.AB) + num(q.ABF),
+        unknown: num(q.LEGACY)
+    };
+}
+
+function _ablyQtyFromItem(aItem) {
+    if (!aItem) return 0;
+    const direct = Number(aItem['수량'] || aItem['기간배송수량'] || aItem['기간발주수량'] || 0);
+    if (direct > 0) return direct;
+    let sum = 0;
+    for (const k in aItem) { if (/^20\d{6}$/.test(k)) sum += Number(aItem[k] || 0); }
+    return sum;
+}
+
+// 상품코드의 수요 지표 추출 (두 추천 경로 공용):
+//   - zgQty: ZG&AB 출고 = 직진+에이블리 합본 파일(ZikjinData) 의 수량/날짜컬럼합
+//   - wQty : 주차별(WeeklyData '기간배송수량/기간발주수량')
+//   - trendVal: 상승세 = 주차별 날짜별(YYYYMMDD) 컬럼의 최근3 - 이전3
+function _getDemandForCode(code) {
+    const zItem = zikjinData[code] || {}; // ZG&AB 출고 (직진+에이블리 합본 파일 → 직진 슬롯 업로드)
+    const wItem = weeklyData[code] || {};
+    const zgQty = _ablyQtyFromItem(zItem); // 수량 || 날짜별 컬럼 합계 || 기간배송수량
+    const wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0);
+    let trendVal = 0;
+    const dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
+    if (dates.length >= 6) {
+        const recent3 = dates.slice(-3).reduce((s, d) => s + Number(wItem[d] || 0), 0);
+        const prev3 = dates.slice(-6, -3).reduce((s, d) => s + Number(wItem[d] || 0), 0);
+        trendVal = Math.max(0, recent3 - prev3);
+    }
+    const locItem = getBaseLocsForCode(code)[0];
+    const name = (locItem && locItem.name) || zItem['상품명'] || wItem['상품명'] || '알 수 없음';
+    return { name, zgQty, wQty, trendVal };
+}
+
 window.showRecommendation = function() {
     window.showLoading("💡 우선순위 알고리즘을 분석하여 최적의 로케이션을 매칭 중입니다...");
 
     setTimeout(() => {
         window.currentRecommendations = [];
-        
+
         // ★ 로케이션에 실제 존재하는 상품코드만 대상
         // ★ v3.53: 입고대기 남은 상품 제외 (곧 입고되므로 자리 이동 보류)
         const allCodes = new Set(
@@ -690,41 +1056,30 @@ window.showRecommendation = function() {
         let itemDataList = [];
 
         allCodes.forEach(code => {
-            let zItem = zikjinData[code] || {}; let wItem = weeklyData[code] || {};
-            let locItem = originalData.find(d => d.code === code);
-            let name = (locItem && locItem.name) || zItem['상품명'] || wItem['상품명'] || '알 수 없음';
-            let zQty = Number(zItem['수량'] || 0); 
-            let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0); 
-            let trendVal = 0;
-            let dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
-            if (dates.length >= 6) {
-                let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
-                let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
-                trendVal = Math.max(0, recent3 - prev3); 
-            }
-            if (zQty > maxZQty) maxZQty = zQty;
-            if (wQty > maxWQty) maxWQty = wQty;
-            if (trendVal > maxTrend) maxTrend = trendVal;
-            itemDataList.push({ code, name, zQty, wQty, trendVal });
+            const dm = _getDemandForCode(code); // ZG&AB 출고(직진+에이블리) / 주차별 / 상승세
+            if (dm.zgQty > maxZQty) maxZQty = dm.zgQty; // maxZQty = ZG&AB 출고 최대
+            if (dm.wQty > maxWQty) maxWQty = dm.wQty;
+            if (dm.trendVal > maxTrend) maxTrend = dm.trendVal;
+            itemDataList.push({ code, name: dm.name, zgQty: dm.zgQty, wQty: dm.wQty, trendVal: dm.trendVal });
         });
 
         let scoredItems = [];
         itemDataList.forEach(item => {
-            let zScore = maxZQty > 0 ? (item.zQty / maxZQty) * 100 : 0;
+            let zScore = maxZQty > 0 ? (item.zgQty / maxZQty) * 100 : 0;
             let wScore = maxWQty > 0 ? (item.wQty / maxWQty) * 100 : 0;
             let tScore = maxTrend > 0 ? (item.trendVal / maxTrend) * 100 : 0;
             let finalScore = (zScore * (window.recommendRatios.zikjin / 100)) + (wScore * (window.recommendRatios.weekly / 100)) + (tScore * (window.recommendRatios.trend / 100));
 
             if (finalScore > 0) {
-                let currentLocs = originalData.filter(d => d.code === item.code).map(d => d.id).join(', ');
+                let currentLocs = getBaseLocsForCode(item.code).map(d => d.id).join(', ');
                 if (!currentLocs) currentLocs = '신규배치 (없음)';
                 // ★ 점수 내역 세부 저장 (툴팁용)
                 const zContrib = zScore * (window.recommendRatios.zikjin / 100);
                 const wContrib = wScore * (window.recommendRatios.weekly / 100);
                 const tContrib = tScore * (window.recommendRatios.trend / 100);
-                scoredItems.push({ 
+                scoredItems.push({
                     code: item.code, name: item.name, score: finalScore, currentLocs,
-                    zQty: item.zQty, wQty: item.wQty, trendVal: item.trendVal,
+                    zgQty: item.zgQty, wQty: item.wQty, trendVal: item.trendVal,
                     zContrib, wContrib, tContrib
                 });
             }
@@ -734,6 +1089,8 @@ window.showRecommendation = function() {
         let emptyLocs = originalData.filter(d => {
             const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
             if (hasContent || d.preAssigned) return false;
+            // ★ 기타(비축·샘플·SAM)는 실제 피킹 랙이 아니므로 이동 추천 대상에서 제외
+            if (isEtcLocObj(d)) return false;
             // ★ 구역+동 조합 제외
             const excludeCombos = window.recommendPriorities.excludeCombos || [];
             if (excludeCombos.length > 0) {
@@ -891,7 +1248,8 @@ window.showRecommendation = function() {
             
             let item = scoredItems[i];
             
-            let currentLocsObjs = originalData.filter(d => d.code === item.code);
+            // ★ 피킹용이 메인 — 피킹용에 있으면 기타 로케이션은 기준에서 제외
+            let currentLocsObjs = getBaseLocsForCode(item.code);
             let currentDongsList = currentLocsObjs.map(d => (d.dong || '').toString().trim());
 
             let candidateIndices = [];
@@ -933,7 +1291,8 @@ window.showRecommendation = function() {
                 
                 currentLocsObjs.forEach(d => {
                     totalStock += Number(d.stock || 0);
-                    totalStock2f += Number(d.stock2f || 0);
+                    // 비축재고는 같은 상품의 모든 칸에 같은 값이 반복 저장돼 있다 → 더하지 말고 대표값 하나
+                    totalStock2f = Math.max(totalStock2f, Number(d.stock2f || 0));
                     if (d.option && !itemOption) itemOption = d.option; 
                 });
                 
@@ -997,7 +1356,7 @@ window.showRecommendation = function() {
                 const moveQtyDisplay = moveQty > 0 ? `<span style="color:#e65100; font-weight:900; font-size:15px;">${moveQty.toLocaleString()}</span><br><span style="font-size:10px; color:#888;">개</span>` : `<span style="color:#bbb; font-size:12px;">-</span>`;
 
                 // ★ 점수 세부 툴팁 HTML (html += 윗줄에 선언)
-                const scoreTipHtml = `<span class="info-tip" data-tip-key="dyn-rec-score-${item.code}" style="margin-left:3px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• 직진배송: ${item.zContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.zQty||0).toLocaleString()})</span><br>• 주차별: ${item.wContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${item.tContrib.toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: 직진 ${window.recommendRatios.zikjin}% / 주차 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
+                const scoreTipHtml = `<span class="info-tip" data-tip-key="dyn-rec-score-${item.code}" style="margin-left:3px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• ZG&AB 출고:${item.zContrib.toFixed(1)}점 <span style="color:#90a4ae;">(출고 ${Number(item.zgQty||0).toLocaleString()})</span><br>• 주차별:${item.wContrib.toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${item.tContrib.toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: ZG&AB출고 ${window.recommendRatios.zikjin}% / 주차별 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
 
                 // v3.98: 페어 보정 배지
                 let pairBadgeHtml = '';
@@ -1096,31 +1455,99 @@ window.downloadRecommendationExcel = function() {
 };
 
 // ========================================
-// ★ 2F 이동 추천 기능
+// ★ 빈칸확보 기능 (구 2F 이동 추천) — 현재고 0 · 입고대기 0 상품, 공급처 제외 지원
 // ========================================
 window.current2FList = [];
 
 window.show2FRecommendation = function() {
     document.getElementById('modal-2f').style.display = 'flex';
+    window.calc2FList(); // 열자마자 기준(현재고0·입고대기0)으로 조회
 };
 
 window.toggle2FCheckAll = function(source) {
     document.querySelectorAll('.check-2f-item').forEach(cb => cb.checked = source.checked);
 };
 
-window.calc2FList = function() {
-    const periodVal = Number(document.getElementById('2f-period-value').value) || 1;
-    const periodUnit = document.getElementById('2f-period-unit').value;
-    const stockLimit = Number(document.getElementById('2f-stock-limit').value) || 999999;
-
-    const now = new Date();
-    let cutoffDate;
-    if (periodUnit === 'week') {
-        cutoffDate = new Date(now.getTime() - (periodVal * 7 * 24 * 60 * 60 * 1000));
-    } else {
-        cutoffDate = new Date(now.getFullYear(), now.getMonth() - periodVal, now.getDate());
+// rawData에서 키를 유연하게 찾는 헬퍼 (공백/전각공백 무시 — \s 는 NBSP도 매칭)
+function get2FRawVal(rd, targetKey) {
+    if (!rd) return '';
+    if (rd[targetKey]) return rd[targetKey];
+    const norm = targetKey.replace(/\s/g, '');
+    for (const k of Object.keys(rd)) {
+        if (k.replace(/\s/g, '') === norm) return rd[k];
     }
-    const cutoffStr = cutoffDate.toISOString().slice(0, 10).replace(/-/g, '-');
+    return '';
+}
+
+// 마지막출고.배송일: 마지막배송일/마지막출고일 중 가장 최근 날짜를 반환. (마지막입고일은 미포함)
+// 두 날짜는 서로 다른 이벤트(배송 vs 출고)이므로 둘 중 더 최근 값이 실제 마지막 이동일임.
+function __getLastMoveDate(rd) {
+    if (!rd) return '';
+    let result = '';
+    ['마지막배송일', '마지막출고일'].forEach(key => {
+        const val = get2FRawVal(rd, key);
+        if (val) {
+            const norm = String(val).replace(/\./g, '-');
+            if (norm > result) result = norm;
+        }
+    });
+    return result;
+}
+
+// 상품(로케이션 묶음)의 공급처명을 찾는다. 재고 엑셀 헤더명이 확실치 않아 유연 매칭.
+const SUPPLIER_KEYS = ['공급처', '공급처명', '공급사', '공급업체', '거래처', '거래처명', 'vendor', 'supplier', 'Supplier'];
+function get2FSupplier(locs) {
+    for (const loc of locs) {
+        const rd = loc.rawData;
+        if (!rd) continue;
+        for (const key of SUPPLIER_KEYS) {
+            const v = get2FRawVal(rd, key);
+            if (v) return String(v).trim();
+        }
+        // '공급처'가 들어간 키(단, 상품명/코드류 제외)
+        for (const k of Object.keys(rd)) {
+            const ck = k.replace(/\s/g, '');
+            if (ck.includes('공급처') && !ck.includes('상품') && !ck.includes('코드')) {
+                const v = rd[k];
+                if (v) return String(v).trim();
+            }
+        }
+    }
+    return '';
+}
+
+// 공급처 제외 체크리스트 렌더 (기존 체크 상태 유지)
+window.render2FSupplierList = function(supplierSet, excluded) {
+    const box = document.getElementById('2f-supplier-box');
+    if (!box) return;
+    const suppliers = [...supplierSet].sort((a, b) => a.localeCompare(b, 'ko'));
+    if (suppliers.length === 0) {
+        box.innerHTML = '<span style="font-size:12px; color:#999;">공급처 정보가 있는 상품이 없습니다.</span>';
+        const allCb0 = document.getElementById('2f-supplier-all');
+        if (allCb0) allCb0.checked = false;
+        return;
+    }
+    box.innerHTML = suppliers.map(s => {
+        const checked = excluded.has(s) ? ' checked' : '';
+        const safe = String(s).replace(/"/g, '&quot;');
+        return '<label style="font-size:12px; color:#333; cursor:pointer; user-select:none; white-space:nowrap;">' +
+               '<input type="checkbox" class="f2-supplier-cb" value="' + safe + '"' + checked + ' style="vertical-align:middle;"> ' + s +
+               '</label>';
+    }).join('');
+    const allCb = document.getElementById('2f-supplier-all');
+    if (allCb) allCb.checked = suppliers.every(s => excluded.has(s));
+};
+
+window.toggle2FSupplierAll = function(source) {
+    document.querySelectorAll('.f2-supplier-cb').forEach(cb => cb.checked = source.checked);
+    window.calc2FList();
+};
+
+window.calc2FList = function() {
+    // 재렌더 전에 현재 체크된 '제외 공급처' 수집
+    const excluded = new Set(
+        Array.from(document.querySelectorAll('.f2-supplier-cb:checked')).map(cb => cb.value)
+    );
 
     // 상품코드별로 그룹핑
     const codeMap = {};
@@ -1132,61 +1559,57 @@ window.calc2FList = function() {
     });
 
     window.current2FList = [];
-    const tbody = document.getElementById('2f-tbody');
+    const supplierSet = new Set(); // 조건 통과 후보들의 공급처 (체크리스트용)
+
+    // 입고대기(오더/사입 입고 리스트)에 포함된 상품코드 — 공백 정규화하여 집합화
+    const incomingCodeSet = new Set(Object.keys(incomingData || {}).map(c => String(c).trim()));
 
     for (const code in codeMap) {
-        // ★ v3.53: 입고대기 남은 상품은 2F 이동 추천에서 제외
-        if (incomingTotalByCode[code] > 0) continue;
-        const locs = codeMap[code];
-        const firstLoc = locs[0];
-        
-        // rawData에서 키를 유연하게 찾는 헬퍼
-        const getRawVal = (rd, targetKey) => {
-            if (!rd) return '';
-            if (rd[targetKey]) return rd[targetKey];
-            const norm = targetKey.replace(/[\s\u00A0]/g, '');
-            for (const k of Object.keys(rd)) {
-                if (k.replace(/[\s\u00A0]/g, '') === norm) return rd[k];
-            }
-            return '';
-        };
+        // ★ 기준 1: 입고대기에 포함된 상품 제외
+        //   (미입고수량>0 이거나, 오더/사입 입고 리스트에 코드가 존재하면 제외 — 도착일 지남·잔량0도 포함)
+        if (incomingCodeSet.has(String(code).trim()) || (incomingTotalByCode[code] || 0) > 0) continue;
 
-        // 마지막배송일 찾기 (마지막배송일 우선, 없으면 마지막입고일)
+        const locs = codeMap[code];
+
+        // ★ 기준 2: 현재고(정상재고) 0개
+        let totalStock = 0;
+        locs.forEach(l => totalStock += Number(l.stock || 0));
+        if (totalStock !== 0) continue;
+
+        const firstLoc = locs[0];
+
+        // 공급처 (제외 판별 + 표시)
+        const supplier = get2FSupplier(locs);
+        if (supplier) supplierSet.add(supplier);
+        if (supplier && excluded.has(supplier)) continue; // ★ 선택한 공급처 제외
+
+        // 마지막출고.배송일 (참고 표시용) — 마지막배송일/마지막출고일 중 더 최근 값
         let lastDelivery = '';
         for (const loc of locs) {
-            let val = getRawVal(loc.rawData, '마지막배송일');
-            if (!val) val = getRawVal(loc.rawData, '마지막입고일');
+            const val = __getLastMoveDate(loc.rawData);
             if (val && val > lastDelivery) lastDelivery = val;
         }
 
-        // 마지막배송일이 없으면 대상에 포함 (배송 기록 없음 = 오래된 것)
-        // 마지막배송일이 있으면 cutoff 이전인지 확인
-        if (lastDelivery && lastDelivery > cutoffStr) continue;
-
-        // 정상재고 합산
-        let totalStock = 0;
-        locs.forEach(l => totalStock += Number(l.stock || 0));
-        if (totalStock > stockLimit) continue;
-
-        // 옵션추가항목1 값 가져오기
+        // 옵션추가항목1 값
         let extraOpt = '';
         for (const loc of locs) {
-            const val = getRawVal(loc.rawData, '옵션추가항목1');
+            const val = get2FRawVal(loc.rawData, '옵션추가항목1');
             if (val) { extraOpt = val; break; }
         }
 
         const locIds = locs.map(l => l.id).join(', ');
         const name = firstLoc.name || '';
         const option = firstLoc.option || '';
-        
-        // 변경값: 2F-코드 옵션추가항목1값
         const changeValue = `2F-${code}${extraOpt ? ' ' + extraOpt : ''}`;
 
         window.current2FList.push({
-            code, name, option, totalStock, lastDelivery: lastDelivery || '기록없음',
+            code, name, option, supplier, totalStock, lastDelivery: lastDelivery || '기록없음',
             locIds, locs, changeValue, extraOpt
         });
     }
+
+    // 공급처 체크리스트 갱신 (선택 상태 유지)
+    window.render2FSupplierList(supplierSet, excluded);
 
     // 마지막배송일 오래된 순 정렬 (기록없음이 맨 위)
     window.current2FSortAsc = true;
@@ -1198,7 +1621,7 @@ window.calc2FList = function() {
 
     const icon = document.getElementById('2f-sort-icon');
     if (icon) icon.textContent = '▲';
-    
+
     window.render2FTable();
 };
 
@@ -1232,9 +1655,10 @@ window.render2FTable = function() {
             <tr style="background:${rowBg};">
                 <td><input type="checkbox" class="check-2f-item" data-idx="${idx}"></td>
                 <td style="font-weight:bold; color:#7b1fa2;">${idx + 1}</td>
-                <td style="font-weight:bold; color:#1a237e;">${item.code}</td>
-                <td style="text-align:left; font-size:13px;">${item.name}</td>
-                <td style="font-size:12px;">${item.option}</td>
+                <td style="font-weight:bold; color:#1a237e; white-space:nowrap;">${item.code}</td>
+                <td style="text-align:left; font-size:13px; white-space:nowrap;">${item.name}</td>
+                <td style="font-size:12px; white-space:nowrap;">${item.option}</td>
+                <td style="font-size:12px; color:#555; white-space:nowrap;">${item.supplier || '-'}</td>
                 <td style="font-weight:bold;">${item.totalStock}</td>
                 <td style="font-size:12px; color:${item.lastDelivery === '기록없음' ? '#ff5252' : '#555'};">${item.lastDelivery}</td>
                 <td style="font-size:12px;">${item.locIds}</td>
@@ -1243,7 +1667,7 @@ window.render2FTable = function() {
         `;
     });
     if (window.current2FList.length === 0) {
-        html = '<tr><td colspan="9" style="padding:40px; color:#888;">조건에 해당하는 상품이 없습니다.</td></tr>';
+        html = '<tr><td colspan="10" style="padding:40px; color:#888;">조건에 해당하는 상품이 없습니다.</td></tr>';
     }
     tbody.innerHTML = html;
     document.getElementById('2f-check-all').checked = false;
@@ -1262,10 +1686,10 @@ window.download2FExcel = function() {
     if (checked.length > 0) {
         const indices = Array.from(checked).map(cb => Number(cb.dataset.idx));
         targetList = indices.map(i => window.current2FList[i]).filter(Boolean);
-        fileLabel = `2F이동추천_선택${targetList.length}건`;
+        fileLabel = `빈칸확보_선택${targetList.length}건`;
     } else {
         targetList = window.current2FList;
-        fileLabel = `2F이동추천_전체${targetList.length}건`;
+        fileLabel = `빈칸확보_전체${targetList.length}건`;
     }
 
     const excelData = targetList.map((item, idx) => ({
@@ -1273,19 +1697,20 @@ window.download2FExcel = function() {
         "상품코드": item.code,
         "상품명": item.name,
         "옵션": item.option,
+        "공급처": item.supplier || '',
         "정상재고": item.totalStock,
-        "마지막배송일": item.lastDelivery,
+        "마지막출고.배송일": item.lastDelivery,
         "현재위치": item.locIds,
         "변경값": item.changeValue
     }));
 
     const ws = XLSX.utils.json_to_sheet(excelData);
     ws['!cols'] = [
-        { wch: 5 }, { wch: 15 }, { wch: 40 }, { wch: 25 },
+        { wch: 5 }, { wch: 15 }, { wch: 40 }, { wch: 25 }, { wch: 18 },
         { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 30 }
     ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "2F이동추천");
+    XLSX.utils.book_append_sheet(wb, ws, "빈칸확보");
     const today = new Date();
     const dateString = today.getFullYear() + String(today.getMonth() + 1).padStart(2, '0') + String(today.getDate()).padStart(2, '0');
     XLSX.writeFile(wb, `${fileLabel}_${dateString}.xlsx`);
@@ -1300,14 +1725,15 @@ function renderTableHeader() {
     let popupHtml = '';
     
     window.visibleColumns.forEach(col => {
-        if (col === 'std_dong') { html += createTh('dong', '동', 80, true); popupHtml += `<div id="pop-dong" class="filter-popup"></div>`; }
-        else if (col === 'std_pos') { html += createTh('pos', '위치', 80, true); popupHtml += `<div id="pop-pos" class="filter-popup"></div>`; }
-        else if (col === 'std_id') { html += createTh('id', '로케이션', 150, true); popupHtml += `<div id="pop-id" class="filter-popup"></div>`; }
-        else if (col === 'std_code') { html += createTh('code', '상품코드', 150, true); popupHtml += `<div id="pop-code" class="filter-popup"></div>`; }
-        else if (col === 'std_name') { html += createTh('name', '상품명', 'auto', true); popupHtml += `<div id="pop-name" class="filter-popup"></div>`; }
-        else if (col === 'std_option') { html += createTh('option', '옵션', 180, true); popupHtml += `<div id="pop-option" class="filter-popup"></div>`; }
-        else if (col === 'std_stock') { html += createTh('stock', '정상재고', 130, true); popupHtml += `<div id="pop-stock" class="filter-popup"></div>`; }
-        else if (col === 'std_stock2f') { html += createTh('stock2f', '2층창고재고', 130, true); popupHtml += `<div id="pop-stock2f" class="filter-popup"></div>`; }
+        if (col === 'std_dong') { html += createTh('dong', '동', 80, true, col); popupHtml += `<div id="pop-dong" class="filter-popup"></div>`; }
+        else if (col === 'std_pos') { html += createTh('pos', '위치', 80, true, col); popupHtml += `<div id="pop-pos" class="filter-popup"></div>`; }
+        else if (col === 'std_id') { html += createTh('id', '로케이션', 150, true, col); popupHtml += `<div id="pop-id" class="filter-popup"></div>`; }
+        else if (col === 'std_category') { html += createTh('category', '대분류', 90, true, col); popupHtml += `<div id="pop-category" class="filter-popup"></div>`; }
+        else if (col === 'std_code') { html += createTh('code', '상품코드', 150, true, col); popupHtml += `<div id="pop-code" class="filter-popup"></div>`; }
+        else if (col === 'std_name') { html += createTh('name', '상품명', 'auto', true, col); popupHtml += `<div id="pop-name" class="filter-popup"></div>`; }
+        else if (col === 'std_option') { html += createTh('option', '옵션', 180, true, col); popupHtml += `<div id="pop-option" class="filter-popup"></div>`; }
+        else if (col === 'std_stock') { html += createTh('stock', '정상재고', 130, true, col); popupHtml += `<div id="pop-stock" class="filter-popup"></div>`; }
+        else if (col === 'std_stock2f') { html += createTh('stock2f', '비축창고재고', 130, true, col); popupHtml += `<div id="pop-stock2f" class="filter-popup"></div>`; }
         else if (col.startsWith('cus_')) {
             const label = col.replace('cus_', '');
             // ★ 입고대기 컬럼에 툴팁 추가
@@ -1315,22 +1741,91 @@ function renderTableHeader() {
             if (label === '입고대기') {
                 displayLabel = `입고대기<span class="info-tip" data-tip-key="header-incoming">i<span class="info-tip-content">📦 <b>오더리스트 + 사입리스트 합계</b><br>입고대기 사이드바에 연동된 구글시트의 <b>미입고수량</b>을 상품코드 기준으로 합산한 값입니다.<br>(같은 상품코드의 옵션별 수량이 모두 더해집니다)</span></span>`;
             }
-            html += createTh(col, displayLabel, 120, true);
+            html += createTh(col, displayLabel, 120, true, col);
             popupHtml += `<div id="pop-${col}" class="filter-popup"></div>`;
         }
     });
-    
+
     theadTr.innerHTML = html;
     popupContainer.innerHTML = popupHtml;
-    
+
     document.querySelectorAll('.filter-popup').forEach(p => { p.addEventListener('click', function(e) { e.stopPropagation(); }); });
     setupFilterPopups();
+    setupHeaderDragAndDrop();
 }
 
-function createTh(key, label, width, hasFilter) {
+function createTh(key, label, width, hasFilter, colId) {
     let widthStyle = width === 'auto' ? '' : `style="width: ${width}px;"`;
     let filterHtml = hasFilter ? `<span class="filter-btn" id="btn-filter-${key}" onclick="toggleFilterPopup(event, 'pop-${key}')">▼</span>` : '';
-    return `<th ${widthStyle}><div class="th-content"><span class="title-text">${label}</span>${filterHtml}</div></th>`;
+    // ★ 드래그앤드롭으로 컬럼 순서 변경 가능하도록 표식 부여
+    const dragAttrs = colId ? ` draggable="true" data-col="${colId}" title="드래그해서 헤더 순서를 바꿀 수 있습니다"` : '';
+    return `<th ${widthStyle}${dragAttrs}><div class="th-content"><span class="title-text">${label}</span>${filterHtml}</div></th>`;
+}
+
+// ★ 헤더 드래그앤드롭 — th를 끌어다 놓으면 visibleColumns 순서를 바꾸고 저장한다.
+let _dragColId = null;
+function setupHeaderDragAndDrop() {
+    const theadTr = document.getElementById('dynamic-thead-tr');
+    if (!theadTr) return;
+    const clearMarks = () => theadTr.querySelectorAll('th').forEach(t => t.classList.remove('th-dragging', 'th-drop-left', 'th-drop-right'));
+
+    theadTr.querySelectorAll('th[data-col]').forEach(th => {
+        th.addEventListener('dragstart', (e) => {
+            _dragColId = th.dataset.col;
+            th.classList.add('th-dragging');
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                try { e.dataTransfer.setData('text/plain', _dragColId); } catch (_) {}
+            }
+        });
+        th.addEventListener('dragend', () => { _dragColId = null; clearMarks(); });
+        th.addEventListener('dragover', (e) => {
+            if (!_dragColId || th.dataset.col === _dragColId) return;
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+            const rect = th.getBoundingClientRect();
+            const after = (e.clientX - rect.left) > rect.width / 2;
+            th.classList.toggle('th-drop-right', after);
+            th.classList.toggle('th-drop-left', !after);
+        });
+        th.addEventListener('dragleave', () => th.classList.remove('th-drop-left', 'th-drop-right'));
+        th.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const targetCol = th.dataset.col;
+            const dragged = _dragColId;
+            clearMarks();
+            if (!dragged || targetCol === dragged) return;
+            const rect = th.getBoundingClientRect();
+            const after = (e.clientX - rect.left) > rect.width / 2;
+            moveVisibleColumn(dragged, targetCol, after);
+        });
+    });
+}
+
+function moveVisibleColumn(fromCol, toCol, placeAfter) {
+    const cols = (window.visibleColumns || []).slice();
+    const fromIdx = cols.indexOf(fromCol);
+    if (fromIdx === -1) return;
+    cols.splice(fromIdx, 1);
+    let toIdx = cols.indexOf(toCol);
+    if (toIdx === -1) return;
+    if (placeAfter) toIdx += 1;
+    cols.splice(toIdx, 0, fromCol);
+
+    window.visibleColumns = cols;
+    renderTableHeader();
+    applyFiltersAndSort();
+    saveVisibleColumnOrder(cols);
+}
+
+async function saveVisibleColumnOrder(cols) {
+    try {
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { visibleColumns: cols }, { merge: true });
+        showToast('✅ 헤더 순서가 저장되었습니다.');
+    } catch (e) {
+        console.error('헤더 순서 저장 실패:', e);
+        showToast('⚠️ 헤더 순서 저장에 실패했습니다.');
+    }
 }
 
 window.openSettingsModal = (e) => {
@@ -1342,8 +1837,8 @@ window.openSettingsModal = (e) => {
     let html = '<div style="margin-bottom:15px; font-weight:bold; color:var(--primary);">■ 화면 헤더(컬럼) 설정</div><div style="display:flex; flex-wrap:wrap; gap:5px;">';
     
     const stdCols = [
-        { id: 'std_dong', label: '동' }, { id: 'std_pos', label: '위치' }, { id: 'std_id', label: '로케이션(ID)' },
-        { id: 'std_code', label: '상품코드' }, { id: 'std_name', label: '상품명' }, { id: 'std_option', label: '옵션' }, { id: 'std_stock', label: '정상재고' }, { id: 'std_stock2f', label: '2층창고재고' }
+        { id: 'std_dong', label: '동' }, { id: 'std_pos', label: '위치' }, { id: 'std_id', label: '로케이션(ID)' }, { id: 'std_category', label: '대분류' },
+        { id: 'std_code', label: '상품코드' }, { id: 'std_name', label: '상품명' }, { id: 'std_option', label: '옵션' }, { id: 'std_stock', label: '정상재고' }, { id: 'std_stock2f', label: '비축창고재고' }
     ];
     
     stdCols.forEach(col => {
@@ -1364,13 +1859,19 @@ window.openSettingsModal = (e) => {
 
 window.saveHeaderSettings = async () => {
     const checkboxes = document.querySelectorAll('.chk-header:checked');
-    const newVisible = Array.from(checkboxes).map(cb => cb.value);
-    
+    const checked = Array.from(checkboxes).map(cb => cb.value);
+    // ★ 드래그로 정해둔 기존 순서를 보존 — 이미 보이던 컬럼은 현재 순서 유지, 새로 켠 컬럼만 뒤에 추가
+    const prev = window.visibleColumns || [];
+    const newVisible = [
+        ...prev.filter(c => checked.includes(c)),
+        ...checked.filter(c => !prev.includes(c))
+    ];
+
     try {
-        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { 
+        await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), {
             visibleColumns: newVisible
         }, { merge: true });
-        
+
         window.visibleColumns = newVisible;
         document.getElementById('settings-modal').style.display = 'none';
         renderTableHeader(); 
@@ -1567,10 +2068,12 @@ window.calcIncomingRecommend = function(code, excludeLocIds) {
     const excludeCombos = priorities.excludeCombos || [];
     const hasExclude = excludeLocIds && typeof excludeLocIds.has === 'function';
     const emptyLocs = originalData.filter(d => {
-        const hasContent = (d.code && d.code !== d.id && d.code.trim() !== '') 
-                        || (d.name && d.name.trim() !== '');
-        if (hasContent || d.preAssigned) return false;
-        
+        const hasContent = (d.code && d.code !== d.id && String(d.code).trim() !== '')
+                        || (d.name && String(d.name).trim() !== '');
+        // 점유(상품 배치)·선지정·당일지정·예약된 자리는 추천에서 제외
+        if (hasContent || d.preAssigned || d.reserved) return false;
+        if (d.codeTag && String(d.codeTag).trim() !== '') return false; // 선지정/당일지정 등 태그된 자리
+
         // [5단계] 일괄적용 시 이미 다른 카드가 가져간 자리 제외
         if (hasExclude && excludeLocIds.has(d.id)) return false;
         
@@ -1727,7 +2230,7 @@ window.applyAllRecommendations = async function() {
             if (loc.code && loc.code !== loc.id) existingLocMap[loc.code] = true;
         });
         
-        const _today = new Date().toISOString().slice(0, 10);
+        const _today = toDateStr();
         
         let list = [];
         for (const code in incomingData) { list.push(incomingData[code]); }
@@ -2145,9 +2648,33 @@ window.saveCapacity2F = async function() {
 
 window.switchUsageTab = function(tab) { window.currentUsageTab = tab; window.calculateAndRenderUsage(); };
 
+// 대시보드 KPI 카드 → 데이터 리스트 뷰로 전환 + 해당 상태 필터 적용 (작업 가능 화면으로 바로 연결)
+window.__dashGoToList = function(state, pickingOnly) {
+    filters = { loc: [], code: [], stock: [], stock2f: [], category: [], dong: [], pos: [], reserved: [], preassigned: [] };
+    if (state === 'used') filters.code = ['not-empty'];
+    else if (state === 'empty') filters.code = ['empty'];
+    else if (state === 'reserved') filters.reserved = ['only'];
+    else if (state === 'preassigned') filters.preassigned = ['only'];
+    if (pickingOnly) filters.pickingOnly = true; // 피킹용(기타·비축·SAM 제외)만
+    setupFilterPopups();
+    applyFiltersAndSort();
+    if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
+    // 3개 뷰 중 '데이터 리스트'로 전환 (대시보드/도면 숨김 + 탭 활성화)
+    const vList = document.getElementById('view-list');
+    const vMap = document.getElementById('view-map');
+    const vDash = document.getElementById('view-locdash');
+    if (vList) vList.style.display = 'block';
+    if (vMap) vMap.style.display = 'none';
+    if (vDash) vDash.style.display = 'none';
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-btn-list')?.classList.add('active');
+    if (typeof window.showFilterResetBtn === 'function') window.showFilterResetBtn();
+    if (vList && vList.scrollIntoView) vList.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+
 window.applyUsageFilter = function(zone, state) {
     // ★ v3.57: 모든 필터 배열 초기화
-    filters = { loc: [], code: [], stock: [], stock2f: [], dong: [], pos: [], reserved: [], preassigned: [] };
+    filters = { loc: [], code: [], stock: [], stock2f: [], category: [], dong: [], pos: [], reserved: [], preassigned: [] };
     if (zone !== 'all') filters.loc = [zone];
     if (state === 'used') filters.code = ['not-empty'];
     else if (state === 'empty') filters.code = ['empty'];
@@ -2169,7 +2696,8 @@ window.calculateAndRenderUsage = function() {
     let html = `<div style="display:flex; gap:10px; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 10px;"><button onclick="switchUsageTab('3F')" style="flex:1; padding:8px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; background:${window.currentUsageTab === '3F' ? 'var(--primary)' : '#eee'}; color:${window.currentUsageTab === '3F' ? 'white' : '#555'}">3층 로케이션</button><button onclick="switchUsageTab('2F')" style="flex:1; padding:8px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; background:${window.currentUsageTab === '2F' ? 'var(--primary)' : '#eee'}; color:${window.currentUsageTab === '2F' ? 'white' : '#555'}">2층 창고재고</button></div>`;
 
     if (window.currentUsageTab === '3F') {
-        const locations = originalData.filter(d => d.id.charAt(0).toUpperCase() !== 'K');
+        // 랙 사용률 통계이므로 '기타'(비축/샘플 등, 실제 피킹 랙이 아님) 위치는 제외
+        const locations = originalData.filter(d => d.id.charAt(0).toUpperCase() !== 'K' && (d.category || '피킹용') !== '기타');
         let total = locations.length;
         if (total === 0) { popup.innerHTML = html + '<div style="padding: 10px;">데이터가 없습니다.</div>'; return; }
         
@@ -2239,7 +2767,7 @@ window.calculateAndRenderUsage = function() {
         const zones = Object.keys(zoneStats).sort((a,b) => (a==='★'?-1:(b==='★'?1:a.localeCompare(b))));
         zones.forEach(z => {
             const zTotal = zoneStats[z].total; const zUsed = zoneStats[z].used; const zEmpty = zTotal - zUsed; const zRate = ((zUsed / zTotal) * 100).toFixed(1);
-            detailHtml += `<tr><td><strong>${z}</strong> 구역</td><td>${zTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'used')">${zUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${z}', 'empty')">${zEmpty}</td><td>${zRate}%</td></tr>`;
+            detailHtml += `<tr><td><strong>${z}</strong> 구역</td><td>${zTotal}</td><td style="color:var(--primary); cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${jsArg(z)}', 'used')">${zUsed}</td><td style="color:#ff5252; cursor:pointer; text-decoration:underline;" onclick="applyUsageFilter('${jsArg(z)}', 'empty')">${zEmpty}</td><td>${zRate}%</td></tr>`;
         });
         detailHtml += `</tbody></table></div>`;
 
@@ -2267,7 +2795,13 @@ window.calculateAndRenderUsage = function() {
         html += detailHtml;
 
     } else {
-        let sum2F = 0; originalData.forEach(loc => { sum2F += Number(loc.stock2f || 0); });
+        // 상품코드별 대표값 한 번씩만 더한다(같은 상품이 여러 칸에 있으면 같은 비축수량이 반복 저장돼 있다)
+        const _b2f = {};
+        originalData.forEach(loc => {
+            const c = String(loc.code || loc.id || '').trim();
+            _b2f[c] = Math.max(_b2f[c] || 0, Number(loc.stock2f || 0));
+        });
+        let sum2F = Object.values(_b2f).reduce((a, v) => a + v, 0);
         let rate2F = ((sum2F / window.capacity2F) * 100).toFixed(1);
         let remaining2F = window.capacity2F - sum2F;
         
@@ -2322,7 +2856,7 @@ window.calculateAndRenderUsage = function() {
                 const extraDays = Math.ceil(remainAfter / dailyAvg);
                 const estDate = new Date(d2);
                 estDate.setDate(estDate.getDate() + extraDays);
-                estimatedDate = estDate.toISOString().slice(0, 10);
+                estimatedDate = toDateStr(estDate);
             }
             
             if (estimatedDate && dailyAvg > 0) {
@@ -2358,7 +2892,7 @@ function updateLocPopupUI() {
     let locHtml = window.getFilterSearchHtml('pop-id') + getSortButtonsHtml('id');
     const isAllSelected = filters.loc.length === 0;
     locHtml += `<div class="filter-option ${isAllSelected ? 'selected' : ''}" onclick="toggleLocFilter('all')">${isAllSelected ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
-    prefixes.forEach(p => { const isSelected = filters.loc.includes(p); locHtml += `<div class="filter-option ${isSelected ? 'selected' : ''}" onclick="toggleLocFilter('${p}')">${isSelected ? '✔️ ' : ''}${p} 구역</div>`; });
+    prefixes.forEach(p => { const isSelected = filters.loc.includes(p); locHtml += `<div class="filter-option ${isSelected ? 'selected' : ''}" onclick="toggleLocFilter('${jsArg(p)}')">${isSelected ? '✔️ ' : ''}${p} 구역</div>`; });
     locPop.innerHTML = locHtml;
 }
 
@@ -2369,7 +2903,7 @@ function updateFilterButtonStates() {
         else btnId.classList.add('active');
     }
     
-    ['code', 'dong', 'pos', 'stock', 'stock2f'].forEach(type => {
+    ['code', 'dong', 'pos', 'stock', 'stock2f', 'category'].forEach(type => {
         const btn = document.getElementById('btn-filter-' + type);
         if (btn) {
             if (type === 'code') {
@@ -2426,7 +2960,7 @@ function setupFilterPopups() {
     let dongHtml = window.getFilterSearchHtml('pop-dong') + getSortButtonsHtml('dong') + `<div class="filter-option ${dongAll ? 'selected' : ''}" onclick="setFilter('dong', 'all')">${dongAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     dongs.forEach(d => { 
         const sel = filters.dong.includes(d);
-        dongHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('dong', '${d}')">${sel ? '✔️ ' : ''}${d}</div>`; 
+        dongHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('dong', '${jsArg(d)}')">${sel ? '✔️ ' : ''}${d}</div>`; 
     });
     if(dongPop) dongPop.innerHTML = dongHtml;
     const poses = [...new Set(originalData.map(d => (d.pos || '').toString()))].filter(Boolean).sort();
@@ -2434,7 +2968,7 @@ function setupFilterPopups() {
     let posHtml = window.getFilterSearchHtml('pop-pos') + getSortButtonsHtml('pos') + `<div class="filter-option ${posAll ? 'selected' : ''}" onclick="setFilter('pos', 'all')">${posAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     poses.forEach(p => { 
         const sel = filters.pos.includes(p);
-        posHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('pos', '${p}')">${sel ? '✔️ ' : ''}${p}</div>`; 
+        posHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('pos', '${jsArg(p)}')">${sel ? '✔️ ' : ''}${p}</div>`; 
     });
     if(posPop) posPop.innerHTML = posHtml;
     const stocks = [...new Set(originalData.map(d => (d.stock || '0').toString()))].sort((a, b) => Number(a) - Number(b));
@@ -2442,7 +2976,7 @@ function setupFilterPopups() {
     let stockHtml = window.getFilterSearchHtml('pop-stock') + getSortButtonsHtml('stock') + `<div class="filter-option ${stockAll ? 'selected' : ''}" onclick="setFilter('stock', 'all')">${stockAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     stocks.forEach(s => { 
         const sel = filters.stock.includes(s);
-        stockHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock', '${s}')">${sel ? '✔️ ' : ''}${s}</div>`; 
+        stockHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock', '${jsArg(s)}')">${sel ? '✔️ ' : ''}${s}</div>`; 
     });
     if(stockPop) stockPop.innerHTML = stockHtml;
    const stock2fPop = document.getElementById('pop-stock2f');
@@ -2451,9 +2985,19 @@ function setupFilterPopups() {
     let stock2fHtml = window.getFilterSearchHtml('pop-stock2f') + getSortButtonsHtml('stock2f') + `<div class="filter-option ${stock2fAll ? 'selected' : ''}" onclick="setFilter('stock2f', 'all')">${stock2fAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
     stocks2f.forEach(s => { 
         const sel = filters.stock2f && filters.stock2f.includes(s);
-        stock2fHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock2f', '${s}')">${sel ? '✔️ ' : ''}${s}</div>`; 
+        stock2fHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('stock2f', '${jsArg(s)}')">${sel ? '✔️ ' : ''}${s}</div>`; 
     });
     if(stock2fPop) stock2fPop.innerHTML = stock2fHtml;
+
+    const categoryPop = document.getElementById('pop-category');
+    const categories = [...new Set(originalData.map(d => (d.category || '피킹용').toString()))].sort();
+    const categoryAll = !filters.category || filters.category.length === 0;
+    let categoryHtml = window.getFilterSearchHtml('pop-category') + getSortButtonsHtml('category') + `<div class="filter-option ${categoryAll ? 'selected' : ''}" onclick="setFilter('category', 'all')">${categoryAll ? '✔️ ' : ''}🔄 전체선택/해제</div>`;
+    categories.forEach(c => {
+        const sel = filters.category && filters.category.includes(c);
+        categoryHtml += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('category', '${jsArg(c)}')">${sel ? '✔️ ' : ''}${c}</div>`;
+    });
+    if(categoryPop) categoryPop.innerHTML = categoryHtml;
 
     updateFilterButtonStates();
 
@@ -2603,7 +3147,7 @@ function setupFilterPopups() {
         }
 
         normalVals.forEach(v => {
-            const escaped = v.replace(/'/g, "\\'");
+            const escaped = jsArg(v);
             const sel = arr.includes(v);
             html += `<div class="filter-option ${sel ? 'selected' : ''}" onclick="setFilter('${col}', '${escaped}')">${sel ? '✔️ ' : ''}${v}</div>`;
         });
@@ -2756,6 +3300,11 @@ window.updateFilterSearch = function(popId, query) {
         // 구분선은 항상 표시
         pop.querySelectorAll('.filter-divider').forEach(d => { d.style.display = ''; });
     }
+
+    // ★ 검색창 입력으로 테이블 본문도 해당 컬럼 부분일치 필터링
+    const colKey = popId.replace('pop-', '');
+    colTextSearch[colKey] = (query || '').trim();
+    applyFiltersAndSort();
 };
 
 // 날짜 필터 평탄화 렌더링 (검색 모드)
@@ -2876,7 +3425,7 @@ window.clearAllFilters = function(e) {
     if (e) e.stopPropagation();
     
     // 기본 필터 키 모두 빈 배열로 초기화
-    filters = { loc: [], code: [], stock: [], stock2f: [], dong: [], pos: [], reserved: [], preassigned: [] };
+    filters = { loc: [], code: [], stock: [], stock2f: [], category: [], dong: [], pos: [], reserved: [], preassigned: [] };
     
     // 동적으로 추가된 커스텀 헤더 필터(cus_*)도 모두 제거
     Object.keys(filters).forEach(key => {
@@ -2885,6 +3434,7 @@ window.clearAllFilters = function(e) {
     
     // 검색 쿼리도 초기화
     if (window._filterSearchQuery) window._filterSearchQuery = {};
+    colTextSearch = {};
     
     // 팝업/메뉴 모두 닫기
     if (typeof window.closeAllPopups === 'function') window.closeAllPopups();
@@ -2915,6 +3465,12 @@ function applyFiltersAndSort() {
         
         if (filters.stock.length > 0 && !filters.stock.includes((item.stock || '0').toString())) return false;
         if (filters.stock2f.length > 0 && !filters.stock2f.includes((item.stock2f || '0').toString())) return false;
+        if (filters.category && filters.category.length > 0 && !filters.category.includes((item.category || '피킹용').toString())) return false;
+        // ★ 피킹용 전용 필터 (대시보드 '피킹용 빈 자리' 진입 시): 기타·비축·SAM 제외
+        if (filters.pickingOnly) {
+            const _pid = (item.id || '').toString().trim();
+            if ((item.category || '피킹용').toString().trim() === '기타' || /^비축/.test(_pid) || /^SAM/i.test(_pid)) return false;
+        }
         
         if (filters.reserved.length > 0 && filters.reserved.includes('only') && item.codeTag !== '당일지정') return false;
         if (filters.preassigned.length > 0 && filters.preassigned.includes('only') && item.codeTag !== '선지정') return false;
@@ -2941,6 +3497,32 @@ function applyFiltersAndSort() {
             }
             if (!matched) return false;
         }
+
+        // ★ 헤더 검색창 텍스트 필터 (각 컬럼 부분일치, 대소문자 무시)
+        for (const ck in colTextSearch) {
+            const q = (colTextSearch[ck] || '').toLowerCase();
+            if (!q) continue;
+            let cv = '';
+            if (ck === 'id') cv = item.id || '';
+            else if (ck === 'code') cv = (item.code && item.code !== item.id) ? item.code : '';
+            else if (ck === 'name') cv = item.name || '';
+            else if (ck === 'option') cv = item.option || '';
+            else if (ck === 'dong') cv = item.dong != null ? item.dong : '';
+            else if (ck === 'pos') cv = item.pos != null ? item.pos : '';
+            else if (ck === 'stock') cv = item.stock != null ? item.stock : '';
+            else if (ck === 'stock2f') cv = item.stock2f != null ? item.stock2f : '';
+            else if (ck === 'category') cv = item.category || '피킹용';
+            else if (ck.startsWith('cus_')) {
+                const key = ck.replace('cus_', '');
+                if (key === '입고대기') {
+                    const c = (item.code && item.code !== item.id) ? item.code : '';
+                    cv = c && incomingTotalByCode[c] ? incomingTotalByCode[c].toString() : '';
+                } else {
+                    cv = (item.rawData && item.rawData[key] != null) ? item.rawData[key] : '';
+                }
+            }
+            if (!String(cv).toLowerCase().includes(q)) return false;
+        }
         return true;
     });
     filtered.sort((a, b) => {
@@ -2952,11 +3534,21 @@ function applyFiltersAndSort() {
         } else {
             aVal = a[sortConfig.key] || ''; bVal = b[sortConfig.key] || '';
         }
-        if (sortConfig.key === 'stock') return sortConfig.direction === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
-        return sortConfig.direction === 'asc' ? aVal.toString().localeCompare(bVal.toString()) : bVal.toString().localeCompare(aVal.toString());
+        // ★ 값이 양쪽 다 순수 숫자면 숫자 정렬 (문자열 정렬 시 "100"이 "11"보다 앞에 오는 문제 방지)
+        const aStr = aVal.toString(), bStr = bVal.toString();
+        const aNum = Number(aStr), bNum = Number(bStr);
+        const bothNumeric = aStr.trim() !== '' && bStr.trim() !== '' && !isNaN(aNum) && !isNaN(bNum);
+        if (bothNumeric) return sortConfig.direction === 'asc' ? aNum - bNum : bNum - aNum;
+        return sortConfig.direction === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
     });
     window.lastFilteredData = filtered;
     renderTable(filtered);
+
+    // ── 병합(v4.4+대시보드): 로케이션 현황 대시보드 탭이 표시 중이면 자동 갱신 ──
+    const __locdashEl = document.getElementById('view-locdash');
+    if (__locdashEl && __locdashEl.style.display !== 'none' && typeof window.renderLocationDashboard === 'function') {
+        window.renderLocationDashboard();
+    }
 }
 
 window.handleRowClick = async function(event, locId) {
@@ -3046,8 +3638,16 @@ function renderTable(data) {
     const tbody = document.getElementById('location-list-body');
     if (!tbody || !container) return;
     
+    // 필터·검색이 바뀌면 지금 목록에 없는 줄의 선택은 버린다
+    // (안 그러면 화면에 안 보이는 줄까지 '선택 수정'·'일괄 삭제' 대상이 된다)
+    if (VS.checkedIds.size > 0) {
+        const visibleIds = new Set(data.map(d => d.id));
+        [...VS.checkedIds].forEach(id => { if (!visibleIds.has(id)) VS.checkedIds.delete(id); });
+    }
+
     if (data.length === 0) {
         tbody.innerHTML = '<tr><td colspan="10" style="padding:50px;">데이터가 없습니다.</td></tr>';
+        updateLocBulkBar();
         return;
     }
     
@@ -3058,6 +3658,7 @@ function renderTable(data) {
     }
     
     renderVisibleRows();
+    updateLocBulkBar();
 }
 
 function renderVisibleRows() {
@@ -3097,12 +3698,13 @@ function renderVisibleRows() {
         }
         
         let isChecked = VS.checkedIds.has(loc.id) ? 'checked' : '';
-        html += `<tr onclick="handleRowClick(event, '${loc.id}')" style="${rowStyle}">`;
+        html += `<tr onclick="handleRowClick(event, '${jsArg(loc.id)}')" style="${rowStyle}">`;
         html += `<td onclick="event.stopPropagation()"><input type="checkbox" class="loc-check" value="${loc.id}" ${isChecked} onchange="window.vsCheckChanged(this)"></td>`;
         window.visibleColumns.forEach(col => {
             if (col === 'std_dong') html += `<td style="color:#666;">${loc.dong || ''}</td>`;
             else if (col === 'std_pos') html += `<td style="color:#666;">${loc.pos || ''}</td>`;
-            else if (col === 'std_id') html += `<td class="loc-copy-cell" onclick="copyLocationToClipboard(event, '${loc.id}')" title="클릭하여 복사 및 예약">${loc.id}</td>`;
+            else if (col === 'std_id') html += `<td class="loc-copy-cell" onclick="copyLocationToClipboard(event, '${jsArg(loc.id)}')" title="클릭하여 복사 및 예약">${loc.id}</td>`;
+            else if (col === 'std_category') html += `<td style="color:${(loc.category || '피킹용') === '기타' ? '#8d6e63' : '#666'};">${loc.category || '피킹용'}</td>`;
             else if (col === 'std_code') html += `<td style="color:#3d5afe; font-weight:bold;">${loc.code === loc.id ? '' : (loc.code || '')}${codeTagHtml}</td>`;
             else if (col === 'std_name') html += `<td style="text-align:left;">${loc.name || ''}</td>`;
             else if (col === 'std_option') html += `<td style="text-align:left; font-size:12px;">${loc.option || ''}</td>`;
@@ -3131,6 +3733,26 @@ function renderVisibleRows() {
 window.vsCheckChanged = function(cb) {
     if (cb.checked) VS.checkedIds.add(cb.value);
     else VS.checkedIds.delete(cb.value);
+    updateLocBulkBar();
+};
+
+// 선택 막대(체크한 줄의 동·위치·대분류 수정) 표시 갱신
+function updateLocBulkBar() {
+    const bar = document.getElementById('loc-bulk-bar');
+    const cnt = document.getElementById('loc-bulk-count');
+    if (!bar) return;
+    const n = VS.checkedIds.size;
+    if (cnt) cnt.textContent = n.toLocaleString();
+    bar.style.display = n > 0 ? 'flex' : 'none';
+}
+window.updateLocBulkBar = updateLocBulkBar;
+
+window.clearLocSelection = function () {
+    VS.checkedIds.clear();
+    const all = document.getElementById('check-all');
+    if (all) all.checked = false;
+    renderVisibleRows();
+    updateLocBulkBar();
 };
 
 // toggleAllCheckboxes 오버라이드 - 전체 데이터 기준으로 동작
@@ -3141,6 +3763,7 @@ window.toggleAllCheckboxes = (source) => {
         VS.checkedIds.clear();
     }
     renderVisibleRows();
+    updateLocBulkBar();
 };
 
 const extractDataFromHTML = function(htmlString) {
@@ -3291,9 +3914,9 @@ const universalExcelReader = (file) => {
 
 // ★ v3.95: 업로드별 필수 헤더 안내 + 진단 코드별 alert 메시지 헬퍼
 const _uploadHeaderGuide = {
-    'permanent': '로케이션, 동, 위치, 칸수',
-    'daily':     '로케이션, 상품코드, 상품명, 옵션, 정상재고, 2층창고재고',
-    'zikjin':    '상품코드(또는 어드민상품코드/대표상품코드 등), 수량',
+    'permanent': '로케이션, 동, 위치, 칸수, 대분류(피킹/기타, 선택)',
+    'daily':     '로케이션, 상품코드, 상품명, 옵션, 정상재고, 비축창고재고(옛 이름: 2층창고재고)',
+    'zikjin':    '상품코드(또는 어드민상품코드/대표상품코드 등), 수량 또는 날짜별(YYYYMMDD) 출고수량 컬럼',
     'weekly':    '상품코드(또는 어드민상품코드/대표상품코드 등), 기간배송수량 또는 기간발주수량'
 };
 
@@ -3359,7 +3982,11 @@ if (fileInputA) {
         window.showLoading('일일 재고/상품 데이터를 최신화 중입니다...');
         try {
             const result = await universalExcelReader(file);
-            if(result.rows.length > 0) await updateDatabaseA(result.rows, 'daily');
+            if(result.rows.length > 0) {
+                await updateDatabaseA(result.rows, 'daily');
+                // 🕒 데이터 최신화 시각 기록 (헤더 표시용)
+                try { await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { lastDataUpdate: Date.now() }, { merge: true }); } catch(_) {}
+            }
             else { window.hideLoading(); _showUploadDiagnosisAlert(result.diagnosis, 'daily'); }
         } catch(err) { window.hideLoading(); alert("오류 발생"); }
         finally { e.target.value=''; }
@@ -3413,6 +4040,26 @@ if (fileInputOrders) {
     });
 }
 
+// 💰 읽기 요금 최적화: ProcessedOrders 전체 스캔 대신 "업로드 파일의 주문번호"만 조회.
+// 기존엔 getDocs(collection) 로 누적된 모든 처리주문(수만 건)을 매 업로드마다 읽어 읽기 폭탄이었음.
+// documentId() in [...] 배치 쿼리는 실제로 존재(중복)하는 문서만 읽으므로,
+// 읽기량이 "누적 전체"가 아니라 "이번 파일과 겹치는 소수"에만 비례한다.
+async function fetchExistingProcessedOrders(orderNos) {
+    const existing = new Set();
+    const CHUNK = 30;       // Firestore 'in' 최대 30개
+    const CONCURRENCY = 10; // 동시 쿼리 수 제한 (과다 병렬 방지)
+    const chunks = [];
+    for (let i = 0; i < orderNos.length; i += CHUNK) chunks.push(orderNos.slice(i, i + CHUNK));
+    for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+        const group = chunks.slice(i, i + CONCURRENCY);
+        const snaps = await Promise.all(group.map(ids =>
+            getDocs(query(collection(db, PROCESSED_ORDERS_COLL), where(documentId(), 'in', ids)))
+        ));
+        snaps.forEach(snap => snap.forEach(d => existing.add(d.id)));
+    }
+    return existing;
+}
+
 // 주문 데이터 처리: 중복 검사 → 신규만 자동 누적 저장
 window.processOrderData = async function(rows) {
     try {
@@ -3436,10 +4083,9 @@ window.processOrderData = async function(rows) {
         }
 
         // 2. 기존 ProcessedOrders 조회 (중복 업로드 방지)
+        // 💰 전체 스캔 대신 이번 파일의 주문번호만 조회 → 읽기 요금 대폭 절감
         window.showLoading('💾 중복 주문 검사 중...');
-        const processedSet = new Set();
-        const processedSnap = await getDocs(collection(db, PROCESSED_ORDERS_COLL));
-        processedSnap.forEach(d => { processedSet.add(d.id); });
+        const processedSet = await fetchExistingProcessedOrders(orderNos);
 
         // 3. 신규 주문만 필터링
         const targetOrderNos = orderNos.filter(ono => !processedSet.has(ono));
@@ -3598,7 +4244,7 @@ window.processOrderData = async function(rows) {
         } catch (e) {}
         const metaUpdate = {
             orderAnalysisMeta: {
-                lastUploadDate: latestDate || new Date().toISOString().slice(0, 10),
+                lastUploadDate: latestDate || toDateStr(),
                 lastUploadAt: Date.now(),
                 totalProcessedOrders: prevTotal + targetOrderNos.length,
                 totalPairs: Object.keys(existingPairs).length,
@@ -3619,11 +4265,18 @@ window.processOrderData = async function(rows) {
         msg += `자세한 리포트는 [📊 페어 분석 리포트 보기]에서 확인하세요.`;
         alert(msg);
         
-        // v3.98: 페어 캐시 갱신
-        if (typeof window.loadOrderPairsCache === 'function') {
-            window.loadOrderPairsCache();
+        // 💰 읽기요금 절감: 방금 병합한 메모리 데이터로 페어 캐시를 직접 갱신.
+        //    (기존엔 loadOrderPairsCache()가 PAIRS/STATS 전체를 Firestore에서 다시 읽어 급등 원인)
+        try {
+            window._cachedOrderPairs = Object.values(existingPairs).map(p => ({ codeA: p.codeA, codeB: p.codeB, count: p.count, lastDate: p.lastDate }));
+            window._cachedOrderStats = existingStats;
+            window._cachedOrderMeta = metaUpdate.orderAnalysisMeta;
+            console.log(`[읽기절감] 업로드 후 페어 캐시를 메모리로 갱신(재읽기 0): 페어 ${window._cachedOrderPairs.length}, 상품 ${Object.keys(existingStats).length}`);
+        } catch (e) {
+            console.warn('페어 캐시 메모리 갱신 실패, 폴백으로 재로드:', e);
+            if (typeof window.loadOrderPairsCache === 'function') window.loadOrderPairsCache();
         }
-        
+
         // v4.4 v3: 주문 업로드 후 자동 팝업 호출 삭제
         // 사용자가 [📊 페어 분석 리포트 보기] 버튼을 직접 클릭해서 열도록 변경
         // window.openOrderAnalysisReport();
@@ -3646,23 +4299,31 @@ window.openOrderAnalysisReport = async function() {
         const cfgSnap = await getDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'));
         if (cfgSnap.exists()) meta = cfgSnap.data().orderAnalysisMeta || {};
 
-        const pairs = [];
-        const stats = {};
-        const pairsSnap = await getDocs(collection(db, ORDER_PAIRS_COLL));
-        pairsSnap.forEach(d => {
-            try {
-                const arr = JSON.parse(d.data().dataStr || '[]');
-                arr.forEach(p => pairs.push({ codeA: p.cA, codeB: p.cB, count: p.c, lastDate: p.d }));
-            } catch (e) {}
-        });
+        let pairs = [];
+        let stats = {};
+        // 💰 읽기요금 절감: 캐시가 있으면 재사용(창 열기·업로드·정리 때 이미 로드됨). 없을 때만 전체 스캔.
+        if (Array.isArray(window._cachedOrderPairs) && window._cachedOrderPairs.length > 0
+            && window._cachedOrderStats && Object.keys(window._cachedOrderStats).length > 0) {
+            pairs = window._cachedOrderPairs;
+            stats = window._cachedOrderStats;
+            console.log('[읽기절감] 리포트: 페어 캐시 재사용(재읽기 0)');
+        } else {
+            const pairsSnap = await getDocs(collection(db, ORDER_PAIRS_COLL));
+            pairsSnap.forEach(d => {
+                try {
+                    const arr = JSON.parse(d.data().dataStr || '[]');
+                    arr.forEach(p => pairs.push({ codeA: p.cA, codeB: p.cB, count: p.c, lastDate: p.d }));
+                } catch (e) {}
+            });
 
-        const statsSnap = await getDocs(collection(db, ORDER_STATS_COLL));
-        statsSnap.forEach(d => {
-            try {
-                const arr = JSON.parse(d.data().dataStr || '[]');
-                arr.forEach(s => { stats[s.c] = { code: s.c, count: s.n, lastDate: s.d }; });
-            } catch (e) {}
-        });
+            const statsSnap = await getDocs(collection(db, ORDER_STATS_COLL));
+            statsSnap.forEach(d => {
+                try {
+                    const arr = JSON.parse(d.data().dataStr || '[]');
+                    arr.forEach(s => { stats[s.c] = { code: s.c, count: s.n, lastDate: s.d }; });
+                } catch (e) {}
+            });
+        }
 
         const totalOrdersEstimate = meta.totalProcessedOrders || 1;
         const pairsWithLift = pairs.map(p => {
@@ -3780,7 +4441,7 @@ window.resetOrderAnalysis = async function() {
 };
 
 async function updateDatabaseB(rows, collectionName, inputElement, silent = false) {
-    let label = collectionName === 'ZikjinData' ? '직진배송' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
+    let label = collectionName === 'ZikjinData' ? 'ZG&AB 출고' : (collectionName === 'WeeklyData' ? '주차별' : '데이터');
     try {
         const querySnapshot = await getDocs(collection(db, collectionName));
         let delBatch = writeBatch(db);
@@ -3806,7 +4467,17 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
         }
         
         if (chunkCount > 0) await batch.commit();
-        
+
+        // 📌 전송 기록 메타 저장(언제/얼마나) — 직진·에이블리(ZG&AB)·주차별
+        try {
+            const metaKey = collectionName === 'ZikjinData' ? 'zikjinMeta'
+                : (collectionName === 'WeeklyData' ? 'weeklyMeta' : null);
+            if (metaKey) {
+                await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'),
+                    { [metaKey]: { at: Date.now(), count: validRows.length } }, { merge: true });
+            }
+        } catch (e) { console.warn('전송 기록 메타 저장 실패:', e); }
+
         if (!silent) alert(`✅ [${label}] 압축 저장 완료!\n총 ${validRows.length}건이 단 ${chunkCount}번의 쓰기로 반영되었습니다.`);
         
     } catch (error) { 
@@ -3821,12 +4492,34 @@ async function updateDatabaseB(rows, collectionName, inputElement, silent = fals
 
 async function updateDatabaseA(rows, mode = 'daily') {
     const totalRows = rows.length;
+
+    // 🔎 '한 로케이션에 2+ 상품' 충돌 감지 (업로드 행 기준; 저장 시 같은 로케이션은 마지막 행만 남아 충돌이 사라지므로 여기서 포착)
+    if (mode === 'daily') {
+        try {
+            const _locCodes = {};
+            rows.forEach(row => {
+                const raw = (row['로케이션'] || '').toString().trim();
+                if (!raw) return;
+                const loc = raw.includes('(') ? raw.split('(')[0].trim() : raw;
+                let code = '';
+                if (raw.includes('(')) { const af = raw.substring(raw.indexOf('(')); const si = af.indexOf('S'); if (si !== -1) code = af.substring(si).trim(); }
+                if (!code) code = (row['상품코드'] || '').toString().trim();
+                if (!loc || !code) return;
+                (_locCodes[loc] = _locCodes[loc] || new Set()).add(code);
+            });
+            window.__dupLocations = Object.entries(_locCodes)
+                .filter(([, s]) => s.size >= 2)
+                .map(([loc, s]) => ({ loc, codes: [...s] }));
+            setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), { dupLocations: window.__dupLocations, dupLocationsAt: Date.now() }, { merge: true }).catch(() => {});
+        } catch (e) { console.warn('[dupLoc] 충돌 감지 실패:', e); }
+    }
+
     try {
         // ★ 모든 행의 키를 합쳐서 전체 헤더 추출 (첫 행에 빈 값이면 키가 누락되는 문제 해결)
         const allHeadersSet = new Set();
         rows.forEach(row => { Object.keys(row).forEach(k => allHeadersSet.add(k)); });
         const allHeaders = [...allHeadersSet];
-        const excludeRaw = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '2층창고재고'];
+        const excludeRaw = ['동', 'dong', '위치', 'pos', '상품코드', '로케이션', '상품명', '옵션', '정상재고', '비축창고재고', '2층창고재고', '대분류'];
         // 공백제거 버전도 제외 목록에 포함
         const exclude = [...new Set([...excludeRaw, ...excludeRaw.map(h => h.replace(/\s+/g, ''))])];
         
@@ -3895,8 +4588,51 @@ async function updateDatabaseA(rows, mode = 'daily') {
             });
         }
         
+        // ★ permanent(영구보전) 업로드의 '대분류' 헤더 값 → 위치 카테고리(피킹용/기타) 정규화
+        const normalizeLocCategory = (raw) => {
+            const v = (raw || '').toString().trim();
+            if (!v) return null;
+            if (v.includes('기타')) return '기타';
+            if (v.includes('피킹')) return '피킹용';
+            return null;
+        };
+
         for (let i = 0; i < totalRows; i++) {
-            const row = rows[i]; 
+            const row = rows[i];
+
+            // ★ 커스텀 헤더(원본 데이터) 스냅샷 — '로케이션'/'옵션추가항목1' 두 경로 모두에서 공용으로 사용
+            let cleanRawData = {};
+            customHeaders.forEach(k => {
+                // 엑셀 파싱 키와 customHeader 키 매칭 (공백/특수문자 무시)
+                const normalizeKey = (s) => (s || '').toString().replace(/[\s ​﻿]/g, '');
+                const normK = normalizeKey(k);
+
+                // row에서 직접 매칭 시도
+                let rawVal = row[k];
+                if (rawVal === undefined) rawVal = row[normK];
+
+                // 그래도 없으면 row의 모든 키를 정규화해서 비교
+                if (rawVal === undefined) {
+                    for (const rowKey of Object.keys(row)) {
+                        if (normalizeKey(rowKey) === normK) {
+                            rawVal = row[rowKey];
+                            break;
+                        }
+                    }
+                }
+
+                if(rawVal !== undefined && rawVal !== null && rawVal.toString().trim() !== "") {
+                    const strVal = rawVal.toString().trim();
+                    const numVal = parseFloat(strVal);
+                    if(!isNaN(numVal) && numVal > 40000 && numVal < 60000 && strVal.includes('.')) {
+                        cleanRawData[k] = formatExcelDate(numVal);
+                    } else if(!isNaN(numVal) && Number.isInteger(numVal) && numVal > 40000 && numVal < 60000) {
+                        cleanRawData[k] = formatExcelDate(numVal);
+                    } else {
+                        cleanRawData[k] = strVal;
+                    }
+                }
+            });
 
             const rawLoc = row['로케이션']?.toString().trim();
             if (rawLoc) {
@@ -3923,7 +4659,7 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     if (twoFCode) {
                         twoFloorCodes.add(twoFCode);
                         // 2F 재고 수량 누적 (정상재고 또는 2층창고재고 컬럼 사용)
-                        const stockVal = Number(row['정상재고'] || row['2층창고재고'] || 0);
+                        const stockVal = Number(row['정상재고'] || row['비축창고재고'] || row['2층창고재고'] || 0);
                         if (!isNaN(stockVal) && stockVal > 0) {
                             twoFloorStockSum += stockVal;
                         }
@@ -3941,13 +4677,16 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     if (sIndex !== -1) extractedCode = afterParen.substring(sIndex).trim();
                 } else { cleanLocId = rawLoc; }
                 
-                if (cleanLocId) { 
+                if (cleanLocId) {
+                    // ★ permanent 모드: '대분류' 헤더로 피킹용/기타 구분 (없으면 피킹용 기본값)
+                    const rowCategory = mode === 'permanent' ? (normalizeLocCategory(row['대분류']) || '피킹용') : '피킹용';
+
                     if (!existingLocMap[cleanLocId]) {
                         // ★ permanent 모드: 낯선 로케이션도 새로 생성 허용
                         if (mode === 'permanent') {
-                            existingLocMap[cleanLocId] = { 
-                                id: cleanLocId, dong: '', pos: '', code: '', name: '', 
-                                option: '', stock: '0', stock2f: '0' 
+                            existingLocMap[cleanLocId] = {
+                                id: cleanLocId, dong: '', pos: '', code: '', name: '',
+                                option: '', stock: '0', stock2f: '0', category: rowCategory
                             };
                         } else {
                             skipCount++;
@@ -3961,39 +4700,6 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     const finalCode = extractedCode || row['상품코드']?.toString().trim() || '';
                     const existingData = existingLocMap[cleanLocId] || {};
                     
-                    let cleanRawData = {};
-                    customHeaders.forEach(k => {
-                        // 엑셀 파싱 키와 customHeader 키 매칭 (공백/특수문자 무시)
-                        const normalizeKey = (s) => (s || '').toString().replace(/[\s\u00A0\u200B\uFEFF]/g, '');
-                        const normK = normalizeKey(k);
-                        
-                        // row에서 직접 매칭 시도
-                        let rawVal = row[k];
-                        if (rawVal === undefined) rawVal = row[normK];
-                        
-                        // 그래도 없으면 row의 모든 키를 정규화해서 비교
-                        if (rawVal === undefined) {
-                            for (const rowKey of Object.keys(row)) {
-                                if (normalizeKey(rowKey) === normK) {
-                                    rawVal = row[rowKey];
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if(rawVal !== undefined && rawVal !== null && rawVal.toString().trim() !== "") {
-                            const strVal = rawVal.toString().trim();
-                            const numVal = parseFloat(strVal);
-                            if(!isNaN(numVal) && numVal > 40000 && numVal < 60000 && strVal.includes('.')) {
-                                cleanRawData[k] = formatExcelDate(numVal);
-                            } else if(!isNaN(numVal) && Number.isInteger(numVal) && numVal > 40000 && numVal < 60000) {
-                                cleanRawData[k] = formatExcelDate(numVal);
-                            } else {
-                                cleanRawData[k] = strVal;
-                            }
-                        }
-                    });
-
                     let updateData = zoneUpdates[zoneDocId][cleanLocId] || { 
                         dong: existingData.dong || '',
                         pos: existingData.pos || '',
@@ -4013,7 +4719,9 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     updateData.updatedAt = new Date();
                     updateData.rawDataStr = JSON.stringify(cleanRawData);
                     updateData.rawData = deleteField();
-                    
+                    // ★ permanent 모드: '대분류' 헤더 값 반영. daily 모드: 로케이션 필드는 항상 피킹용 취급
+                    updateData.category = (mode === 'permanent') ? rowCategory : (existingData.category || '피킹용'); // 대분류는 자리 성격 값 → 일일 업로드는 기존 값 유지
+
                     if (mode === 'permanent') {
                         updateData.dong = ('동' in row || 'dong' in row) ? (row['동'] || row['dong'] || '').toString().trim() : (existingData.dong || '');
                         updateData.pos = ('위치' in row || 'pos' in row) ? (row['위치'] || row['pos'] || '').toString().trim() : (existingData.pos || '');
@@ -4034,7 +4742,7 @@ async function updateDatabaseA(rows, mode = 'daily') {
                         updateData.name = row['상품명']?.toString().trim() || '';
                         updateData.option = row['옵션']?.toString().trim() || '';
                         updateData.stock = row['정상재고']?.toString().trim() || '0';
-                        updateData.stock2f = row['2층창고재고']?.toString().trim() || '0';
+                        updateData.stock2f = (row['비축창고재고'] ?? row['2층창고재고'])?.toString().trim() || '0';
                         
                         if (finalCode && finalCode.trim() !== '') {
                             updateData.preAssigned = false;
@@ -4049,8 +4757,76 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     updateCount++;
                 }
             }
+
+            // ★ '옵션추가항목1' 헤더: 로케이션과 별개의 '기타' 위치로 동일 상품을 추가 배정
+            // (비축/샘플 등 위치 코드. permanent 모드로 사전 등록된 위치만 daily 모드에서 매칭됨 —
+            //  '로케이션' 필드와 동일한 사전등록 규칙 적용)
+            // ★ 콤마로 여러 위치가 나열될 수 있음(예: "비축-05,비축-04,R-08") → 개별 위치로 분리해 각각 등록
+            const rawOpt1 = row['옵션추가항목1']?.toString().trim();
+            if (rawOpt1) {
+                const opt1LocIds = rawOpt1.split(',').map(s => s.trim()).filter(Boolean);
+
+                for (const opt1LocId of opt1LocIds) {
+                    if (!existingLocMap[opt1LocId]) {
+                        // ★ daily 모드: 사전 등록 안 된 위치는 새로 만들지 않고 건너뜀 (로케이션 필드와 동일 규칙)
+                        if (mode !== 'permanent') { skipCount++; continue; }
+                        existingLocMap[opt1LocId] = {
+                            id: opt1LocId, dong: '', pos: '', code: '', name: '',
+                            option: '', stock: '0', stock2f: '0', category: '기타'
+                        };
+                    }
+                    // ★ 안전장치: 이미 실제 피킹용 위치로 쓰이는 ID는 '기타'로 덮어쓰지 않음
+                    //   (옵션추가항목1 텍스트가 우연히 다른 상품의 실제 로케이션 코드와 겹칠 수 있음)
+                    if (existingLocMap[opt1LocId].category === '피킹용') { skipCount++; continue; }
+
+                    const opt1ZoneDocId = getZoneDocId(opt1LocId);
+                    if (!zoneUpdates[opt1ZoneDocId]) zoneUpdates[opt1ZoneDocId] = {};
+
+                    const opt1ExistingData = existingLocMap[opt1LocId] || {};
+                    const opt1Code = (row['상품코드'] || '').toString().trim();
+
+                    let opt1UpdateData = zoneUpdates[opt1ZoneDocId][opt1LocId] || {
+                        dong: opt1ExistingData.dong || '',
+                        pos: opt1ExistingData.pos || '',
+                        reserved: false,
+                        reservedAt: 0,
+                        reservedBy: '',
+                        assignedAt: 0,
+                        preAssigned: opt1ExistingData.preAssigned || false,
+                        preAssignedCode: opt1ExistingData.preAssignedCode || '',
+                        preAssignedName: opt1ExistingData.preAssignedName || '',
+                        preAssignedQty: opt1ExistingData.preAssignedQty || '',
+                        preAssignedAt: opt1ExistingData.preAssignedAt || 0,
+                        codeTag: opt1ExistingData.codeTag || '',
+                        codeTagAt: opt1ExistingData.codeTagAt || 0
+                    };
+
+                    opt1UpdateData.updatedAt = new Date();
+                    opt1UpdateData.rawDataStr = JSON.stringify(cleanRawData);
+                    opt1UpdateData.rawData = deleteField();
+                    opt1UpdateData.category = '기타'; // ★ '옵션추가항목1' 헤더 기준 위치 → 대분류: 기타
+
+                    if (mode === 'permanent') {
+                        opt1UpdateData.code = opt1ExistingData.code || '';
+                        opt1UpdateData.name = opt1ExistingData.name || '';
+                        opt1UpdateData.option = opt1ExistingData.option || '';
+                        opt1UpdateData.stock = opt1ExistingData.stock || '0';
+                        opt1UpdateData.stock2f = opt1ExistingData.stock2f || '0';
+                    } else {
+                        opt1UpdateData.code = opt1Code || '';
+                        opt1UpdateData.name = row['상품명']?.toString().trim() || '';
+                        opt1UpdateData.option = row['옵션']?.toString().trim() || '';
+                        // 기타칸의 재고수량은 '2층창고재고' 헤더 값을 사용 (위치별로 동일 수량 반복 표시)
+                        opt1UpdateData.stock = (row['비축창고재고'] ?? row['2층창고재고'])?.toString().trim() || '0';
+                        opt1UpdateData.stock2f = '0';
+                    }
+
+                    zoneUpdates[opt1ZoneDocId][opt1LocId] = opt1UpdateData;
+                    updateCount++;
+                }
+            }
         }
-        
+
         let currentBatchLocCount = 0;
         for (let zoneId in zoneUpdates) {
             const zoneData = zoneUpdates[zoneId];
@@ -4077,7 +4853,7 @@ async function updateDatabaseA(rows, mode = 'daily') {
                     totalStock: twoFloorStockSum,
                     codes: Array.from(twoFloorCodes), // 디버그/검증용
                     savedAt: new Date(),
-                    sourceDate: window._v44_getTodayDateString ? window._v44_getTodayDateString() : new Date().toISOString().slice(0, 10)
+                    sourceDate: toDateStr()
                 };
                 await setDoc(doc(db, 'artifacts', 'team-work-logger-v2', 'locationStock', 'twoFloorLatest'), twoFloorData);
                 console.log('[v4.4] 2F SKU 데이터 저장 완료: SKU', twoFloorCodes.size, '개 / 총 재고', twoFloorStockSum);
@@ -4182,7 +4958,7 @@ window.cleanupDeprecatedPairs = async function() {
         // 4. 30일 cutoff 날짜 계산
         const now = new Date();
         const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        const cutoffStr = toDateStr(cutoff);
         
         // 5. 상품코드별로 그룹핑 (마지막배송일, 재고 합계 집계)
         const codeMap = {}; // { code: { lastDelivery, totalStock, locIds: [] } }
@@ -4383,10 +5159,10 @@ window.cleanupDeprecatedPairs = async function() {
         if (bc > 0) await batch.commit();
         
         // 11. DeprecatedLog 컬렉션에 상세 로그 저장 (날짜별 1문서)
-        const logDocId = new Date().toISOString().slice(0, 10) + '_' + Date.now();
+        const logDocId = toDateStr() + '_' + Date.now();
         await setDoc(doc(db, 'DeprecatedLog', logDocId), {
             cleanedAt: Date.now(),
-            cleanedAtDate: new Date().toISOString().slice(0, 10),
+            cleanedAtDate: toDateStr(),
             cutoffDate: cutoffStr,
             deprecatedCount: deprecatedSet.size,
             deletedPairCount,
@@ -4398,7 +5174,7 @@ window.cleanupDeprecatedPairs = async function() {
         await setDoc(doc(db, LOC_COLLECTION, 'INFO_CONFIG'), {
             orderAnalysisMeta: {
                 lastCleanupAt: Date.now(),
-                lastCleanupDate: new Date().toISOString().slice(0, 10),
+                lastCleanupDate: toDateStr(),
                 totalPairs: survivingPairs.length,
                 totalCodes: survivingStats.length
             }
@@ -4526,21 +5302,113 @@ window.addSingleLocationFromSetting = async () => {
 };
 
 window.deleteSelectedLocations = async () => {
-    const checkedBoxes = document.querySelectorAll('.loc-check:checked');
-    if (checkedBoxes.length === 0) return alert("삭제할 대상을 선택하세요.");
-    if (!confirm(`정말 삭제하시겠습니까?`)) return;
+    // 가상 스크롤이라 화면에 그려진 줄만 querySelectorAll 에 잡힌다 → 선택 집합을 쓴다
+    const checkedIds = [...VS.checkedIds];
+    if (checkedIds.length === 0) return alert("삭제할 대상을 선택하세요.");
+    if (!confirm(`선택한 ${checkedIds.length}개 로케이션을 정말 삭제하시겠습니까?`)) return;
     try {
         let batch = writeBatch(db); let batchCount = 0;
-        for (let i = 0; i < checkedBoxes.length; i++) {
-            const locId = checkedBoxes[i].value;
+        for (let i = 0; i < checkedIds.length; i++) {
+            const locId = checkedIds[i];
             const zoneDocId = getZoneDocId(locId);
             batch.set(doc(db, LOC_COLLECTION, zoneDocId), { [locId]: deleteField() }, { merge: true });
             batchCount++;
             if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
         }
         if (batchCount > 0) await batch.commit();
-        alert(`🗑️ 삭제 완료`); 
-    } catch (error) { console.error(error); }
+        VS.checkedIds.clear();
+        updateLocBulkBar();
+        alert(`🗑️ ${checkedIds.length}개 삭제 완료`);
+    } catch (error) { console.error(error); alert('삭제 실패: ' + (error && error.message ? error.message : error)); }
+};
+
+// ============================================================
+// ✏️ 선택한 로케이션의 동·위치·대분류 직접 수정
+//    (지금까지는 영구보전 데이터 업로드로만 바꿀 수 있었다. 몇 칸만 고칠 때 엑셀을 다시 만들지 않아도 되게.)
+//    자리 번호(로케이션 id)는 바꾸지 않는다 — 상품 지정·이력이 번호로 연결돼 있다.
+// ============================================================
+window.openLocBulkEdit = function () {
+    const ids = [...VS.checkedIds];
+    if (ids.length === 0) return alert('수정할 로케이션을 먼저 선택하세요.');
+    const modal = document.getElementById('loc-bulk-modal');
+    const target = document.getElementById('loc-bulk-target');
+    if (!modal || !target) return;
+
+    const byId = new Map(originalData.map(l => [l.id, l]));
+    const rows = ids.map(id => byId.get(id)).filter(Boolean);
+    const preview = rows.slice(0, 30).map(l =>
+        `${escAttr(l.id)} <span style="color:#90a4ae;">(동 ${escAttr(l.dong || '-')} · 위치 ${escAttr(l.pos || '-')} · ${escAttr(l.category || '피킹용')})</span>`
+    ).join('<br>');
+    target.innerHTML = `<b>${rows.length}개 로케이션</b>${rows.length > 30 ? ' <span style="color:#90a4ae;">(아래는 앞 30개)</span>' : ''}<br>${preview || '선택한 자리를 찾지 못했습니다.'}`;
+
+    // 값이 모두 같으면 그 값을 미리 채워 준다
+    const one = (key) => { const s = new Set(rows.map(l => (l[key] || '').toString().trim())); return s.size === 1 ? [...s][0] : ''; };
+    ['dong', 'pos', 'cat'].forEach(k => {
+        const ck = document.getElementById('loc-bulk-use-' + k);
+        if (ck) ck.checked = false;
+    });
+    const dongEl = document.getElementById('loc-bulk-dong');
+    const posEl = document.getElementById('loc-bulk-pos');
+    const catEl = document.getElementById('loc-bulk-cat');
+    if (dongEl) { dongEl.value = one('dong'); dongEl.disabled = true; }
+    if (posEl) { posEl.value = one('pos'); posEl.disabled = true; }
+    if (catEl) { catEl.value = one('category') === '기타' ? '기타' : '피킹용'; catEl.disabled = true; }
+
+    modal.style.display = 'flex';
+};
+
+window.applyLocBulkEdit = async function () {
+    // 실제로 있는 자리만 — 없는 id 에 저장하면 빈 껍데기 자리가 새로 생긴다
+    const exist = new Set(originalData.map(l => l.id));
+    const ids = [...VS.checkedIds].filter(id => exist.has(id));
+    if (ids.length === 0) return alert('수정할 로케이션을 먼저 선택하세요.');
+
+    const useDong = document.getElementById('loc-bulk-use-dong')?.checked;
+    const usePos = document.getElementById('loc-bulk-use-pos')?.checked;
+    const useCat = document.getElementById('loc-bulk-use-cat')?.checked;
+    if (!useDong && !usePos && !useCat) return alert('바꿀 항목을 체크해 주세요.');
+
+    const patch = {};
+    if (useDong) patch.dong = (document.getElementById('loc-bulk-dong')?.value || '').trim();
+    if (usePos) patch.pos = (document.getElementById('loc-bulk-pos')?.value || '').trim();
+    if (useCat) patch.category = (document.getElementById('loc-bulk-cat')?.value === '기타') ? '기타' : '피킹용';
+
+    const what = [useDong ? `동 → '${patch.dong || '(빈칸)'}'` : '', usePos ? `위치 → '${patch.pos || '(빈칸)'}'` : '', useCat ? `대분류 → '${patch.category}'` : '']
+        .filter(Boolean).join('\n');
+    const notes = [];
+    if ((useDong && !patch.dong) || (usePos && !patch.pos)) notes.push('※ 빈칸으로 두면 동·위치 필터에서 그 자리를 찾을 수 없습니다.');
+    if (useCat) {
+        const fixed = ids.filter(id => /^(비축|SAM)/i.test(id));
+        if (fixed.length) notes.push(`※ ${fixed.length}개(비축·SAM 번호)는 번호 규칙상 항상 '기타'로 취급됩니다 — 대분류를 바꿔도 화면 집계는 그대로입니다.`);
+    }
+    if (!confirm(`${ids.length}개 로케이션을 바꿉니다.\n\n${what}\n${notes.length ? '\n' + notes.join('\n') + '\n' : ''}\n진행할까요?`)) return;
+
+    window.showLoading(`✏️ ${ids.length}개 로케이션 수정 중...`);
+    try {
+        // 같은 구역 문서에 여러 자리가 몰리므로 문서 단위로 묶어 쓴다(문서당 쓰기 1회)
+        const byZone = new Map();
+        for (const locId of ids) {
+            const zoneDocId = getZoneDocId(locId);
+            if (!byZone.has(zoneDocId)) byZone.set(zoneDocId, {});
+            // 자리 하나의 해당 필드만 덮어쓴다(merge) — 상품코드·재고·이력은 건드리지 않는다
+            byZone.get(zoneDocId)[locId] = { ...patch, updatedAt: new Date() };
+        }
+        let batch = writeBatch(db); let batchCount = 0;
+        for (const [zoneDocId, payload] of byZone) {
+            batch.set(doc(db, LOC_COLLECTION, zoneDocId), payload, { merge: true });
+            batchCount++;
+            if (batchCount >= 400) { await batch.commit(); batch = writeBatch(db); batchCount = 0; }
+        }
+        if (batchCount > 0) await batch.commit();
+        window.hideLoading();
+        document.getElementById('loc-bulk-modal').style.display = 'none';
+        window.clearLocSelection();
+        alert(`✅ ${ids.length}개 로케이션을 수정했습니다.`);
+    } catch (e) {
+        window.hideLoading();
+        console.error('[location] 일괄 수정 실패:', e);
+        alert('수정 실패: ' + (e && e.message ? e.message : e));
+    }
 };
 
 window.renderIncomingQueue = function() {
@@ -4559,7 +5427,7 @@ window.renderIncomingQueue = function() {
     for(let code in incomingData) { list.push(incomingData[code]); }
 
     // ★ v3.53: 오늘 날짜 (YYYY-MM-DD)
-    const _today = new Date().toISOString().slice(0, 10);
+    const _today = toDateStr();
     list = list.filter(item => {
         if(filterSource !== 'all' && item.source !== filterSource) return false;
         if(existingLocMap[item['상품코드']]) return false; 
@@ -4571,6 +5439,27 @@ window.renderIncomingQueue = function() {
         
         return true;
     });
+
+    // 추천 자리 미리 배정 (일괄 적용과 동일 순서: 출고예상일 빠른 순 → 미입고수량 많은 순)
+    // → 표시 정렬과 무관하게 상품마다 서로 다른 자리, 그리고 실제 일괄적용 결과와 일치
+    const recLocMap = {};
+    if (typeof window.calcIncomingRecommend === 'function') {
+        const _usedRec = new Set();
+        const _canon = list.slice().sort((a, b) => {
+            const dA = (a['표시날짜'] || '9999-99-99').toString();
+            const dB = (b['표시날짜'] || '9999-99-99').toString();
+            if (dA !== dB) return dA.localeCompare(dB);
+            return Number(b['입고대기수량'] || 0) - Number(a['입고대기수량'] || 0);
+        });
+        for (const _it of _canon) {
+            const _c = _it['상품코드'];
+            if (!_c || recLocMap[_c]) continue;
+            try {
+                const _r = window.calcIncomingRecommend(_c, _usedRec);
+                if (_r && _r.loc && _r.loc.id) { _usedRec.add(_r.loc.id); recLocMap[_c] = _r; }
+            } catch (_e) { /* 카드는 그대로 표시 */ }
+        }
+    }
 
     list.sort((a, b) => {
         if(sortType === 'qty-desc') return Number(b['입고대기수량'] || 0) - Number(a['입고대기수량'] || 0);
@@ -4588,25 +5477,19 @@ window.renderIncomingQueue = function() {
         let src = item.source || '-';
         let date = src === '제작' ? (item['공장출고예상일'] || item['표시날짜'] || '-') : (item['검수창고도착일'] || item['표시날짜'] || '-');
         let option = item['옵션'] || '';
-        
-        // [4단계] 추천 자리 계산 (실패해도 카드는 그대로 표시)
+
+        // [4단계] 추천 자리 (미리 배정된 맵에서 조회 — 일괄 적용과 동일 결과)
         let recHtml = '';
-        try {
-            if (typeof window.calcIncomingRecommend === 'function') {
-                const rec = window.calcIncomingRecommend(code);
-                if (rec && rec.loc && rec.loc.id) {
-                    const caseLabel = rec.case === 'A' 
-                        ? `<span style="font-size:10px; color:#7b1fa2; font-weight:normal;">(페어 ${rec.partnerCount}개)</span>` 
-                        : `<span style="font-size:10px; color:#777; font-weight:normal;">(우선순위)</span>`;
-                    recHtml = `<div style="margin-top:6px; padding-top:5px; border-top:1px dashed #ddd; font-size:11px; color:#1976d2;">📍 추천: <b>${rec.loc.id}</b> ${caseLabel}</div>`;
-                }
-            }
-        } catch (e) {
-            console.warn('[renderIncomingQueue] 추천 계산 실패:', code, e);
+        const rec = recLocMap[code];
+        if (rec && rec.loc && rec.loc.id) {
+            const caseLabel = rec.case === 'A'
+                ? `<span style="font-size:10px; color:#7b1fa2; font-weight:normal;">(페어 ${rec.partnerCount}개)</span>`
+                : `<span style="font-size:10px; color:#777; font-weight:normal;">(우선순위)</span>`;
+            recHtml = `<div style="margin-top:6px; padding-top:5px; border-top:1px dashed #ddd; font-size:11px; color:#1976d2;">📍 추천: <b>${rec.loc.id}</b> ${caseLabel}</div>`;
         }
         
         html += `
-            <div class="incoming-item" onclick="activatePreAssignMode('${code}', '${name.replace(/'/g, "\\'")}', '${qty}', '${option.replace(/'/g, "\\'")}')">
+            <div class="incoming-item" onclick="activatePreAssignMode('${jsArg(code)}', '${jsArg(name)}', '${jsArg(qty)}', '${jsArg(option)}')">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                     <div style="font-weight:bold; color:var(--primary); font-size:14px;">${code}</div>
                     <span style="font-size:10px; background:${src==='제작'?'#e3f2fd':'#fbe9e7'}; color:${src==='제작'?'#1976d2':'#d84315'}; padding:2px 5px; border-radius:3px; font-weight:bold;">${src}</span>
@@ -5095,8 +5978,14 @@ window.renderMap = function() {
     // ★구역은 동 없이 단독, 일반구역은 구역+동 조합으로 탭 구성
     svCorridorList = [];
 
+    // ★ 기타 로케이션(비축·샘플 등, 대분류='기타')은 첫 글자 구역에서 분리 → 전용 '기타' 탭으로 모음
+    //   (예: '비축-05'가 첫 글자 '비'로 '비구역' 탭에 잘못 묶이던 문제 해결)
+    // ★ SAM 로케이션은 첫 글자가 'S'라 S구역으로 묶이던 것을 별도 존이 아닌 '기타' 탭으로 편입
+    const isSamLoc = (d) => /^SAM/i.test((d.id || '').trim());
+    const isEtcLoc = (d) => (d.category || '피킹용') === '기타' || isSamLoc(d);
+
     const zoneSet = new Set();
-    originalData.forEach(d => zoneSet.add(d.id.charAt(0).toUpperCase()));
+    originalData.forEach(d => { if (!isEtcLoc(d)) zoneSet.add(d.id.charAt(0).toUpperCase()); });
     const zones = [...zoneSet].sort((a, b) => {
         if (a === '★') return -1;
         if (b === '★') return 1;
@@ -5106,6 +5995,11 @@ window.renderMap = function() {
     zones.forEach(zone => {
         svCorridorList.push({ zone, label: zone === '★' ? '★★ 구역' : `${zone}구역` });
     });
+
+    // 기타 로케이션이 하나라도 있으면 맨 뒤에 전용 '기타' 탭 추가
+    if (originalData.some(isEtcLoc)) {
+        svCorridorList.push({ zone: '__ETC__', label: '📦 기타' });
+    }
 
     // 탭 렌더링
     tabContainer.innerHTML = '';
@@ -5232,7 +6126,7 @@ function renderCorridor(idx) {
                     onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
                     <div style="width:${cellSize}px;height:${cellSize + 6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
                         onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'"
-                        onclick="window.copyLocationToClipboard(event, '${loc.id}')">
+                        onclick="window.copyLocationToClipboard(event, '${jsArg(loc.id)}')">
                         ${cellInner(loc)}
                     </div>${tooltipHtml(loc)}</div>`;
             });
@@ -5240,6 +6134,40 @@ function renderCorridor(idx) {
         });
         html += '</div>';
         return html;
+    }
+
+    // ★ 기타 로케이션 판별 + 동/위치/번호 없는 로케이션용 단순 격자 렌더러(★구역 starRow와 동일 스타일)
+    const isSamLoc = (d) => /^SAM/i.test((d.id || '').trim());
+    const isEtc = (d) => (d.category || '피킹용') === '기타' || isSamLoc(d);
+    // 기타 탭 내부 세부 분류: 비축 / SAM / 그 외(알파벳-숫자-L,R 등 일반 코드 형태)
+    const isBichukLoc = (d) => /^비축/.test((d.id || '').trim());
+    function classifyEtc(d) {
+        if (isSamLoc(d)) return 'sam';
+        if (isBichukLoc(d)) return 'bichuk';
+        return 'general';
+    }
+    function simpleGridCells(locs, cs) {
+        const idFontSize = Math.max(7, Math.floor(cs / 8));
+        const nameFontSize = Math.max(10, Math.floor(cs / 5));
+        const maxChars = Math.max(4, Math.floor((cs - 6) / (nameFontSize * 0.55)));
+        let h = '';
+        locs.forEach(loc => {
+            if (!matchesLegendFilter(loc)) return; // 범례 필터 미매칭 셀 숨김
+            const tid = 'tip-' + (loc.id || '').replace(/[^a-zA-Z0-9]/g, '_');
+            const nameText = hasContent(loc) ? (loc.name || loc.code || '') : '';
+            const nameColor = hasContent(loc) ? '#1b5e20' : '#999';
+            const displayName = nameText.substring(0, maxChars) || '빈칸';
+            h += `<div style="position:relative;"
+                onmouseenter="(function(e){var t=document.getElementById('${tid}');if(!t)return;t.style.display='block';var r=e.currentTarget.getBoundingClientRect();var tw=t.offsetWidth||160;var th=t.offsetHeight||100;var x=r.left+r.width/2-tw/2;var y=r.top-th-8;if(y<8)y=r.bottom+8;if(x+tw>window.innerWidth-8)x=window.innerWidth-tw-8;if(x<8)x=8;t.style.left=x+'px';t.style.top=y+'px';})(event)"
+                onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
+                <div style="width:${cs}px;height:${cs+6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
+                    onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'"
+                    onclick="window.copyLocationToClipboard(event, '${jsArg(loc.id)}')">
+                    <div style="font-size:${idFontSize}px;color:#bbb;line-height:1.1;">${loc.id}</div>
+                    <div style="font-size:${nameFontSize}px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cs-4}px;text-align:center;line-height:1.3;">${displayName}</div>
+                </div>${tooltipHtml(loc)}</div>`;
+        });
+        return h;
     }
 
     let bodyHtml = '';
@@ -5253,7 +6181,7 @@ function renderCorridor(idx) {
         const isStarZone = item.zone === '★';
 
         if (isStarZone) {
-            const allLocs = originalData.filter(d => d.id.charAt(0) === '★')
+            const allLocs = originalData.filter(d => d.id.charAt(0) === '★' && !isEtc(d))
                 .sort((a, b) => parseInt((a.id.match(/\d+$/) || [0])[0]) - parseInt((b.id.match(/\d+$/) || [0])[0]));
             // 필터 ON 시 ★구역에 매칭 슬롯 0개면 통째로 건너뜀
             if (_mapLegendFilter && !allLocs.some(l => matchesLegendFilter(l))) return;
@@ -5281,7 +6209,7 @@ function renderCorridor(idx) {
                     onmouseleave="(function(){var t=document.getElementById('${tid}');if(t)t.style.display='none';})()">
                     <div style="width:${cellSize}px;height:${cellSize+6}px;${cellStyle(loc)}border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:3px;transition:transform 0.1s;"
                         onmouseenter="this.style.transform='scale(1.06)'" onmouseleave="this.style.transform='scale(1)'"
-                        onclick="window.copyLocationToClipboard(event, '${loc.id}')">
+                        onclick="window.copyLocationToClipboard(event, '${jsArg(loc.id)}')">
                         <div style="font-size:${idFontSize}px;color:#bbb;line-height:1.1;">${loc.id}</div>
                         <div style="font-size:${nameFontSize}px;font-weight:bold;color:${nameColor};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:${cellSize-4}px;text-align:center;line-height:1.3;">${displayName}</div>
                     </div>${tooltipHtml(loc)}</div>`;
@@ -5301,21 +6229,41 @@ function renderCorridor(idx) {
                 </div>`}
                 ${starRow(botLocs)}
             </div>`;
-    } else {
-        // 일반구역: 동별로 섹션 나눠서 표시
-        const dongSet = new Set();
-        originalData.forEach(d => {
-            if (d.id.charAt(0).toUpperCase() === item.zone && d.dong) {
-                dongSet.add((d.dong || '').toString().trim());
+    } else if (item.zone === '__ETC__') {
+        // 기타 구역: 대분류='기타'(+SAM) 로케이션을 비축/SAM/그 외로 나눠서 표시 (동/위치 없음)
+        const etcLocs = originalData.filter(isEtc)
+            .sort((a, b) => (a.id || '').localeCompare(b.id || '', undefined, {numeric: true}));
+        const etcGroups = [
+            { key: 'bichuk', label: '📦 비축', bg: '#efebe9', color: '#8d6e63', border: '#d7ccc8' },
+            { key: 'general', label: '🧩 기타 (알파벳-숫자-L/R 등)', bg: '#eef2f7', color: '#455a64', border: '#cfd8dc' },
+            { key: 'sam', label: '🏷️ SAM', bg: '#fff3e0', color: '#e65100', border: '#ffe0b2' }
+        ];
+        etcGroups.forEach(g => {
+            const groupLocs = etcLocs.filter(d => classifyEtc(d) === g.key);
+            if (!groupLocs.length) return;
+            if (_mapLegendFilter && !groupLocs.some(l => matchesLegendFilter(l))) return;
+            const cells = simpleGridCells(groupLocs, cellSize);
+            if (cells) {
+                bodyHtml += `
+                    <div style="border:1px solid #ddd;border-radius:10px;overflow:hidden;margin-bottom:12px;">
+                        <div style="background:${g.bg};padding:6px 16px;font-size:13px;font-weight:bold;color:${g.color};border-bottom:1px solid ${g.border};">${g.label}</div>
+                        <div style="padding:8px;display:flex;flex-wrap:wrap;gap:3px;">${cells}</div>
+                    </div>`;
             }
+        });
+    } else {
+        // 일반구역: 동별로 섹션 나눠서 표시 (기타 로케이션은 전용 탭으로 분리)
+        const zoneLocs = originalData.filter(d => d.id.charAt(0).toUpperCase() === item.zone && !isEtc(d));
+
+        const dongSet = new Set();
+        zoneLocs.forEach(d => {
+            const dongVal = (d.dong || '').toString().trim();
+            if (dongVal) dongSet.add(dongVal);
         });
         const dongs = [...dongSet].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
 
         dongs.forEach(dong => {
-            const allLocs = originalData.filter(d =>
-                d.id.charAt(0).toUpperCase() === item.zone &&
-                (d.dong || '').toString().trim() === dong
-            );
+            const allLocs = zoneLocs.filter(d => (d.dong || '').toString().trim() === dong);
             // 필터 ON 시 이 동에 매칭 슬롯 0개면 동 통째로 건너뜀
             if (_mapLegendFilter && !allLocs.some(l => matchesLegendFilter(l))) return;
 
@@ -5363,6 +6311,27 @@ function renderCorridor(idx) {
                     ${buildRackSection(rightLocs, numsByPos, posLabels, 'right', cellSize)}
                 </div>`;
         });
+
+        // ★ 동/위치/끝번호가 없어 격자에 배치되지 못한 로케이션 → '미배치' 섹션 (도면 누락 방지)
+        const isPlaced = (d) => {
+            const dongVal = (d.dong || '').toString().trim();
+            const posVal = (d.pos || '').toString().trim();
+            return !!(dongVal && posVal && /\d+$/.test(d.id || ''));
+        };
+        const orphanLocs = zoneLocs.filter(d => !isPlaced(d))
+            .sort((a, b) => (a.id || '').localeCompare(b.id || '', undefined, {numeric: true}));
+        if (orphanLocs.length > 0 && !(_mapLegendFilter && !orphanLocs.some(l => matchesLegendFilter(l)))) {
+            const cells = simpleGridCells(orphanLocs, cellSize);
+            if (cells) {
+                bodyHtml += `
+                    <div style="border:1px solid #ffcc80;border-radius:10px;overflow:hidden;margin-bottom:12px;">
+                        <div style="background:#fff3e0;padding:5px 16px;border-bottom:1px solid #ffe0b2;">
+                            <div style="font-size:13px;font-weight:bold;color:#e65100;">⚠️ ${item.zone}구역 · 미배치 (동/위치 미지정)</div>
+                        </div>
+                        <div style="padding:8px;display:flex;flex-wrap:wrap;gap:3px;">${cells}</div>
+                    </div>`;
+            }
+        }
     }
     }); // itemsToRender.forEach 닫기
 
@@ -5576,39 +6545,33 @@ window.showSingleRecommendation = function() {
             let itemDataList = [];
             
             allCodes.forEach(code => {
-                let zItem = zikjinData[code] || {};
-                let wItem = weeklyData[code] || {};
-                let locItem = originalData.find(d => d.code === code);
-                let name = (locItem && locItem.name) || zItem['상품명'] || wItem['상품명'] || '알 수 없음';
-                let zQty = Number(zItem['수량'] || 0);
-                let wQty = Number(wItem['기간배송수량'] || wItem['기간발주수량'] || 0);
-                let trendVal = 0;
-                let dates = Object.keys(wItem).filter(k => /^20\d{6}$/.test(k)).sort();
-                if (dates.length >= 6) {
-                    let recent3 = dates.slice(-3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
-                    let prev3 = dates.slice(-6, -3).reduce((sum, d) => sum + Number(wItem[d] || 0), 0);
-                    trendVal = Math.max(0, recent3 - prev3);
-                }
-                if (zQty > maxZQty) maxZQty = zQty;
-                if (wQty > maxWQty) maxWQty = wQty;
-                if (trendVal > maxTrend) maxTrend = trendVal;
-                itemDataList.push({ code, name, zQty, wQty, trendVal });
+                const dm = _getDemandForCode(code); // ZG&AB 출고(직진+에이블리) / 주차별 / 상승세
+                if (dm.zgQty > maxZQty) maxZQty = dm.zgQty; // maxZQty = ZG&AB 출고 최대
+                if (dm.wQty > maxWQty) maxWQty = dm.wQty;
+                if (dm.trendVal > maxTrend) maxTrend = dm.trendVal;
+                itemDataList.push({ code, name: dm.name, zgQty: dm.zgQty, wQty: dm.wQty, trendVal: dm.trendVal });
             });
-            
+
             const scoredItems = [];
             itemDataList.forEach(item => {
-                let zScore = maxZQty > 0 ? (item.zQty / maxZQty) * 100 : 0;
+                let zScore = maxZQty > 0 ? (item.zgQty / maxZQty) * 100 : 0;
                 let wScore = maxWQty > 0 ? (item.wQty / maxWQty) * 100 : 0;
                 let tScore = maxTrend > 0 ? (item.trendVal / maxTrend) * 100 : 0;
                 let finalScore = (zScore * (window.recommendRatios.zikjin / 100)) + (wScore * (window.recommendRatios.weekly / 100)) + (tScore * (window.recommendRatios.trend / 100));
                 
                 if (finalScore > 0) {
-                    const currentLocs = originalData.filter(d => d.code === item.code).map(d => d.id);
+                    // ★ 피킹용이 메인 — 피킹용에 있으면 기타(T-01 등) 로케이션은 기준에서 제외
+                    const currentLocs = getBaseLocsForCode(item.code).map(d => d.id);
                     scoredItems.push({
                         code: item.code,
                         name: item.name,
                         score: finalScore,
-                        currentLocs: currentLocs
+                        currentLocs: currentLocs,
+                        // v3.94 결과 양식 복원: 점수 내역(툴팁용)
+                        zContrib: zScore * (window.recommendRatios.zikjin / 100),
+                        wContrib: wScore * (window.recommendRatios.weekly / 100),
+                        tContrib: tScore * (window.recommendRatios.trend / 100),
+                        zgQty: item.zgQty, wQty: item.wQty, trendVal: item.trendVal
                     });
                 }
             });
@@ -5618,6 +6581,8 @@ window.showSingleRecommendation = function() {
             let emptyLocs = originalData.filter(d => {
                 const hasContent = (d.code && d.code !== d.id && d.code.trim() !== "") || (d.name && d.name.trim() !== "");
                 if (hasContent || d.preAssigned) return false;
+                // ★ 기타(비축·샘플·SAM)는 실제 피킹 랙이 아니므로 이동 추천 대상에서 제외
+                if (isEtcLocObj(d)) return false;
                 const excludeCombos = window.recommendPriorities.excludeCombos || [];
                 if (excludeCombos.length > 0) {
                     const prefix = (d.id || '').charAt(0).toUpperCase();
@@ -5710,7 +6675,7 @@ window.showSingleRecommendation = function() {
             };
             
             const getOptionByCode = (code) => {
-                const locData = originalData.find(d => d.code === code);
+                const locData = getBaseLocsForCode(code).find(d => d.option) || getBaseLocsForCode(code)[0];
                 return (locData && locData.option) ? locData.option : '';
             };
             
@@ -5749,23 +6714,33 @@ window.showSingleRecommendation = function() {
                 const option = getOptionByCode(item.code);
                 const rowBg = matchCount % 2 === 0 ? '#ffffff' : '#fafafa';
                 
+                // v3.94 결과 양식: 이동수량(정상재고-2층재고) + 방향 뱃지 + 점수 툴팁
+                let _ts = 0, _ts2 = 0;
+                // 비축재고는 칸마다 같은 값이 반복 저장돼 있다 → 합이 아니라 대표값
+                originalData.forEach(d => { if (d.code === item.code) { _ts += Number(d.stock || 0); _ts2 = Math.max(_ts2, Number(d.stock2f || 0)); } });
+                const moveQty = _ts - _ts2;
+                const moveQtyDisplay = moveQty > 0
+                    ? `<span style="color:#e65100; font-weight:900; font-size:13px;">${moveQty.toLocaleString()}</span><span style="font-size:9px; color:#888; margin-left:1px;">개</span>`
+                    : `<span style="color:#bbb; font-size:11px;">-</span>`;
+                const _badge = (bg, fg, label) => `<span style="display:inline-block; background:${bg}; color:${fg}; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:bold; vertical-align:middle;">${label}</span>`;
+                const _slot = getEmptyLocInfo(foundSlot);
+                let moveBadge;
+                if (!currentLocId) moveBadge = _badge('#e3f2fd', '#1565c0', '✨신규');
+                else if (_slot.dongRank < currentInfo.dongRank || (_slot.dongRank === currentInfo.dongRank && _slot.posRank < currentInfo.posRank)) moveBadge = _badge('#ffebee', '#b71c1c', '🔺전진');
+                else moveBadge = _badge('#f5f5f5', '#616161', '➖수평');
+                const scoreTip = `<span class="info-tip" data-tip-key="sr-score-${item.code}" style="margin-left:2px;">i<span class="info-tip-content">📊 <b>${item.code}</b> 점수 내역<br>━━━━━━━━━━━━━<br>• ZG&AB 출고:${(item.zContrib||0).toFixed(1)}점 <span style="color:#90a4ae;">(출고 ${Number(item.zgQty||0).toLocaleString()})</span><br>• 주차별:${(item.wContrib||0).toFixed(1)}점 <span style="color:#90a4ae;">(원수량 ${Number(item.wQty||0).toLocaleString()})</span><br>• 상승세: ${(item.tContrib||0).toFixed(1)}점 <span style="color:#90a4ae;">(증가분 ${Number(item.trendVal||0).toLocaleString()})</span><br>━━━━━━━━━━━━━<br><b>합계: ${item.score.toFixed(1)}점</b><br><br>💡 반영 비율: ZG&AB출고 ${window.recommendRatios.zikjin}% / 주차별 ${window.recommendRatios.weekly}% / 상승세 ${window.recommendRatios.trend}%</span></span>`;
+
                 html += `
-                    <tr style="background:${rowBg};">
-                        <td style="text-align:center; color:var(--primary); font-weight:900; font-size:14px; padding:12px 6px;">
-                            ${matchCount + 1}위
-                        </td>
-                        <td style="padding:10px 8px; font-size:12px;">
-                            <div style="font-weight:bold; color:#1976d2;">${item.code}</div>
-                            <div style="color:#333; margin-top:2px;">${item.name}</div>
-                            <div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${option || '-'}</div>
-                        </td>
-                        <td style="text-align:center; padding:10px 6px;">
-                            <div style="font-weight:bold; color:#555; font-size:13px;">${currentInfo.id}</div>
-                            <div style="font-size:10px; color:#777; margin-top:2px;">${currentInfo.dong}동</div>
-                        </td>
-                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
-                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${foundSlot.id}</div>
-                            <div style="font-size:10px; color:#555; margin-top:2px;">${(foundSlot.dong || '').toString().trim()}동</div>
+                    <tr style="background:${rowBg}; line-height:1.3;">
+                        <td style="color:var(--primary); font-weight:900; font-size:12px; padding:5px 8px; white-space:nowrap;">${matchCount + 1}위 <span style="font-size:10px; color:#e65100; font-weight:bold;">(${item.score.toFixed(1)}${scoreTip})</span></td>
+                        <td style="font-weight:bold; color:#1a237e; font-size:11px; padding:5px 8px; white-space:nowrap;">${item.code}</td>
+                        <td style="text-align:left; font-size:12px; font-weight:600; color:#212121; padding:5px 10px;">${item.name}${option ? `<span style="color:#90a4ae; font-size:10px; margin-left:6px;">(${option})</span>` : ''}</td>
+                        <td style="text-align:center; padding:5px 6px; white-space:nowrap;">${moveQtyDisplay}</td>
+                        <td style="color:#555; font-size:11px; padding:5px 8px; white-space:nowrap;">${currentInfo.id} <span style="color:#999;">${currentInfo.dong}동</span></td>
+                        <td style="background:#f1f8e9; padding:5px 10px; text-align:center; white-space:nowrap;">
+                            <span style="color:#1b5e20; font-weight:900; font-size:13px;">${foundSlot.id}</span>
+                            <span style="font-size:10px; color:#777; margin-left:4px;">${(foundSlot.dong || '').toString().trim()}동·${(foundSlot.pos || '').toString().trim()}위치</span>
+                            <span style="margin-left:6px;">${moveBadge}</span>
                         </td>
                     </tr>
                 `;
@@ -5802,7 +6777,7 @@ window.showSingleRecommendation = function() {
             console.log('[v4.1] 단독 추천 종료: 성공', matchCount, '개 / 건너뜀(현재자리없음)', skipNoCurrentLoc, '개 / 건너뜀(이미최적)', skipNoBetterSlot, '개 / 엑셀 데이터', window.currentSingleRecommendations.length, '개');
             
             if (matchCount === 0) {
-                html += '<tr><td colspan="4" style="padding:40px; text-align:center; color:#666;">표시할 추천이 없습니다.<br>(모든 상품이 이미 최적 자리에 있거나, 더 좋은 빈 자리가 없습니다)</td></tr>';
+                html += '<tr><td colspan="6" style="padding:40px; text-align:center; color:#666;">표시할 추천이 없습니다.<br>(모든 상품이 이미 최적 자리에 있거나, 더 좋은 빈 자리가 없습니다)</td></tr>';
             }
             
             tbody.innerHTML = html;
@@ -6021,28 +6996,26 @@ window.showPairRecommendation = function() {
                 
                 html += `
                     <tr style="background:${rowBg};">
-                        <td style="text-align:center; color:var(--primary); font-weight:900; font-size:14px; padding:12px 6px;">
-                            ${i + 1}위
+                        <td style="text-align:center; color:var(--primary); font-weight:900; font-size:13px; padding:5px 6px;">${i + 1}</td>
+                        <td style="padding:5px 8px; font-size:12px; line-height:1.35;">
+                            <span style="font-weight:bold; color:#1976d2;">${itemA.code}</span>
+                            <span style="color:#333;"> · ${itemA.name}</span>
+                            ${itemA.option ? `<span style="color:#999; font-size:11px;"> (${itemA.option})</span>` : ''}
+                            <span style="color:#777; font-size:11px;"> · 현재 ${aCurrentLoc}</span>
                         </td>
-                        <td style="padding:10px 8px; font-size:12px;">
-                            <div style="font-weight:bold; color:#1976d2;">${itemA.code}</div>
-                            <div style="color:#333; margin-top:2px;">${itemA.name}</div>
-                            <div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${itemA.option || '-'}</div>
-                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${aCurrentLoc}</div>
+                        <td style="text-align:center; padding:5px 6px; background:#e8f5e9; white-space:nowrap;">
+                            <span style="font-weight:bold; color:#2e7d32; font-size:12px;">${slotA_id}</span>
+                            <span style="font-size:10px; color:#777;"> ${slotA_dong}동</span>
                         </td>
-                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
-                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slotA_id}</div>
-                            <div style="font-size:10px; color:#555; margin-top:2px;">${slotA_dong}동</div>
+                        <td style="padding:5px 8px; font-size:12px; line-height:1.35;">
+                            <span style="font-weight:bold; color:#1976d2;">${itemB.code}</span>
+                            <span style="color:#333;"> · ${itemB.name}</span>
+                            ${itemB.option ? `<span style="color:#999; font-size:11px;"> (${itemB.option})</span>` : ''}
+                            <span style="color:#777; font-size:11px;"> · 현재 ${bCurrentLoc}</span>
                         </td>
-                        <td style="padding:10px 8px; font-size:12px;">
-                            <div style="font-weight:bold; color:#1976d2;">${itemB.code}</div>
-                            <div style="color:#333; margin-top:2px;">${itemB.name}</div>
-                            <div style="color:#888; font-size:11px; margin-top:2px;">옵션: ${itemB.option || '-'}</div>
-                            <div style="color:#777; font-size:11px; margin-top:3px;">현재: ${bCurrentLoc}</div>
-                        </td>
-                        <td style="text-align:center; padding:10px 6px; background:#e8f5e9;">
-                            <div style="font-weight:bold; color:#2e7d32; font-size:13px;">${slotB_id}</div>
-                            <div style="font-size:10px; color:#555; margin-top:2px;">${slotB_dong}동</div>
+                        <td style="text-align:center; padding:5px 6px; background:#e8f5e9; white-space:nowrap;">
+                            <span style="font-weight:bold; color:#2e7d32; font-size:12px;">${slotB_id}</span>
+                            <span style="font-size:10px; color:#777;"> ${slotB_dong}동</span>
                         </td>
                     </tr>
                 `;
@@ -6094,12 +7067,7 @@ window.showPairRecommendation = function() {
 //   5. 종합 대시보드 탭: 사용률 팝업 내용 + SKU + 재고회전율 통합
 (function v44Module() {
     // ===== 유틸: 오늘 날짜 문자열 (메인 시스템과 동일 KST 보정 방식) =====
-    window._v44_getTodayDateString = function() {
-        const now = new Date();
-        const offset = now.getTimezoneOffset() * 60000;
-        const localDate = new Date(now - offset);
-        return localDate.toISOString().slice(0, 10);
-    };
+    window._v44_getTodayDateString = () => toDateStr();
     
     // ===== 현재 재고 집계 =====
     // 3층은 originalData에서 stock 합산, 2F는 캐시된 데이터에서 가져옴
@@ -6483,8 +7451,961 @@ window.showPairRecommendation = function() {
             window._v44_setupHistoryListener();
             
             console.log('[v4.4] 초기화 완료');
+            // 재고 회전율은 스냅샷 로드 후에 계산 가능 → 로케이션 대시보드가 떠 있으면 즉시 갱신
+            const __locdashEl = document.getElementById('view-locdash');
+            if (__locdashEl && __locdashEl.style.display !== 'none' && typeof window.renderLocationDashboard === 'function') {
+                window.renderLocationDashboard();
+            }
         } catch (e) {
             console.warn('[v4.4] 초기화 오류:', e);
         }
     };
 })();
+
+// ════════════════════════════════════════════════════════════
+// 📍 [병합] 로케이션 현황 대시보드 (배포본 v3.94에서 이식)
+//    별도 탭 'view-locdash'에서 렌더. v44 종합 대시보드와 독립.
+// ════════════════════════════════════════════════════════════
+
+// ============================================================
+// 📊 로케이션 현황 대시보드
+// ============================================================
+
+// 피킹용이 아닌 자리(대분류 '기타' = 비축·SAM·A-1-R 형식 등) 판정 — 대시보드 여러 곳에서 같은 기준을 쓴다.
+window.__isEtcLoc = isEtcLocation;
+
+// 마지막출고.배송일(배송일/출고일 중 최신) + 직진/주차별 출고 활동을 함께 고려한 분류 헬퍼.
+// 일반배송 기록만 보면 직진배송으로 나간 물건이 데드로 잘못 잡힘 → 두 데이터를 합산.
+function __dashInferDelivery(code, locs) {
+    let lastDelivery = '';
+    let hasStock = false;
+    let hasRecentActivity = false;
+
+    locs.forEach(loc => {
+        if (Number(loc.stock || 0) > 0) hasStock = true;
+        const val = __getLastMoveDate(loc.rawData || {});
+        if (val && val > lastDelivery) lastDelivery = val;
+    });
+
+    // weeklyData YYYYMMDD 키 중 출고수량 > 0 인 가장 최근 날짜를 후보로
+    if (code && weeklyData && weeklyData[code]) {
+        let maxKey = '';
+        for (const wk of Object.keys(weeklyData[code])) {
+            if (/^20\d{6}$/.test(wk) && Number(weeklyData[code][wk] || 0) > 0) {
+                if (wk > maxKey) maxKey = wk;
+            }
+        }
+        if (maxKey) {
+            const ymd = maxKey.slice(0, 4) + '-' + maxKey.slice(4, 6) + '-' + maxKey.slice(6, 8);
+            if (ymd > lastDelivery) lastDelivery = ymd;
+        }
+    }
+
+    // 직진배송 데이터 — 정확한 날짜는 모르지만 활동 사실은 확인 가능
+    if (code && zikjinData && zikjinData[code] && Number(zikjinData[code]['수량'] || 0) > 0) {
+        hasRecentActivity = true;
+    }
+
+    return { lastDelivery, hasStock, hasRecentActivity };
+}
+
+// 구역·동별 데드스톡 표의 정렬 상태 (key: dead|zone|dong|used|w1|m1|m3|m6plus|none, dir: 'asc'|'desc')
+let __dashZdSort = { key: 'dead', dir: 'desc' };
+
+// 구역 우선순위 (낮을수록 먼저). ★ → A → B → … → Z 외 나머지는 99.
+function __zoneRank(z) {
+    if (!z) return 99;
+    if (z === '★') return -1;
+    const code = z.charCodeAt(0);
+    if (code >= 65 && code <= 90) return code - 65; // A=0, B=1, ...
+    return 99;
+}
+// 동 정렬용 — 숫자 추출 후 비교. '미지정'은 항상 맨 뒤.
+function __dongKey(d) {
+    if (!d || d === '미지정') return Number.POSITIVE_INFINITY;
+    const m = String(d).match(/-?\d+(\.\d+)?/);
+    if (m) return Number(m[0]);
+    return Number.POSITIVE_INFINITY - 1; // 숫자 없으면 거의 끝
+}
+
+function __dashSortRows(rows) {
+    const { key, dir } = __dashZdSort;
+    const mul = dir === 'asc' ? 1 : -1;
+    const cmpStr = (a, b) => String(a).localeCompare(String(b)) * mul;
+    const cmpNum = (a, b) => (a - b) * mul;
+    rows.sort((a, b) => {
+        switch (key) {
+            case 'zone': {
+                const z = __zoneRank(a.zone) - __zoneRank(b.zone);
+                if (z !== 0) return z * mul;
+                // 동일 구역 내 동 보조 정렬은 항상 오름차순
+                const d = __dongKey(a.dong) - __dongKey(b.dong);
+                if (d !== 0) return d;
+                return cmpStr(a.dong, b.dong);
+            }
+            case 'dong': {
+                const d = __dongKey(a.dong) - __dongKey(b.dong);
+                if (d !== 0) return d * mul;
+                // 동일 동 내 구역 보조 정렬은 항상 오름차순
+                const z = __zoneRank(a.zone) - __zoneRank(b.zone);
+                if (z !== 0) return z;
+                return cmpStr(a.zone, b.zone);
+            }
+            case 'used':   return cmpNum(a.usedCount, b.usedCount);
+            case 'w1':     return cmpNum(a.w1, b.w1);
+            case 'm1':     return cmpNum(a.m1, b.m1);
+            case 'm3':     return cmpNum(a.m3, b.m3);
+            case 'm6plus': return cmpNum(a.m6plus, b.m6plus);
+            case 'y1plus': return cmpNum(a.y1plus, b.y1plus);
+            case 'none':   return cmpNum(a.none, b.none);
+            case 'dead':
+            default:       return cmpNum(a.deadRate, b.deadRate) || cmpNum(a.m6plus, b.m6plus);
+        }
+    });
+}
+
+// 헤더 클릭 핸들러 — 같은 키면 dir 토글, 다른 키면 그 키 + desc(zone/dong은 asc).
+window.__dashZdSortBy = function (key) {
+    if (__dashZdSort.key === key) {
+        __dashZdSort.dir = __dashZdSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        __dashZdSort.key = key;
+        // 이름 정렬은 asc, 숫자 정렬은 desc 기본
+        __dashZdSort.dir = (key === 'zone' || key === 'dong') ? 'asc' : 'desc';
+    }
+    if (typeof window.renderLocationDashboard === 'function') window.renderLocationDashboard();
+};
+
+// 헤더 화살표 HTML 생성
+function __dashSortArrow(key) {
+    if (__dashZdSort.key !== key) return '<span style="color:#cfd8dc; font-size:10px;">↕</span>';
+    return __dashZdSort.dir === 'asc'
+        ? '<span style="color:var(--primary); font-size:11px;">▲</span>'
+        : '<span style="color:var(--primary); font-size:11px;">▼</span>';
+}
+
+// 분류 헬퍼: 마지막배송일 + 직진 활동 여부 → bucket 키 반환.
+// 직진 활동이 있으면 3개월/6개월+/기록없음을 1개월로 끌어올려 데드에서 제외.
+function __dashClassifyDelivery(info, todayMs) {
+    const MS_DAY = 24 * 60 * 60 * 1000;
+    if (!info.lastDelivery) return info.hasRecentActivity ? '1개월' : '기록없음';
+    const d = new Date(info.lastDelivery);
+    if (isNaN(d.getTime())) return info.hasRecentActivity ? '1개월' : '기록없음';
+    const diff = (todayMs - d.getTime()) / MS_DAY;
+    if (diff <= 7) return '1주';
+    if (diff <= 31) return '1개월';
+    if (diff <= 93) return info.hasRecentActivity ? '1개월' : '3개월';
+    if (diff <= 365) return info.hasRecentActivity ? '1개월' : '6개월+';
+    return info.hasRecentActivity ? '1개월' : '1년+';
+}
+
+window.renderLocationDashboard = function () {
+    if (!originalData || originalData.length === 0) {
+        const kpiRow = document.getElementById('dash-kpi-row');
+        if (kpiRow) kpiRow.innerHTML = '<div class="dash-kpi-card" style="grid-column:1/-1;"><div class="kpi-body"><div class="kpi-title">데이터 없음</div><div class="kpi-sub">먼저 일일 최신화 엑셀을 업로드해주세요.</div></div></div>';
+        return;
+    }
+
+    // 3F만 (K로 시작하는 2F 제외) — SKU/데드스톡 집계용 (기타 위치 포함) — 사용률 팝업 로직과 동일
+    const locs3F = originalData.filter(d => (d.id || '').charAt(0).toUpperCase() !== 'K');
+    // ★ 3F 위치를 3분류로 구분: 피킹용 / 기타용(비축+A-1-R 형식) / SAM
+    const _isSam = (d) => /^SAM/i.test(String(d.id || '').trim());
+    const _isEtcAll = (d) => window.__isEtcLoc(d);
+    // 랙 사용률/총 칸수 통계용 — 피킹용(기타·비축·SAM 제외)만
+    const locsUsage = locs3F.filter(d => !_isEtcAll(d));
+    const etcLocs = locs3F.filter(d => _isEtcAll(d) && !_isSam(d)); // 기타용 = 비축 + A-1-R 형식(대분류 '기타')
+    const samLocs = locs3F.filter(d => _isSam(d));                  // SAM 전용 자리
+    const total = locsUsage.length;
+
+    const isUsed = (loc) =>
+        (loc.code && String(loc.code).trim() !== '' && loc.code !== loc.id) ||
+        (loc.name && String(loc.name).trim() !== '');
+
+    // ---- 집계: 랙 사용률(칸 수 기준) — '기타' 제외 ----
+    const zoneStats = {};                  // 구역 → {total, used}
+    let used = 0, preAssigned = 0, todayReserved = 0;
+
+    locsUsage.forEach(loc => {
+        const u = isUsed(loc);
+        if (u) used++;
+        if (loc.codeTag === '선지정') preAssigned++;
+        if (loc.codeTag === '당일지정') todayReserved++;
+
+        const zone = (loc.id || '').charAt(0).toUpperCase() || '?';
+        if (!zoneStats[zone]) zoneStats[zone] = { total: 0, used: 0 };
+        zoneStats[zone].total++;
+        if (u) zoneStats[zone].used++;
+    });
+
+    // ---- 집계: SKU/재고 (상품코드 기준) — '기타' 포함, locs3F 전체 대상 ----
+    const codeToLocs = new Map();          // 상품코드 → [loc, ...]
+    let registeredStockSum = 0;
+
+    locs3F.forEach(loc => {
+        const u = isUsed(loc);
+        if (u && loc.code) {
+            const c = String(loc.code).trim();
+            if (!codeToLocs.has(c)) codeToLocs.set(c, []);
+            codeToLocs.get(c).push(loc);
+            registeredStockSum += Number(loc.stock || 0) || 0;
+        }
+    });
+
+    const uniqueCodes = codeToLocs.size;
+    const multiLocCodes = [...codeToLocs.entries()].filter(([, arr]) => arr.length >= 2);
+    const empty = total - used;
+    const usageRate = total > 0 ? (used / total * 100) : 0;
+
+    // ★ 기타용/SAM 그룹 사용률 집계 (isUsed 재사용)
+    const _grpStat = (arr) => { let u = 0; arr.forEach(l => { if (isUsed(l)) u++; }); const t = arr.length; return { total: t, used: u, empty: t - u, rate: t > 0 ? (u / t * 100) : 0 }; };
+    const stEtc = _grpStat(etcLocs);
+    const stSam = _grpStat(samLocs);
+
+    // 입고대기
+    const incomingCodes = Object.keys(incomingTotalByCode || {}).filter(c => (incomingTotalByCode[c] || 0) > 0);
+    const incomingQtyTotal = incomingCodes.reduce((a, c) => a + (incomingTotalByCode[c] || 0), 0);
+
+    // 마지막배송일 분포 (정상재고 있는 상품만, 상품코드 기준)
+    const todayMs = new Date().setHours(0, 0, 0, 0);
+    const MS_DAY = 24 * 60 * 60 * 1000;
+    const buckets = { '1주': 0, '1개월': 0, '3개월': 0, '6개월+': 0, '1년+': 0, '기록없음': 0 };
+    const bucketsQty = { '1주': 0, '1개월': 0, '3개월': 0, '6개월+': 0, '1년+': 0, '기록없음': 0 };
+    codeToLocs.forEach((arr, code) => {
+        const __info = __dashInferDelivery(code, arr);
+        if (!__info.hasStock) return;
+        const __bucketKey = __dashClassifyDelivery(__info, todayMs);
+        buckets[__bucketKey]++;
+        bucketsQty[__bucketKey] += arr.reduce((s, l) => s + (Number(l.stock || 0) || 0), 0);
+        return;
+        // (이하 옛 코드는 도달 불가 — 안전상 보존)
+        let lastDelivery = '';
+        let hasStock = false;
+        arr.forEach(loc => {
+            if (Number(loc.stock || 0) > 0) hasStock = true;
+            const rd = loc.rawData || {};
+            let val = rd['마지막배송일'] || rd['마지막입고일'] || '';
+            if (!val) {
+                // 공백/유니코드 변형 처리
+                for (const k of Object.keys(rd)) {
+                    const norm = k.replace(/[\s ]/g, '');
+                    if (norm === '마지막배송일' || norm === '마지막입고일') { val = rd[k]; break; }
+                }
+            }
+            if (val && val > lastDelivery) lastDelivery = val;
+        });
+        if (!hasStock) return;
+        if (!lastDelivery) { buckets['기록없음']++; return; }
+        // lastDelivery는 'YYYY-MM-DD' 또는 'YYYY.MM.DD' 형태로 추정 — 표준 Date 파싱 시도
+        const d = new Date(String(lastDelivery).replace(/\./g, '-'));
+        if (isNaN(d.getTime())) { buckets['기록없음']++; return; }
+        const diff = (todayMs - d.getTime()) / MS_DAY;
+        if (diff <= 7) buckets['1주']++;
+        else if (diff <= 31) buckets['1개월']++;
+        else if (diff <= 93) buckets['3개월']++;
+        else buckets['6개월+']++;
+    });
+
+    // 데드 스톡 (3개월+) 후보 수 = 3개월 + 6개월+ + 1년+
+    const deadStockCount = buckets['3개월'] + buckets['6개월+'] + buckets['1년+'];
+    const deadStockQty = bucketsQty['3개월'] + bucketsQty['6개월+'] + bucketsQty['1년+'];
+
+    // 빈 슬롯 비중 높은 동 Top 3
+    const dongEmptyStats = {};
+    locsUsage.forEach(loc => {
+        const dong = (loc.dong || '').toString().trim();
+        if (!dong) return;
+        if (!dongEmptyStats[dong]) dongEmptyStats[dong] = { total: 0, empty: 0 };
+        dongEmptyStats[dong].total++;
+        if (!isUsed(loc)) dongEmptyStats[dong].empty++;
+    });
+    const topEmptyDongs = Object.entries(dongEmptyStats)
+        .filter(([, s]) => s.total >= 10)
+        .map(([d, s]) => ({ dong: d, empty: s.empty, total: s.total, rate: s.empty / s.total }))
+        .sort((a, b) => b.rate - a.rate)
+        .slice(0, 3);
+
+    // 추천 건수 (계산된 경우만 표시 — 없으면 '계산 필요')
+    const recCount = Array.isArray(window.currentRecommendations) ? window.currentRecommendations.length : 0;
+
+    // ---- 재고 회전율 (v4.4 스냅샷 기반: 전일 대비 재고 증감률) ----
+    const __turnover = (typeof window._v44_calculateTurnover === 'function')
+        ? window._v44_calculateTurnover() : { sufficient: false };
+    const __fmtRate = (rate) => {
+        if (rate === null || rate === undefined) return '-';
+        const sign = rate > 0 ? '+' : '';
+        const color = rate > 0 ? '#e65100' : (rate < 0 ? '#1976d2' : '#666');
+        return `<span style="color:${color};">${sign}${rate.toFixed(1)}%</span>`;
+    };
+
+    // ---- KPI 카드 렌더 ----
+    const donutSvg = (rate) => {
+        const r = 22, c = 2 * Math.PI * r;
+        const dash = c * (rate / 100);
+        const color = rate >= 80 ? '#ef5350' : rate >= 50 ? '#3d5afe' : '#66bb6a';
+        return `<svg class="kpi-donut" viewBox="0 0 56 56">
+            <circle cx="28" cy="28" r="${r}" fill="none" stroke="#eceff1" stroke-width="7"/>
+            <circle cx="28" cy="28" r="${r}" fill="none" stroke="${color}" stroke-width="7"
+                stroke-dasharray="${dash.toFixed(2)} ${(c - dash).toFixed(2)}"
+                transform="rotate(-90 28 28)" stroke-linecap="round"/>
+            <text x="28" y="32" text-anchor="middle">${rate.toFixed(0)}%</text>
+        </svg>`;
+    };
+
+    const kpiHtml = `
+        <div class="dash-kpi-card">
+            ${donutSvg(usageRate)}
+            <div class="kpi-body">
+                <div class="kpi-title">피킹용 사용률</div>
+                <div class="kpi-value">${usageRate.toFixed(1)}%</div>
+                <div class="kpi-sub">${used.toLocaleString()}/${total.toLocaleString()} 칸 · 빈 ${empty.toLocaleString()}</div>
+            </div>
+        </div>
+        <div class="dash-kpi-card">
+            ${donutSvg(stEtc.rate)}
+            <div class="kpi-body">
+                <div class="kpi-title">기타용 사용률 <span style="font-size:10px; color:#90a4ae; font-weight:normal;">비축+A-1-R</span></div>
+                <div class="kpi-value">${stEtc.total > 0 ? stEtc.rate.toFixed(1) + '%' : '-'}</div>
+                <div class="kpi-sub">${stEtc.used.toLocaleString()}/${stEtc.total.toLocaleString()} 칸 · 빈 ${stEtc.empty.toLocaleString()}</div>
+            </div>
+        </div>
+        <div class="dash-kpi-card">
+            ${donutSvg(stSam.rate)}
+            <div class="kpi-body">
+                <div class="kpi-title">SAM 사용률</div>
+                <div class="kpi-value">${stSam.total > 0 ? stSam.rate.toFixed(1) + '%' : '-'}</div>
+                <div class="kpi-sub">${stSam.used.toLocaleString()}/${stSam.total.toLocaleString()} 칸 · 빈 ${stSam.empty.toLocaleString()}</div>
+            </div>
+        </div>
+        <div class="dash-kpi-card" style="cursor:pointer;" onclick="window.__dashGoToList('empty', true)" title="클릭: 데이터 리스트에서 피킹용 빈 자리만 보기 (기타·비축·SAM 제외)"
+            onmouseover="this.style.boxShadow='0 2px 10px rgba(61,90,254,0.25)';" onmouseout="this.style.boxShadow='';">
+            <div class="kpi-icon green">🟢</div>
+            <div class="kpi-body">
+                <div class="kpi-title">피킹용 빈 자리 <span style="font-size:11px; color:#90a4ae;">▸</span></div>
+                <div class="kpi-value">${empty.toLocaleString()}</div>
+                <div class="kpi-sub">전체 대비 ${total > 0 ? (empty / total * 100).toFixed(1) : 0}%</div>
+            </div>
+        </div>
+        <div class="dash-kpi-card">
+            <div class="kpi-icon blue">📦</div>
+            <div class="kpi-body">
+                <div class="kpi-title">등록 상품 (고유)</div>
+                <div class="kpi-value">${uniqueCodes.toLocaleString()}<span style="font-size:13px; color:#90a4ae; font-weight:bold;"> 종</span></div>
+                <div class="kpi-sub">총 재고 ${registeredStockSum.toLocaleString()}개 · 평균 ${uniqueCodes > 0 ? (used / uniqueCodes).toFixed(1) : 0} 칸/상품</div>
+            </div>
+        </div>
+        <div class="dash-kpi-card" style="cursor:pointer;" onclick="window.__dashShowLocList('preassigned')" title="클릭: 선지정/당일지정 리스트 보기"
+            onmouseover="this.style.boxShadow='0 2px 10px rgba(230,81,0,0.25)';" onmouseout="this.style.boxShadow='';">
+            <div class="kpi-icon amber">📌</div>
+            <div class="kpi-body">
+                <div class="kpi-title">선지정 / 당일지정 <span style="font-size:11px; color:#90a4ae;">▸</span></div>
+                <div class="kpi-value">${preAssigned} <span style="font-size:14px; color:#90a4ae; font-weight:bold;">/ ${todayReserved}</span></div>
+                <div class="kpi-sub">미입고 찜 ${preAssigned}건, 오늘 작업 ${todayReserved}건</div>
+            </div>
+        </div>
+        <div class="dash-kpi-card">
+            <div class="kpi-icon red">📥</div>
+            <div class="kpi-body">
+                <div class="kpi-title">입고 대기</div>
+                <div class="kpi-value">${incomingCodes.length}<span style="font-size:14px; color:#90a4ae; font-weight:bold;"> 종</span></div>
+                <div class="kpi-sub">총 ${incomingQtyTotal.toLocaleString()} 개 미입고</div>
+            </div>
+        </div>
+    `;
+    document.getElementById('dash-kpi-row').innerHTML = kpiHtml;
+
+    // ---- 구역별 사용률 ----
+    const sortedZones = Object.keys(zoneStats).sort((a, b) => (a === '★' ? -1 : (b === '★' ? 1 : a.localeCompare(b))));
+    const zoneBars = sortedZones.map(z => {
+        const s = zoneStats[z];
+        const rate = s.total > 0 ? (s.used / s.total * 100) : 0;
+        return `<div class="zone-bar-row">
+            <div class="zb-label">${z} 구역</div>
+            <div class="zb-track"><div class="zb-fill" style="width:${rate.toFixed(1)}%;"></div></div>
+            <div class="zb-text">${s.used} / ${s.total} (${rate.toFixed(1)}%)</div>
+        </div>`;
+    }).join('');
+    document.getElementById('dash-zone-bars').innerHTML = zoneBars || '<div style="color:#90a4ae; font-size:12px;">데이터 없음</div>';
+
+    // ---- 마지막배송일 분포 ----
+    const totalForBuckets = Object.values(buckets).reduce((a, b) => a + b, 0);
+    const bucketDef = [
+        { key: '1주', cls: '' },
+        { key: '1개월', cls: '' },
+        { key: '3개월', cls: 'warn' },
+        { key: '6개월+', cls: 'danger' },
+        { key: '1년+', cls: 'danger' },
+        { key: '기록없음', cls: 'gray' }
+    ];
+    const deliveryBars = bucketDef.map(b => {
+        const v = buckets[b.key];
+        const rate = totalForBuckets > 0 ? (v / totalForBuckets * 100) : 0;
+        const cursor = v > 0 ? 'cursor:pointer;' : '';
+        const clickAttr = v > 0 ? `onclick="window.__dashShowBucketList('${b.key}')"` : '';
+        return `<div class="zone-bar-row" style="${cursor} transition: background 0.15s;" ${clickAttr}
+                    onmouseover="if(${v})this.style.background='#f5f7ff';"
+                    onmouseout="this.style.background='';"
+                    title="${v > 0 ? '클릭: 이 기간 상품 리스트 보기' : ''}">
+            <div class="zb-label">${b.key}</div>
+            <div class="zb-track"><div class="zb-fill ${b.cls}" style="width:${rate.toFixed(1)}%;"></div></div>
+            <div class="zb-text">${v.toLocaleString()} 종 (${rate.toFixed(1)}%)</div>
+        </div>`;
+    }).join('');
+    document.getElementById('dash-delivery-bars').innerHTML = deliveryBars;
+
+    // ---- 인사이트 카드 ----
+    const insightHtml = `
+        <div class="insight-card">
+            <h4>🔄 재고 회전</h4>
+            ${__turnover.sufficient
+                ? `<div class="ins-big">${((__turnover.currentStock3F || 0) + (__turnover.currentStock2F || 0)).toLocaleString()}<span style="font-size:13px; color:#90a4ae; font-weight:bold;"> 개</span> <span style="font-size:15px;">${__fmtRate(__turnover.rateAll)}</span></div>
+                   <div class="ins-desc">3층 ${(__turnover.currentStock3F || 0).toLocaleString()}개 ${__fmtRate(__turnover.rate3F)} (전일 대비) · ${__turnover.previousDate} → ${__turnover.currentDate}</div>`
+                : `<div class="ins-big" style="font-size:18px; color:#a36800;">데이터 부족</div>
+                   <div class="ins-desc">일일 최신화 2회 이상 누적 시 계산됩니다.</div>`}
+        </div>
+        <div class="insight-card">
+            <h4>🔁 다중 위치 상품</h4>
+            <div class="ins-big" ${multiLocCodes.length > 0 ? `style="cursor:pointer; transition: color 0.15s;" onclick="window.__dashShowLocList('multiloc')" onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color=''" title="전체 다중 위치 상품 리스트 보기"` : ''}>
+                ${multiLocCodes.length}<span style="font-size:13px; color:#90a4ae; font-weight:bold;"> 종</span>
+                ${multiLocCodes.length > 0 ? '<span style="font-size:11px; color:#90a4ae; font-weight:normal; margin-left:4px;">▸</span>' : ''}
+            </div>
+            <div class="ins-desc">한 상품코드가 2곳 이상 분산된 상품. 통합하면 빈 슬롯이 늘어납니다. <span style="color:#90a4ae;">(숫자 클릭: 전체 리스트)</span></div>
+            <div class="ins-list">
+                ${multiLocCodes.slice(0, 5).map(([c, arr]) =>
+                    `<div><span class="pill">${arr.length}곳</span> ${c}</div>`
+                ).join('') || '<div style="color:#90a4ae;">없음</div>'}
+            </div>
+            <div style="margin-top:8px; padding-top:8px; border-top:1px dashed #e0e0e0; font-size:12px;">
+                <span style="color:#37474f; font-weight:700;">⚠️ 한 자리 2+ 상품</span>
+                <span ${(window.__dupLocations || []).length > 0 ? `style="cursor:pointer; color:#c62828; font-weight:900; margin-left:4px;" onclick="window.__dashShowLocList('duploc')" title="중복 지정된 로케이션 보기"` : 'style="color:#90a4ae; margin-left:4px;"'}>${(window.__dupLocations || []).length}건${(window.__dupLocations || []).length > 0 ? ' ▸' : ''}</span>
+                <div style="color:#90a4ae; font-size:11px; margin-top:2px;">최근 데이터 최신화에서 같은 로케이션에 다른 상품이 들어온 경우</div>
+            </div>
+        </div>
+        <div class="insight-card">
+            <h4>💤 데드 스톡 후보</h4>
+            <div class="ins-big" ${deadStockCount > 0 ? `style="cursor:pointer; transition: color 0.15s;" onclick="window.__dashShowBucketList('dead-all')" onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color=''" title="전체 데드스톡 합계 리스트 보기"` : ''}>
+                ${deadStockCount}<span style="font-size:13px; color:#90a4ae; font-weight:bold;"> 종</span>
+                <span style="font-size:14px; color:#90a4ae; font-weight:bold;"> / ${deadStockQty.toLocaleString()}개</span>
+                ${deadStockCount > 0 ? '<span style="font-size:11px; color:#90a4ae; font-weight:normal; margin-left:4px;">▸</span>' : ''}
+            </div>
+            <div class="ins-list">
+                <span class="pill" style="cursor:pointer; background:#fff8e1; color:#e65100;" onclick="window.__dashShowBucketList('3개월')" title="3개월 경과 상품 보기">3개월: ${buckets['3개월']}종 / ${bucketsQty['3개월'].toLocaleString()}개</span>
+                <span class="pill" style="cursor:pointer; background:#ffebee; color:#c62828;" onclick="window.__dashShowBucketList('6개월+')" title="6개월~1년 경과 상품 보기">6개월+: ${buckets['6개월+']}종 / ${bucketsQty['6개월+'].toLocaleString()}개</span>
+                <span class="pill" style="cursor:pointer; background:#fce4ec; color:#880e4f;" onclick="window.__dashShowBucketList('1년+')" title="1년 이상 경과 상품 보기">1년+: ${buckets['1년+']}종 / ${bucketsQty['1년+'].toLocaleString()}개</span>
+            </div>
+        </div>
+        <div class="insight-card">
+            <h4>🏚️ 빈 자리 많은 동 Top 3</h4>
+            ${topEmptyDongs.length > 0 ? `
+                <div class="ins-list" style="margin-top: 4px;">
+                    ${topEmptyDongs.map(d => `
+                        <div style="display:flex; align-items:center; gap:8px; padding:4px 0;">
+                            <span class="pill" style="background:#fff3e0; color:#e65100;">${d.dong}동</span>
+                            <span style="color:#37474f; font-weight:bold;">${d.empty}/${d.total}</span>
+                            <span style="color:#90a4ae;">(${(d.rate * 100).toFixed(0)}%)</span>
+                        </div>
+                    `).join('')}
+                </div>
+            ` : '<div style="color:#90a4ae; font-size:12px; margin-top: 8px;">동 데이터가 부족합니다.</div>'}
+        </div>
+    `;
+    document.getElementById('dash-insight-row').innerHTML = insightHtml;
+
+    // ---- 빠른 작업 ----
+    const actionsHtml = `
+        <button class="dash-action-btn act-orange" onclick="window.toggleIncomingSidebar()">
+            📦 입고대기 패널 <span class="badge">${incomingCodes.length}건</span>
+        </button>
+        <button class="dash-action-btn act-green" onclick="window.openRecommendModal && window.openRecommendModal()">
+            💡 변경 추천 ${recCount > 0 ? `<span class="badge">${recCount}건</span>` : ''}
+        </button>
+        <button class="dash-action-btn act-purple" onclick="document.getElementById('modal-2f').style.display='flex'; window.calc2FList && window.calc2FList();">
+            📭 빈칸확보
+        </button>
+    `;
+    document.getElementById('dash-actions').innerHTML = actionsHtml;
+
+    // ---- 구역·동별 데드스톡 분석 ----
+    renderZoneDongDeadStock(locs3F, isUsed);
+
+    // ---- 데이터 신선도 ----
+    const zikjinKeys = Object.keys(zikjinData || {}).length;
+    const weeklyKeys = Object.keys(weeklyData || {}).length;
+    const freshHtml = `
+        <div>📅 <b>오늘:</b> ${new Date().toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+        <div>📂 <b>ZG&AB 출고 데이터:</b> ${zikjinKeys > 0 ? zikjinKeys.toLocaleString() + '건' : '<span style="color:#c62828;">미업로드</span>'}</div>
+        <div>📂 <b>주차별 데이터:</b> ${weeklyKeys > 0 ? weeklyKeys.toLocaleString() + '건' : '<span style="color:#c62828;">미업로드</span>'}</div>
+        <div>📦 <b>입고대기 종 수:</b> ${incomingCodes.length.toLocaleString()}</div>
+        <div>🗄️ <b>등록 로케이션:</b> ${originalData.length.toLocaleString()}칸 (3F: ${total.toLocaleString()}, 그 외: ${(originalData.length - total).toLocaleString()})</div>
+    `;
+    document.getElementById('dash-freshness').innerHTML = freshHtml;
+};
+
+// 구역·동별 데드스톡 집계 + 테이블 렌더
+function renderZoneDongDeadStock(locs3F, isUsed) {
+    const tbody = document.getElementById('dash-zonedong-tbody');
+    const thead = document.getElementById('dash-zonedong-thead');
+    const summary = document.getElementById('dash-zonedong-summary');
+    if (!tbody) return;
+
+    // 정렬 헤더 렌더
+    if (thead) {
+        const A = __dashSortArrow;
+        const sortKey = __dashZdSort.key;
+        const cellBase = 'padding:8px; border:1px solid #e0e6ed; cursor:pointer; user-select:none;';
+        const isActive = (k) => sortKey === k;
+        const hl = (k, baseBg) => isActive(k) ? 'background:#e3f2fd;' : (baseBg ? `background:${baseBg};` : '');
+        const zoneSubActive = sortKey === 'zone';
+        const dongSubActive = sortKey === 'dong';
+        thead.innerHTML = `
+            <tr style="background:#f4f4f4;">
+                <th style="${cellBase} ${(zoneSubActive||dongSubActive)?'background:#e3f2fd;':''}" title="구역 또는 동 기준 정렬">
+                    <div style="display:flex; gap:6px; justify-content:center; align-items:center;">
+                        <span onclick="window.__dashZdSortBy('zone')" style="cursor:pointer; padding:2px 6px; border-radius:4px; ${zoneSubActive?'background:white; color:var(--primary); font-weight:900;':'color:#37474f;'}">
+                            구역 ${A('zone')}
+                        </span>
+                        <span style="color:#cfd8dc;">|</span>
+                        <span onclick="window.__dashZdSortBy('dong')" style="cursor:pointer; padding:2px 6px; border-radius:4px; ${dongSubActive?'background:white; color:var(--primary); font-weight:900;':'color:#37474f;'}">
+                            동 ${A('dong')}
+                        </span>
+                    </div>
+                </th>
+                <th style="${cellBase} ${hl('used')}" onclick="window.__dashZdSortBy('used')">사용중 ${A('used')}</th>
+                <th style="${cellBase} ${hl('w1', '#e8f5e9')}" onclick="window.__dashZdSortBy('w1')">1주 ${A('w1')}</th>
+                <th style="${cellBase} ${hl('m1', '#f1f8e9')}" onclick="window.__dashZdSortBy('m1')">1개월 ${A('m1')}</th>
+                <th style="${cellBase} ${hl('m3', '#fff8e1')}" onclick="window.__dashZdSortBy('m3')">3개월 ${A('m3')}</th>
+                <th style="${cellBase} ${hl('m6plus', '#ffebee')}" onclick="window.__dashZdSortBy('m6plus')">6개월+ ${A('m6plus')}</th>
+                <th style="${cellBase} ${hl('y1plus', '#fce4ec')}" onclick="window.__dashZdSortBy('y1plus')">1년+ ${A('y1plus')}</th>
+                <th style="${cellBase} ${hl('none', '#eceff1')}" onclick="window.__dashZdSortBy('none')">기록없음 ${A('none')}</th>
+                <th style="${cellBase} ${hl('dead')} min-width: 180px;" onclick="window.__dashZdSortBy('dead')">데드율 (3개월+) ${A('dead')}</th>
+            </tr>
+        `;
+    }
+
+    const includeNone = !!document.getElementById('dash-zd-include-none')?.checked;
+    const minSlots = Math.max(0, Number(document.getElementById('dash-zd-min-slots')?.value || 10));
+
+    const todayMs = new Date().setHours(0, 0, 0, 0);
+    const MS_DAY = 24 * 60 * 60 * 1000;
+
+    // (zone, dong) → 상품코드 Map → bucket
+    const groupMap = new Map(); // key 'A-1' → { codeMap: Map<code,locs[]>, zone, dong }
+
+    locs3F.forEach(loc => {
+        if (!isUsed(loc)) return;
+        const code = String(loc.code || '').trim();
+        if (!code) return;
+        const zone = (loc.id || '').charAt(0).toUpperCase() || '?';
+        const dong = String(loc.dong || '').trim() || '미지정';
+        const key = `${zone}-${dong}`;
+        if (!groupMap.has(key)) groupMap.set(key, { zone, dong, codeMap: new Map() });
+        const grp = groupMap.get(key);
+        if (!grp.codeMap.has(code)) grp.codeMap.set(code, []);
+        grp.codeMap.get(code).push(loc);
+    });
+
+    // 상품코드 단위로 bucket 분류 (전체 차트와 동일한 방법)
+    const lastDeliveryOfCode = (locs) => {
+        let lastDelivery = '';
+        let hasStock = false;
+        locs.forEach(loc => {
+            if (Number(loc.stock || 0) > 0) hasStock = true;
+            const rd = loc.rawData || {};
+            let val = rd['마지막배송일'] || rd['마지막입고일'] || '';
+            if (!val) {
+                for (const k of Object.keys(rd)) {
+                    const norm = k.replace(/[\s ]/g, '');
+                    if (norm === '마지막배송일' || norm === '마지막입고일') { val = rd[k]; break; }
+                }
+            }
+            if (val && val > lastDelivery) lastDelivery = val;
+        });
+        return { lastDelivery, hasStock };
+    };
+
+    const rows = [];
+    groupMap.forEach(grp => {
+        let usedCount = 0, w1 = 0, m1 = 0, m3 = 0, m6plus = 0, y1plus = 0, none = 0;
+        grp.codeMap.forEach((arr, code) => {
+            // 🛡️ 직진/주차 출고 활동 보강 헬퍼 사용 (전체 차트와 동일)
+            const info = __dashInferDelivery(code, arr);
+            if (!info.hasStock) return;
+            usedCount++;
+            const cat = __dashClassifyDelivery(info, todayMs);
+            if (cat === '1주') w1++;
+            else if (cat === '1개월') m1++;
+            else if (cat === '3개월') m3++;
+            else if (cat === '6개월+') m6plus++;
+            else if (cat === '1년+') y1plus++;
+            else none++;
+            return;
+            // (이하 구버전 로직 — 안전상 보존, 도달 불가)
+            const { lastDelivery, hasStock } = lastDeliveryOfCode(arr);
+            if (!hasStock) return;
+            usedCount++;
+            if (!lastDelivery) { none++; return; }
+            const d = new Date(String(lastDelivery).replace(/\./g, '-'));
+            if (isNaN(d.getTime())) { none++; return; }
+            const diff = (todayMs - d.getTime()) / MS_DAY;
+            if (diff <= 7) w1++;
+            else if (diff <= 31) m1++;
+            else if (diff <= 93) m3++;
+            else m6plus++;
+        });
+        if (usedCount < minSlots) return;
+        const deadBase = includeNone ? (m3 + m6plus + y1plus + none) : (m3 + m6plus + y1plus);
+        const deadRate = usedCount > 0 ? (deadBase / usedCount * 100) : 0;
+        rows.push({ ...grp, usedCount, w1, m1, m3, m6plus, y1plus, none, deadRate });
+    });
+
+    __dashSortRows(rows);
+
+    if (rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="padding:20px; color:#90a4ae;">조건에 맞는 구역-동이 없습니다. (최소 사용 슬롯 ${minSlots} 기준)</td></tr>`;
+        if (summary) summary.innerHTML = '';
+        return;
+    }
+
+    const cellFmt = (v) => v > 0 ? v.toLocaleString() : '<span style="color:#cfd8dc;">·</span>';
+    // 데드율 내림차순 정렬일 때만 1~3위 강조 (다른 정렬에선 의미 없으므로 끔)
+    const isDefaultDeadSort = __dashZdSort.key === 'dead' && __dashZdSort.dir === 'desc';
+    const html = rows.map((r, idx) => {
+        const barColor = r.deadRate >= 50 ? '#c62828' : r.deadRate >= 30 ? '#ef6c00' : r.deadRate >= 15 ? '#fbc02d' : '#66bb6a';
+        const showRank = isDefaultDeadSort && idx < 3;
+        const rankBadge = showRank ? `<span style="display:inline-block; background:${idx===0?'#c62828':idx===1?'#ef6c00':'#fbc02d'}; color:white; font-weight:900; font-size:10px; padding:2px 6px; border-radius:10px; margin-right:6px;">${idx+1}위</span>` : '';
+        // 클릭 셀 빌더 (값 > 0 이고 bucket 있을 때만 클릭 가능)
+        const clickCell = (bucket, value, baseStyle) => {
+            if (value > 0) {
+                const safeZ = String(r.zone).replace(/'/g, "\\'");
+                const safeD = String(r.dong).replace(/'/g, "\\'");
+                return `<td style="${baseStyle} cursor:pointer;" onclick="window.__dashShowBucketList('${bucket}','${safeZ}','${safeD}')" title="${r.zone}-${r.dong} ${bucket} 상품 보기" onmouseover="this.style.background='#eef1ff';" onmouseout="this.style.background='';">${cellFmt(value)}</td>`;
+            }
+            return `<td style="${baseStyle}">${cellFmt(value)}</td>`;
+        };
+        return `
+        <tr style="${showRank ? 'background: #fff3e0;' : ''}">
+            <td style="padding:8px; border:1px solid #e0e6ed; font-weight:bold; text-align:left;">${rankBadge}${r.zone} 구역 - ${r.dong} 동</td>
+            <td style="padding:8px; border:1px solid #e0e6ed;">${r.usedCount.toLocaleString()}</td>
+            ${clickCell('1주', r.w1, 'padding:8px; border:1px solid #e0e6ed; color:#2e7d32;')}
+            ${clickCell('1개월', r.m1, 'padding:8px; border:1px solid #e0e6ed; color:#558b2f;')}
+            ${clickCell('3개월', r.m3, 'padding:8px; border:1px solid #e0e6ed; color:#ef6c00; font-weight:bold;')}
+            ${clickCell('6개월+', r.m6plus, 'padding:8px; border:1px solid #e0e6ed; color:#c62828; font-weight:bold;')}
+            ${clickCell('1년+', r.y1plus, 'padding:8px; border:1px solid #e0e6ed; color:#880e4f; font-weight:bold; background:#fce4ec;')}
+            ${clickCell('기록없음', r.none, 'padding:8px; border:1px solid #e0e6ed; color:#78909c;')}
+            <td style="padding:8px; border:1px solid #e0e6ed;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="flex:1; background:#eceff1; height:14px; border-radius:7px; overflow:hidden;">
+                        <div style="height:100%; width:${r.deadRate.toFixed(1)}%; background:${barColor}; transition: width 0.4s;"></div>
+                    </div>
+                    <span style="font-weight:bold; color:${barColor}; min-width: 42px; text-align:right;">${r.deadRate.toFixed(1)}%</span>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+    tbody.innerHTML = html;
+
+    // 요약: 가중 평균 / 최악 / 최상
+    const totalUsed = rows.reduce((a, r) => a + r.usedCount, 0);
+    const totalDead = rows.reduce((a, r) => a + (includeNone ? r.m3 + r.m6plus + r.y1plus + r.none : r.m3 + r.m6plus + r.y1plus), 0);
+    const avgRate = totalUsed > 0 ? (totalDead / totalUsed * 100) : 0;
+    const worst = rows[0];
+    const best = rows[rows.length - 1];
+    if (summary) {
+        summary.innerHTML = `
+            📊 표시된 ${rows.length}개 구역-동의 평균 데드율: <b style="color:#37474f;">${avgRate.toFixed(1)}%</b>
+            &nbsp;|&nbsp; 최악: <b style="color:#c62828;">${worst.zone}-${worst.dong}동 (${worst.deadRate.toFixed(1)}%)</b>
+            &nbsp;|&nbsp; 최상: <b style="color:#2e7d32;">${best.zone}-${best.dong}동 (${best.deadRate.toFixed(1)}%)</b>
+            ${includeNone ? ' &nbsp;<span style="color:#90a4ae;">(기록없음 포함)</span>' : ''}
+        `;
+    }
+}
+
+// ============================================================
+// 📅 bucket 클릭 → 상품 리스트 모달
+// ============================================================
+let __dashLastBucketList = []; // 엑셀 다운로드용 캐시
+
+window.__dashShowBucketList = function (bucket, zoneFilter, dongFilter) {
+    const modal = document.getElementById('dash-bucket-modal');
+    const titleEl = document.getElementById('dash-bucket-title');
+    const metaEl = document.getElementById('dash-bucket-meta');
+    const tbody = document.getElementById('dash-bucket-tbody');
+    if (!modal || !tbody) return;
+
+    // 3F만, isUsed (코드+name) 인 로케이션만
+    const locs3F = originalData.filter(d => (d.id || '').charAt(0).toUpperCase() !== 'K');
+    const isUsed = (loc) =>
+        (loc.code && String(loc.code).trim() !== '' && loc.code !== loc.id) ||
+        (loc.name && String(loc.name).trim() !== '');
+
+    // zone/dong 필터 적용 후 상품코드 단위 그룹화
+    const codeMap = new Map();
+    locs3F.forEach(loc => {
+        if (!isUsed(loc)) return;
+        const zone = (loc.id || '').charAt(0).toUpperCase() || '?';
+        const dong = String(loc.dong || '').trim() || '미지정';
+        if (zoneFilter && zone !== zoneFilter) return;
+        if (dongFilter && dong !== dongFilter) return;
+        const code = String(loc.code || '').trim();
+        if (!code) return;
+        if (!codeMap.has(code)) codeMap.set(code, []);
+        codeMap.get(code).push(loc);
+    });
+
+    // 자리 id 로 실제 로케이션을 찾기 위한 맵 (공백·NBSP·대소문자 흔들림을 흡수)
+    const normLocId = (v) => String(v == null ? '' : v).replace(/[\s\u00A0]+/g, '').toUpperCase();
+    const locById = new Map(originalData.map(l => [normLocId(l.id), l]));
+
+    // 비축랙 자리 표시 여부 (체크박스, 기본 꺼짐)
+    const includeEtc = !!document.getElementById('dash-bucket-include-etc')?.checked;
+
+    const todayMs = new Date().setHours(0, 0, 0, 0);
+    // bucket이 'dead-all'이면 데드스톡 3종(3개월/6개월+/1년+)을 모두 포함.
+    const DEAD_SET = new Set(['3개월', '6개월+', '1년+']);
+    const isDeadAll = bucket === 'dead-all';
+    const items = [];
+    codeMap.forEach((arr, code) => {
+        const info = __dashInferDelivery(code, arr);
+        if (!info.hasStock) return;
+        const cat = __dashClassifyDelivery(info, todayMs);
+        if (isDeadAll) {
+            if (!DEAD_SET.has(cat)) return;
+        } else if (cat !== bucket) return;
+
+        // 대표 정보 — 같은 코드여도 위치 여러 곳이면 모두 노출
+        const rep = arr[0] || {};
+        const name = rep.name || (zikjinData[code]?.['상품명']) || (weeklyData[code]?.['상품명']) || '';
+        const option = rep.option || '';
+        // 현재 위치: 피킹 자리와 비축랙 자리를 나눠 둔다 (기본은 피킹만 표시, 체크하면 비축랙도 함께)
+        // ★ 비축랙 자리는 상품 행의 '옵션추가항목1'(예: '비축-002,비축-007,H-3-L')이 정확하다.
+        //   비축 칸 문서에는 상품코드가 한 개만 남아(나중 행이 덮어씀) 거꾸로 찾으면 대부분 빠진다.
+        const pickRows = arr.filter(l => !window.__isEtcLoc(l));
+        const pickLocs = pickRows.map(l => l.id);
+        const etcSet = new Set();
+        const addEtc = (raw) => {
+            const hit = locById.get(normLocId(raw));          // 실제로 있는 자리만 (오타·폐기·남의 피킹자리 제외)
+            if (hit && window.__isEtcLoc(hit) && !pickLocs.includes(hit.id)) etcSet.add(hit.id);
+        };
+        arr.forEach(l => String((l.rawData || {})['옵션추가항목1'] || '').split(',').forEach(addEtc));
+        arr.filter(l => window.__isEtcLoc(l)).forEach(l => addEtc(l.id));
+        const etcLocs = [...etcSet].sort((a, b) => a.localeCompare(b));
+        const locsStr = (includeEtc ? [...pickLocs, ...etcLocs] : pickLocs).join(', ');
+        const sumStock = (rows) => rows.reduce((a, l) => a + Number(l.stock || 0), 0);
+        const totalStock2f = arr.reduce((a, l) => Math.max(a, Number(l.stock2f || 0)), 0);
+        items.push({
+            code, name, option,
+            locsStr, pickLocs, etcLocs,
+            stock: sumStock(arr),
+            stockPick: sumStock(pickRows),
+            stock2f: totalStock2f,
+            lastDelivery: info.lastDelivery || '',
+            hasRecentActivity: info.hasRecentActivity,
+            cat
+        });
+    });
+
+    // 정렬: 마지막배송일 오래된 순 (기록없음 맨 위)
+    items.sort((a, b) => {
+        if (!a.lastDelivery && !b.lastDelivery) return 0;
+        if (!a.lastDelivery) return -1;
+        if (!b.lastDelivery) return 1;
+        return a.lastDelivery.localeCompare(b.lastDelivery);
+    });
+
+    __dashLastBucketList = { bucket, zoneFilter, dongFilter, items };
+
+    // 헤더 텍스트
+    const scopeLabel = (zoneFilter || dongFilter)
+        ? `${zoneFilter || '전체구역'} - ${dongFilter || '전체동'} `
+        : '전체 ';
+    const displayBucket = isDeadAll ? '데드스톡 후보 합계' : bucket;
+    if (titleEl) {
+        titleEl.querySelector('span').textContent = `📅 ${scopeLabel}[${displayBucket}] 상품 리스트 (${items.length}종)`;
+    }
+    if (metaEl) {
+        const desc = isDeadAll
+            ? '3개월 / 6개월+ / 1년+ 합계 — 우선 정리/이동 대상'
+            : ({
+                '1주': '최근 1주일 내 출고된 상품 (회전 양호)',
+                '1개월': '최근 1개월 내 출고된 상품',
+                '3개월': '1~3개월 내 마지막 출고 — 데드 후보',
+                '6개월+': '3~12개월 내 마지막 출고 — 데드',
+                '1년+': '1년 이상 출고 없는 재고 — 우선 정리 대상',
+                '기록없음': '마지막출고.배송일 기록이 없는 상품'
+            }[bucket] || '');
+        const etcCount = items.filter(it => it.etcLocs.length > 0).length;
+        metaEl.textContent = desc + (etcCount > 0
+            ? ` · 비축·기타 자리에도 지정된 상품 ${etcCount}종 (${includeEtc ? '함께 표시 중' : '표시하려면 오른쪽 체크'})` : '');
+    }
+
+    // dead-all 모드일 때 분류 컬럼 추가
+    const thead = document.querySelector('#dash-bucket-modal thead tr');
+    if (thead) {
+        // 기존 분류 컬럼이 있으면 제거
+        const oldCatTh = thead.querySelector('th[data-cat-col]');
+        if (oldCatTh) oldCatTh.remove();
+        if (isDeadAll) {
+            const th = document.createElement('th');
+            th.setAttribute('data-cat-col', '1');
+            th.style.borderTop = 'none';
+            th.textContent = '분류';
+            thead.insertBefore(th, thead.children[thead.children.length - 2]); // 마지막배송일 앞
+        }
+    }
+
+    if (items.length === 0) {
+        const colCount = isDeadAll ? 9 : 8;
+        tbody.innerHTML = `<tr><td colspan="${colCount}" style="padding:30px; text-align:center; color:#90a4ae;">해당 조건에 맞는 상품이 없습니다.</td></tr>`;
+    } else {
+        const catBadge = (cat) => {
+            const colors = {
+                '3개월': 'background:#fff8e1; color:#ef6c00;',
+                '6개월+': 'background:#ffebee; color:#c62828;',
+                '1년+': 'background:#fce4ec; color:#880e4f;'
+            };
+            return `<span style="${colors[cat] || 'background:#eceff1; color:#37474f;'} padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">${cat}</span>`;
+        };
+        const etcHint = (it) => ` <span style="color:#a1887f; font-size:10px;" title="${escAttr(it.etcLocs.join(', '))}">비축랙 ${it.etcLocs.length}곳</span>`;
+        tbody.innerHTML = items.map(it => `
+            <tr>
+                <td style="font-family:monospace; font-size:11px;">${escAttr(it.code)}</td>
+                <td style="text-align:left; padding-left:8px;">${escAttr(it.name) || '<span style=\"color:#cfd8dc;\">-</span>'}</td>
+                <td>${escAttr(it.option) || '<span style=\"color:#cfd8dc;\">-</span>'}</td>
+                <td style="font-family:monospace; font-size:11px;">${escAttr(it.locsStr)
+                    || '<span style="color:#cfd8dc;">-</span>'}${
+                    (!includeEtc && it.etcLocs.length) ? etcHint(it) : ''}</td>
+                <td style="font-weight:bold;">${it.stockPick.toLocaleString()}</td>
+                <td style="color:#607d8b;">${it.stock2f > 0 ? it.stock2f.toLocaleString() : '<span style=\"color:#cfd8dc;\">·</span>'}</td>
+                ${isDeadAll ? `<td>${catBadge(it.cat)}</td>` : ''}
+                <td>${it.lastDelivery || '<span style=\"color:#c62828;\">기록없음</span>'}</td>
+                <td>${it.hasRecentActivity ? '<span style="background:#e8f5e9; color:#2e7d32; padding:2px 6px; border-radius:8px; font-size:10px; font-weight:bold;">직진 활동</span>' : '<span style=\"color:#cfd8dc;\">·</span>'}</td>
+            </tr>
+        `).join('');
+    }
+
+    modal.style.display = 'flex';
+};
+
+// ============================================================
+// 📍 KPI 카드 클릭 → 상세 리스트 모달 (빈자리 / 선지정·당일지정 / 다중위치)
+// ============================================================
+window.__dashShowLocList = function (type) {
+    const modal = document.getElementById('dash-loc-modal');
+    const titleEl = document.getElementById('dash-loc-title');
+    const metaEl = document.getElementById('dash-loc-meta');
+    const thead = document.getElementById('dash-loc-thead');
+    const tbody = document.getElementById('dash-loc-tbody');
+    if (!modal || !tbody || !thead) return;
+
+    const locs3F = originalData.filter(d => (d.id || '').charAt(0).toUpperCase() !== 'K');
+    // 빈 자리(랙 사용률) 리스트는 '기타'(비축/샘플 등) 위치를 제외한 실제 피킹 랙 기준
+    const locsUsage = locs3F.filter(d => (d.category || '피킹용') !== '기타');
+    const isUsed = (loc) =>
+        (loc.code && String(loc.code).trim() !== '' && loc.code !== loc.id) ||
+        (loc.name && String(loc.name).trim() !== '');
+    const setTitle = (t) => { if (titleEl) titleEl.querySelector('span').textContent = t; };
+    const th = (cols) => `<tr>${cols.map(c => `<th style="border-top:none; font-size:12px;${c.w ? `width:${c.w};` : ''}">${c.t}</th>`).join('')}</tr>`;
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+
+    if (type === 'empty') {
+        const rows = locsUsage.filter(l => !isUsed(l)).sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+        setTitle(`🟢 빈 자리 리스트 (${rows.length}칸)`);
+        if (metaEl) metaEl.textContent = '현재 비어 있는 3층 로케이션 — 입고/이동 배치에 사용 가능';
+        thead.innerHTML = th([{ t: '로케이션', w: '130px' }, { t: '구역', w: '80px' }, { t: '동', w: '80px' }, { t: '위치' }]);
+        tbody.innerHTML = rows.length ? rows.map(l => `<tr>
+            <td style="font-family:monospace; font-weight:bold;">${l.id}</td>
+            <td>${(l.id || '').charAt(0).toUpperCase() || '-'}</td>
+            <td>${String(l.dong || '').trim() || '-'}</td>
+            <td>${String(l.pos || '').trim() || '-'}</td></tr>`).join('')
+            : `<tr><td colspan="4" style="padding:30px; text-align:center; color:#90a4ae;">빈 자리가 없습니다.</td></tr>`;
+    } else if (type === 'preassigned') {
+        const rows = locs3F.filter(l => l.codeTag === '선지정' || l.codeTag === '당일지정')
+            .sort((a, b) => (a.codeTag || '').localeCompare(b.codeTag || '') || (a.id || '').localeCompare(b.id || ''));
+        setTitle(`📌 선지정 / 당일지정 리스트 (${rows.length}건)`);
+        if (metaEl) metaEl.textContent = '선지정(미입고 찜) · 당일지정(오늘 작업) 상태인 로케이션';
+        thead.innerHTML = th([{ t: '로케이션', w: '130px' }, { t: '구분', w: '90px' }, { t: '상품코드', w: '120px' }, { t: '상품명' }, { t: '동', w: '70px' }]);
+        const tagBadge = (tag) => tag === '선지정'
+            ? '<span style="background:#fff3e0; color:#e65100; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">선지정</span>'
+            : '<span style="background:#e3f2fd; color:#1565c0; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold;">당일지정</span>';
+        tbody.innerHTML = rows.length ? rows.map(l => `<tr>
+            <td style="font-family:monospace; font-weight:bold;">${l.id}</td>
+            <td>${tagBadge(l.codeTag)}</td>
+            <td style="font-family:monospace; font-size:11px;">${l.preAssignedCode || l.code || '-'}</td>
+            <td style="text-align:left; padding-left:8px;">${l.name || '-'}</td>
+            <td>${String(l.dong || '').trim() || '-'}</td></tr>`).join('')
+            : `<tr><td colspan="5" style="padding:30px; text-align:center; color:#90a4ae;">선지정/당일지정 항목이 없습니다.</td></tr>`;
+    } else if (type === 'multiloc') {
+        const codeMap = new Map();
+        locs3F.forEach(l => {
+            if (!isUsed(l) || !l.code) return;
+            const c = String(l.code).trim();
+            if (!codeMap.has(c)) codeMap.set(c, []);
+            codeMap.get(c).push(l);
+        });
+        const rows = [...codeMap.entries()].filter(([, arr]) => arr.length >= 2)
+            .map(([code, arr]) => ({
+                code, name: arr[0].name || '',
+                locs: arr.map(l => l.id).join(', '),
+                count: arr.length,
+                stock: arr.reduce((a, l) => a + Number(l.stock || 0), 0)
+            }))
+            .sort((a, b) => b.count - a.count || b.stock - a.stock);
+        setTitle(`🔁 다중 위치 상품 (${rows.length}종)`);
+        if (metaEl) metaEl.textContent = '한 상품코드가 2곳 이상에 분산된 상품 — 통합 시 빈 슬롯 확보 가능';
+        thead.innerHTML = th([{ t: '상품코드', w: '120px' }, { t: '상품명' }, { t: '분산 위치' }, { t: '칸수', w: '70px' }, { t: '정상재고', w: '90px' }]);
+        tbody.innerHTML = rows.length ? rows.map(r => `<tr>
+            <td style="font-family:monospace; font-size:11px; font-weight:bold; color:#1976d2;">${r.code}</td>
+            <td style="text-align:left; padding-left:8px;">${r.name || '-'}</td>
+            <td style="font-family:monospace; font-size:11px;">${r.locs}</td>
+            <td style="font-weight:bold;">${r.count}곳</td>
+            <td>${r.stock.toLocaleString()}</td></tr>`).join('')
+            : `<tr><td colspan="5" style="padding:30px; text-align:center; color:#90a4ae;">다중 위치 상품이 없습니다.</td></tr>`;
+    } else if (type === 'duploc') {
+        const dups = window.__dupLocations || [];
+        setTitle(`⚠️ 한 로케이션 2+ 상품 (${dups.length}건)`);
+        if (metaEl) metaEl.textContent = '최근 데이터 최신화 시 같은 로케이션에 서로 다른 상품코드가 들어온 경우 — 저장 시 마지막 행만 남으므로 원본 엑셀을 확인하세요.';
+        thead.innerHTML = th([{ t: '로케이션', w: '160px' }, { t: '지정된 상품코드들' }, { t: '개수', w: '70px' }]);
+        tbody.innerHTML = dups.length ? dups.map(d => `<tr>
+            <td style="font-family:monospace; font-weight:bold;">${esc(d.loc)}</td>
+            <td style="text-align:left; padding-left:8px; font-family:monospace; font-size:11px;">${esc((d.codes || []).join(', '))}</td>
+            <td style="font-weight:bold; color:#c62828;">${(d.codes || []).length}</td></tr>`).join('')
+            : `<tr><td colspan="3" style="padding:30px; text-align:center; color:#90a4ae;">중복 지정된 로케이션이 없습니다.</td></tr>`;
+    } else {
+        return;
+    }
+
+    modal.style.display = 'flex';
+};
+
+// '비축 위치도 표시' 체크박스 → 같은 조건으로 목록만 다시 그린다
+window.__dashRerenderBucketList = function () {
+    const last = __dashLastBucketList;
+    if (!last || !last.bucket) return;
+    window.__dashShowBucketList(last.bucket, last.zoneFilter, last.dongFilter);
+};
+
+// 엑셀 다운로드 (XLSX는 페이지에 이미 로드됨)
+window.__dashDownloadBucketExcel = function () {
+    if (!__dashLastBucketList || !__dashLastBucketList.items || __dashLastBucketList.items.length === 0) {
+        alert('다운로드할 데이터가 없습니다.');
+        return;
+    }
+    const { bucket, zoneFilter, dongFilter, items } = __dashLastBucketList;
+    const sheetData = items.map(it => ({
+        '상품코드': it.code,
+        '상품명': it.name,
+        '옵션': it.option,
+        '현재위치': (it.pickLocs || []).join(', '),
+        '비축랙위치': (it.etcLocs || []).join(', '),
+        '정상재고': it.stockPick,
+        '비축창고재고': it.stock2f,
+        '마지막출고.배송일': it.lastDelivery || '',
+        '직진활동': it.hasRecentActivity ? 'O' : ''
+    }));
+    const ws = XLSX.utils.json_to_sheet(sheetData);
+    const wb = XLSX.utils.book_new();
+    const scope = (zoneFilter || 'ALL') + '_' + (dongFilter || 'ALL');
+    const sheetName = `${bucket}_${scope}`.slice(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    const fname = `데드스톡_${bucket}_${scope}_${toDateStr()}.xlsx`;
+    XLSX.writeFile(wb, fname);
+};

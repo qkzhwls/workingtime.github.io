@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="출퇴근 기록표">
+    <title>출퇴근 기록표</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <style>
+        body { font-family: 'Inter', 'Noto Sans KR', sans-serif; }
+        .ws-table { border-collapse: collapse; width: 100%; min-width: 700px; font-size: 13px; }
+        .ws-table th { background: #f1f5f9; color: #334155; font-weight: 700; padding: 7px 8px;
+                       border-bottom: 1px solid #e2e8f0; white-space: nowrap; text-align: center;
+                       position: sticky; top: 0; z-index: 1; }
+        .ws-table td { padding: 4px 8px; border-bottom: 1px solid #eef2f7; color: #334155;
+                       text-align: center; white-space: nowrap; }
+        .ws-table tbody tr:hover td { background: #f8fafc; }
+        .ws-table tr.sat td { background: #f8fafc; }
+        .ws-table tr.sun td { background: #fef2f2; }
+        .ws-table tr.sat:hover td, .ws-table tr.sun:hover td { filter: brightness(.98); }
+        /* 지난 날짜인데 아직 확인하지 않은 줄 — 눈에 띄게 */
+        .ws-table tr.todo td { background: #fffbeb; }
+        .ws-table tr.todo:hover td { background: #fef3c7; }
+        .ok-cell { display: inline-flex; align-items: center; gap: 4px; }
+        .ok-box { width: 16px; height: 16px; accent-color: #059669; cursor: pointer; }
+        .ok-txt { font-size: 10px; font-weight: 700; }
+        .ok-done { color: #059669; }
+        .ok-todo { color: #d97706; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; }
+        .day-name { font-size: 11px; color: #94a3b8; }
+        .sun .day-name { color: #ef4444; }
+        .sat .day-name { color: #3b82f6; }
+        /* 시간 입력칸 — 표 안에서 테두리 없이, 값이 있을 때만 진하게 */
+        /* 시각 입력칸은 브라우저가 그리는 시:분 위젯이라 폭이 좁으면 잘린다.
+           크롬에서 24시간 표기 기준으로 여유를 두고 잡는다. */
+        .t-in { width: 100%; min-width: 104px; padding: 4px 6px; border: 1px solid transparent;
+                border-radius: 6px; text-align: center; font-size: 13px; background: transparent;
+                color: #334155; font-variant-numeric: tabular-nums; box-sizing: border-box; }
+        .t-in:hover { border-color: #cbd5e1; background: #fff; }
+        .t-in:focus { outline: none; border-color: #3b82f6; background: #fff;
+                      box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+        .b-in { min-width: 60px; }
+        .m-in { min-width: 120px; }   /* 정렬은 .t-in 의 가운데 정렬을 그대로 쓴다 */
+        .lbl { display: block; font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 4px; }
+        .inp { width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px; }
+        .inp:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+        /* 근무자 카드 목록 (왼쪽) */
+        .p-card { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 10px;
+                  background: #fff; border: 1px solid #e2e8f0; cursor: pointer; transition: .12s; }
+        .p-card:hover { border-color: #c7d2fe; background: #f8fafc; }
+        .p-card.on { border-color: #4f46e5; background: #eef2ff; box-shadow: 0 0 0 2px rgba(79,70,229,.12); }
+        .p-card .nm { font-size: 13px; font-weight: 800; color: #334155; }
+        .p-card.on .nm { color: #3730a3; }
+        .p-card .sub { font-size: 10px; color: #94a3b8; margin-top: 2px;
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .p-card .badge { font-size: 10px; font-weight: 800; }
+
+        /* 📱 모바일(1024px 미만) — 표 외의 영역은 접고, 남는 높이를 전부 표에 준다 */
+        @media (max-width: 1023px) {
+            .m-collapsed { display: none !important; }
+            /* 근무자: 한 줄 가로 스크롤 칩 */
+            #person-tabs { flex-wrap: nowrap; }
+            #person-tabs .p-card { width: auto; flex-shrink: 0; padding: 5px 12px; border-radius: 999px; }
+            #person-tabs .p-card .sub { display: none; }
+            /* 표: 여백을 줄이고, 가로로 밀어도 날짜는 왼쪽에 붙어 있게 */
+            .ws-table { min-width: 0; font-size: 14px; }
+            .ws-table th { padding: 6px 4px; }
+            .ws-table td { padding: 3px 4px; background: #fff; }
+            .ws-table th { width: auto !important; }
+            .ws-table th:nth-child(1), .ws-table td:nth-child(1) { position: sticky; left: 0; z-index: 2;
+                                                                   width: 32px !important; min-width: 32px; max-width: 32px; }
+            .ws-table th:nth-child(2), .ws-table td:nth-child(2) { position: sticky; left: 32px; z-index: 2;
+                                                                   width: 58px !important; min-width: 58px;
+                                                                   box-shadow: 1px 0 0 #e2e8f0; }
+            .ws-table th:nth-child(1), .ws-table th:nth-child(2) { z-index: 3; }
+            .t-in { min-width: 92px; font-size: 14px; padding: 5px 2px; }
+            .b-in { min-width: 48px; }
+            .m-in { min-width: 110px; }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 h-screen h-[100dvh] overflow-hidden flex flex-col">
+
+    <header class="bg-white border-b border-slate-200 px-3 py-2 lg:px-5 lg:py-3 flex items-center justify-between gap-2 lg:gap-3 z-20 shadow-sm shrink-0">
+        <h1 class="text-base lg:text-lg font-extrabold text-slate-800 flex items-center gap-2 whitespace-nowrap">🕘 출퇴근 기록표</h1>
+        <div class="flex items-center gap-1.5 lg:gap-2">
+            <button id="btn-add-person" class="text-xs font-bold px-2.5 py-1.5 lg:px-3 lg:py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition" title="인원 등록">➕<span class="hidden sm:inline"> 인원 등록</span></button>
+            <button id="btn-excel" class="text-xs font-bold px-2.5 py-1.5 lg:px-3 lg:py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition" title="엑셀">⬇<span class="hidden sm:inline"> 엑셀</span></button>
+            <button id="btn-close" class="text-xs font-bold px-2.5 py-1.5 lg:px-3 lg:py-2 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-700 transition" title="창 닫기">✕<span class="hidden sm:inline"> 닫기</span></button>
+        </div>
+    </header>
+
+    <div id="auth-gate" class="hidden max-w-md mx-auto mt-24 text-center p-8 bg-white rounded-2xl shadow shrink-0">
+        <div class="text-4xl mb-3">🔒</div>
+        <div class="font-bold text-slate-800 mb-1">로그인이 필요합니다</div>
+        <div class="text-sm text-slate-500">메인 앱(업무관리)에서 먼저 로그인한 뒤<br>이 페이지를 열어주세요.</div>
+    </div>
+
+    <!-- 헤더를 뺀 나머지 높이를 전부 쓴다 (표를 최대한 길게) -->
+    <main id="main" class="hidden px-2 py-2 lg:px-4 lg:py-3 max-w-[1600px] w-full mx-auto flex flex-col lg:flex-row gap-2 lg:gap-3 flex-1 min-h-0">
+
+        <!-- 근무자 목록 — 기록표와 별개의 왼쪽 영역 -->
+        <aside id="people-panel"
+               class="w-full lg:w-[190px] shrink-0 bg-white rounded-2xl border border-slate-200 shadow-sm
+                      p-1.5 lg:p-3 flex flex-col min-h-0 lg:max-h-full overflow-hidden">
+            <div class="hidden lg:flex items-center justify-between mb-2 shrink-0">
+                <span class="text-[11px] font-extrabold text-slate-500">근무자</span>
+                <button id="btn-add-person-side"
+                        class="text-[11px] font-bold px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white">➕ 등록</button>
+            </div>
+            <div id="person-tabs" class="flex flex-row lg:flex-col gap-1.5 overflow-auto"></div>
+        </aside>
+
+        <section class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex-1 min-w-0 min-h-0 flex flex-col">
+
+            <!-- 월 이동 + 인원 정보 -->
+            <div class="px-2 py-2 lg:px-4 lg:py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2 lg:gap-3 shrink-0">
+                <div class="flex flex-wrap items-center gap-1.5 lg:gap-2">
+                    <button id="btn-prev" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200">◀</button>
+                    <span id="month-label" class="text-sm font-extrabold text-slate-800 tabular-nums"></span>
+                    <button id="btn-next" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200">▶</button>
+                    <button id="btn-this" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200">이번 달</button>
+                    <!-- 📱 모바일 전용 — 접어 둔 영역 열기 -->
+                    <button id="btn-m-summary" type="button" aria-expanded="false"
+                            class="lg:hidden text-xs font-bold px-2.5 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+                        <span id="summary-mini">요약</span> ▾</button>
+                    <button id="btn-m-tools" type="button" aria-expanded="false"
+                            class="lg:hidden text-xs font-bold px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200">도구 ▾</button>
+                </div>
+                <div id="m-tools-sel" class="m-collapsed flex flex-wrap lg:flex-nowrap items-center gap-1.5 lg:gap-2 w-full lg:w-auto lg:flex-none">
+                    <span class="hidden lg:inline text-slate-300 mx-1">|</span>
+                    <span class="text-[11px] font-bold text-slate-400">선택</span>
+                    <button class="sel-btn text-xs font-bold px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200" data-sel="all">전체</button>
+                    <button class="sel-btn text-xs font-bold px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200" data-sel="weekday">평일</button>
+                    <button class="sel-btn text-xs font-bold px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200" data-sel="weekend">주말</button>
+                    <button class="sel-btn text-xs font-bold px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200" data-sel="filled">입력된 날</button>
+                    <button class="sel-btn text-xs font-bold px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200" data-sel="none">해제</button>
+                </div>
+                <div id="m-tools-wage" class="m-collapsed flex items-center gap-2">
+                    <label class="text-xs font-bold text-slate-500">시급</label>
+                    <input id="wage-input" type="text" inputmode="numeric"
+                           class="w-28 text-right px-2 py-1.5 border border-slate-300 rounded-lg text-sm tabular-nums">
+                    <span class="text-xs text-slate-500">원</span>
+                    <button id="btn-edit-person" class="text-xs font-bold px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200">인원 수정</button>
+                </div>
+            </div>
+
+            <div class="flex flex-col lg:flex-row items-stretch flex-1 min-h-0">
+
+                <!-- 월 합계 · 계산 규칙 -->
+                <aside id="m-summary-panel" class="m-collapsed w-full lg:w-[212px] shrink-0 bg-slate-50
+                              border-b lg:border-b-0 lg:border-r border-slate-100 p-3
+                              overflow-y-auto max-h-[45vh] lg:max-h-none">
+                    <div id="summary" class="grid grid-cols-2 lg:grid-cols-1 gap-2"></div>
+                    <div id="fx-note" class="text-[11px] text-slate-500 mt-2 leading-snug"></div>
+
+                    <!-- 계산 규칙 — 평소엔 접어 둔다 -->
+                    <details class="group mt-3">
+                        <summary class="list-none [&::-webkit-details-marker]:hidden cursor-pointer select-none inline-flex items-center gap-1
+                                        text-[11px] font-bold text-slate-400 hover:text-indigo-600 transition">
+                            <span class="transition-transform group-open:rotate-90">▸</span>계산 규칙 · 사용법
+                        </summary>
+                        <p class="text-[11px] text-slate-500 mt-2 leading-relaxed bg-white border border-slate-200 rounded-lg px-2.5 py-2">
+                            · 근무시간 = 퇴근 − 출근 − 휴게시간. 휴게는 <b>기본 0분</b>이고, <b>08:30~17:30 정규 근무인 날만 60분</b>이 자동으로 들어갑니다.<br>
+                            · 퇴근이 출근보다 이르면 자정을 넘긴 것으로 봅니다.<br>
+                            · <b>확인</b> 칸은 그날 일정대로 근무를 마쳤는지 표시합니다. 지난 날짜인데 확인하지 않은 날은 노랗게 보이고, 시간을 고치면 확인이 해제됩니다.<br>
+                            · 날짜를 체크하면 <b>일괄 입력·삭제</b>와 <b>확인 처리·해제</b>를 한 번에 할 수 있습니다.<br>
+                            · 월 총금액 = 총 근무시간 × 시급. <b>연장·야간·주휴수당은 계산하지 않습니다.</b><br>
+                            · 위안화는 월 총액을 당일 환율로 환산합니다(경영지표에 기록된 값).
+                        </p>
+                    </details>
+                </aside>
+
+                <div class="flex-1 min-w-0 flex flex-col min-h-0">
+                    <!-- 일괄 입력 — 체크한 날짜에만 적용된다 -->
+                    <div id="bulk-bar" class="hidden shrink-0 px-4 py-2.5 bg-indigo-50 border-b border-indigo-100
+                         flex flex-wrap items-center gap-2 text-xs">
+                        <b id="bulk-count" class="text-indigo-700"></b>
+                        <span class="text-slate-400">|</span>
+                        <label class="font-bold text-slate-600">출근</label>
+                        <input id="bulk-in" type="time" class="px-2 py-1 border border-slate-300 rounded-lg">
+                        <label class="font-bold text-slate-600">퇴근</label>
+                        <input id="bulk-out" type="time" class="px-2 py-1 border border-slate-300 rounded-lg">
+                        <label class="font-bold text-slate-600">휴게</label>
+                        <input id="bulk-break" inputmode="numeric" placeholder="자동"
+                               class="w-16 px-2 py-1 border border-slate-300 rounded-lg text-center">
+                        <button id="btn-bulk-apply" class="font-bold px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white">적용</button>
+                        <button id="btn-bulk-ok" class="font-bold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white">확인 처리</button>
+                        <button id="btn-bulk-unok" class="font-bold px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 hover:bg-slate-50">확인 해제</button>
+                        <button id="btn-bulk-clear" class="font-bold px-3 py-1.5 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">선택 지우기</button>
+                        <span class="hidden lg:inline text-[11px] text-slate-500 ml-auto">비워 둔 칸은 그대로 둡니다</span>
+                    </div>
+
+                    <div class="overflow-auto flex-1 min-h-0">
+                        <table class="ws-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:38px;"><input type="checkbox" id="chk-all" title="전체 선택"></th>
+                                    <th style="width:92px;">날짜</th>
+                                    <th style="width:124px;">출근</th>
+                                    <th style="width:124px;">퇴근</th>
+                                    <th style="width:86px;">휴게<span class="font-normal text-slate-400">(분)</span></th>
+                                    <th style="width:104px;">근무시간</th>
+                                    <th style="width:88px;" title="일정대로 출퇴근해 근무를 마쳤는지 확인한 표시입니다. 시간을 고치면 자동으로 해제됩니다.">확인</th>
+                                    <th>메모</th>
+                                </tr>
+                            </thead>
+                            <tbody id="sheet-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="empty-state" class="hidden p-12 text-center text-slate-400 text-sm">
+                등록된 인원이 없습니다. <b>➕ 인원 등록</b>으로 추가하세요.
+            </div>
+        </section>
+
+    </main>
+
+    <!-- 인원 등록/수정 -->
+    <div id="person-modal" class="hidden fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl w-full max-w-sm shadow-xl">
+            <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 id="person-modal-title" class="font-bold text-slate-800">인원 등록</h3>
+                <button data-close-person class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div class="p-5 space-y-3">
+                <div>
+                    <label class="lbl">이름</label>
+                    <input id="p-name" class="inp" placeholder="예: 김OO" maxlength="20">
+                </div>
+                <div>
+                    <label class="lbl">시급 (원)</label>
+                    <input id="p-wage" class="inp text-right" inputmode="numeric" placeholder="10,030">
+                </div>
+                <div>
+                    <label class="lbl">메모 <span class="font-normal text-slate-400">(선택)</span></label>
+                    <input id="p-memo" class="inp" placeholder="예: 주 3일, 오후만" maxlength="40">
+                </div>
+                <label class="flex items-center gap-2 text-sm text-slate-600 font-bold pt-1">
+                    <input type="checkbox" id="p-active" checked> 사용 중
+                    <span class="font-normal text-xs text-slate-400">(끄면 탭에서 숨겨집니다. 기록은 남습니다)</span>
+                </label>
+            </div>
+            <div class="px-5 py-4 border-t border-slate-100 flex justify-between gap-2">
+                <button id="btn-delete-person" class="hidden text-xs font-bold px-3 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100">삭제</button>
+                <div class="flex gap-2 ml-auto">
+                    <button data-close-person class="text-xs font-bold px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200">취소</button>
+                    <button id="btn-save-person" class="text-xs font-bold px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg z-[60]"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script type="module" src="js/worktime.js?v=202610021042"></script>
+</body>
+</html>

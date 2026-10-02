@@ -3,6 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, shrink-to-fit=no">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="업무관리">
     <title>물류팀 데이터 관리</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -15,8 +20,10 @@
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 팀 결산 보고 '화면 그대로 PDF' 저장용 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=202610021042">
     <style>
         /* 💡 탭 전환 시 hidden 클래스가 충돌하는 문제 방지 */
         .hidden { display: none !important; }
@@ -82,11 +89,23 @@
             flex-direction: column !important;
         }
         
+        /* 본문: 좌측 공용 사이드바 | 우측 콘텐츠 (좌우 배치) */
         #history-modal-content-box > .flex-grow {
-            min-height: 0 !important; 
+            min-height: 0 !important;
             flex: 1 1 auto !important;
             display: flex !important;
+            flex-direction: row !important;
+        }
+        #history-global-sidebar {
+            flex: 0 0 auto !important;
+        }
+        #history-main-content {
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            min-height: 0 !important;
+            display: flex !important;
             flex-direction: column !important;
+            overflow: hidden !important;
         }
 
         /* 💡 패널별 속성 분리 (rawdata-panel은 스크롤이 되면 안됩니다!) */
@@ -110,7 +129,12 @@
 
     <div id="modals-container-history" class="w-full h-full"></div>
     <div id="modals-container-history-popups"></div>
-    <div id="modals-container-form"></div> 
+    <div id="modals-container-form-attendance"></div>
+    <div id="modals-container-form-record"></div>
+    <div id="modals-container-form-quantity"></div>
+    <div id="modals-container-form-team"></div>
+    <div id="modals-container-form-inspection"></div>
+    <div id="modals-container-form-total-inspection"></div> 
     <div id="modals-container-download"></div>
     <div id="modals-container-confirm"></div>
     
@@ -131,14 +155,31 @@
                 loadComponent('components/modals-history.html', 'modals-container-history'),
                 loadComponent('components/modals-history-popups.html', 'modals-container-history-popups'),
                 loadComponent('components/modals-confirm.html', 'modals-container-confirm'),
-                loadComponent('components/modals-form.html', 'modals-container-form') 
+                // ⚠️ 예전의 modals-form.html 은 아래 6개 파일로 쪼개졌는데 여기만 옛 이름을 부르고 있었다.
+                // 그래서 데이터 관리 창에는 처리량 수정·근태 기록·업무 기록 수정 모달의
+                // 마크업이 통째로 없었고, 버튼을 눌러도 아무 일이 일어나지 않았다.
+                loadComponent('components/modals-form-attendance.html', 'modals-container-form-attendance'),
+                loadComponent('components/modals-form-record.html', 'modals-container-form-record'),
+                loadComponent('components/modals-form-quantity.html', 'modals-container-form-quantity'),
+                loadComponent('components/modals-form-team.html', 'modals-container-form-team'),
+                loadComponent('components/modals-form-inspection.html', 'modals-container-form-inspection'),
+                loadComponent('components/modals-form-total-inspection.html', 'modals-container-form-total-inspection')
             ]);
 
             try {
-                const State = await import('./js/state.js');
-                try { await import('./js/app.js'); } catch(e) {} 
+                const State = await import('./js/state.js?v=202610021042');
+                try { await import('./js/app.js?v=202610021042'); } catch(e) {} 
                 
-                const { loadAndRenderHistoryList, switchHistoryView } = await import('./js/app-history-logic.js');
+                const { loadAndRenderHistoryList, switchHistoryView } = await import('./js/app-history-logic.js?v=202610021042');
+                const { restoreHistoryView } = await import('./js/view-state.js?v=202610021042');
+
+                // 초기 준비(로우데이터 → 일별 → 첫 날짜)를 마친 뒤,
+                // 보고 있던 자리로 되돌린다. 기억된 게 없으면 평소대로 대시보드.
+                const showLastViewOrDashboard = async (dashboardBtn) => {
+                    let restored = false;
+                    try { restored = await restoreHistoryView(); } catch (e) { console.error('화면 복원 실패:', e); }
+                    if (!restored && dashboardBtn) dashboardBtn.click();
+                };
 
                 const triggerInitialUI = () => {
                     // 💡 [안전장치 추가] 0.3초 뒤 무조건 화면을 표시하여 투명한 상태에 영원히 갇히는 현상 방지
@@ -172,7 +213,7 @@
                                     if (firstDateItem) firstDateItem.click();
                                     
                                     setTimeout(() => {
-                                        if (dashboardMainTabBtn) dashboardMainTabBtn.click();
+                                        showLastViewOrDashboard(dashboardMainTabBtn);
                                         
                                         setTimeout(() => {
                                             const modal = document.getElementById('history-modal');
@@ -186,7 +227,7 @@
                                 }, 100);
                             } catch (e) {
                                 console.error("백그라운드 UI 렌더링 오류:", e);
-                                if (dashboardMainTabBtn) dashboardMainTabBtn.click();
+                                showLastViewOrDashboard(dashboardMainTabBtn);
                                 setTimeout(() => {
                                     const modal = document.getElementById('history-modal');
                                     if (modal) modal.classList.add('ready-show');
@@ -196,7 +237,7 @@
                         } else if (uiAttempts > 50) {
                             clearInterval(triggerInterval);
                             const dashboardMainTabBtn = document.querySelector('[data-main-tab="dashboard"]');
-                            if (dashboardMainTabBtn) dashboardMainTabBtn.click();
+                            showLastViewOrDashboard(dashboardMainTabBtn);
                             setTimeout(() => {
                                 const modal = document.getElementById('history-modal');
                                 if (modal) modal.classList.add('ready-show');
@@ -261,5 +302,7 @@
 
         initHistoryApp();
     </script>
+    <script src="js/connection-banner.js?v=202610021042"></script>
+    <script src="js/modal-esc.js?v=202610021042"></script>
 </body>
 </html>

@@ -1,33 +1,33 @@
 // === js/listeners-main.js ===
 // 설명: 메인 화면의 리스너 (실시간 현황판 제외)
 
-import * as DOM from './dom-elements.js';
-import * as State from './state.js';
+import * as DOM from './dom-elements.js?v=202610021042';
+import * as State from './state.js?v=202610021042';
 
 // app.js에서는 'render'만, app-data.js에서는 'updateDailyData'를 가져옵니다.
-import { render } from './app.js';
-import { updateDailyData } from './app-data.js';
+import { render } from './app.js?v=202610021042';
+import { updateDailyData } from './app-data.js?v=202610021042';
 
-import { calcElapsedMinutes, showToast, getTodayDateString, getCurrentTime, formatTimeTo24H } from './utils.js';
+import { calcElapsedMinutes, showToast, getTodayDateString, getCurrentTime, formatTimeTo24H } from './utils.js?v=202610021042';
 import {
     renderPersonalAnalysis,
     renderQuantityModalInputs,
     renderManualAddModalDatalists,
     renderLeaveTypeModalOptions 
-} from './ui.js';
+} from './ui.js?v=202610021042';
 import {
     processClockIn, processClockOut, cancelClockOut
-} from './app-logic.js';
-import { saveProgress, saveDayDataToHistory, checkUnverifiedRecords } from './history-data-manager.js';
-import { checkMissingQuantities } from './analysis-logic.js';
-import { openHistoryQuantityModal } from './app-history-logic.js';
+} from './app-logic.js?v=202610021042';
+import { saveProgress, saveDayDataToHistory, checkUnverifiedRecords, previewDayClose } from './history-data-manager.js?v=202610021042';
+import { checkMissingQuantities } from './analysis-logic.js?v=202610021042';
+import { openHistoryQuantityModal } from './app-history-logic.js?v=202610021042';
 
 import { 
     doc, updateDoc, collection, query, where, getDocs, setDoc 
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // Admin Todo 로직 임포트
-import * as AdminTodoLogic from './admin-todo-logic.js';
+import * as AdminTodoLogic from './admin-todo-logic.js?v=202610021042';
 
 export function setupMainScreenListeners() {
 
@@ -159,35 +159,79 @@ export function setupMainScreenListeners() {
     }
 
     // --- 하단 버튼 (마감, 저장, 수동추가) 리스너 ---
-    if (DOM.endShiftBtn) {
-        DOM.endShiftBtn.addEventListener('click', () => {
-            const ongoingRecords = (State.appState.workRecords || []).filter(r => r.status === 'ongoing' || r.status === 'paused');
+    // 🔥 [핵심 수정] 진행 중인 업무가 없어도 확인 창을 띄우도록 수정
 
-            if (ongoingRecords.length > 0) {
-                const ongoingTaskNames = new Set(ongoingRecords.map(r => r.task));
-                const ongoingTaskCount = ongoingTaskNames.size;
-                if (DOM.endShiftConfirmTitle) DOM.endShiftConfirmTitle.textContent = `진행 중인 업무 ${ongoingTaskCount}종`;
-                if (DOM.endShiftConfirmMessage) DOM.endShiftConfirmMessage.textContent = `총 ${ongoingRecords.length}명이 참여 중인 ${ongoingTaskCount}종의 업무가 있습니다. 모두 종료하고 마감하시겠습니까?`;
-                if (DOM.endShiftConfirmModal) DOM.endShiftConfirmModal.classList.remove('hidden');
-            } else {
-                saveDayDataToHistory(true);
-            }
-        });
+    // 마감 미리보기를 확인창에 그린다. 마감은 되돌릴 수 없으므로
+    // '무엇이 마감되고 무엇이 삭제되는지' 를 누르기 전에 보여 준다.
+    const renderEndShiftPreview = () => {
+        const box = DOM.endShiftPreview;
+        if (!box) return;
+        const t = DOM.endShiftTimeInput ? DOM.endShiftTimeInput.value : '';
+        if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(t)) {
+            box.innerHTML = '<span class="text-red-600">마감 시각을 17:30 형식으로 입력해 주세요.</span>';
+            return;
+        }
+        const p = previewDayClose(State.appState.workRecords || [],
+                                 State.appState.dailyAttendance || {}, t);
+        const 시간 = (m) => {
+            const v = Math.round(m || 0);
+            if (v < 60) return `${v}분`;
+            return v % 60 ? `${Math.floor(v / 60)}시간 ${v % 60}분` : `${Math.floor(v / 60)}시간`;
+        };
+        const 줄 = [
+            `· 진행 중 기록 <b>${p.closed}건</b>이 마감됩니다 (합계 ${시간(p.closedMinutes)})`,
+            `· 퇴근 미기록 <b>${p.outTimeFixed}명</b>의 퇴근시각이 <b>${t}</b>로 확정됩니다`,
+        ];
+        if (p.deleted > 0) {
+            const 사유 = [];
+            if (p.deletedCompleted) 사유.push(`${p.deletedCompleted}건은 이미 종료된 0분 기록`);
+            if (p.lateStart) 사유.push(`${p.lateStart}건은 ${t} 보다 늦게 시작`);
+            줄.push(`· <span class="text-red-600 font-bold">⚠️ ${p.deleted}건은 0분이 되어 삭제됩니다`
+                + (사유.length ? ` (그중 ${사유.join(', ')})` : '') + '</span>');
+        }
+        if (p.clamped > 0) 줄.push(`· ${p.clamped}건은 조퇴/퇴근 시각까지만 계산됩니다`);
+        if (p.outTimeBeforeIn > 0) {
+            줄.push(`· <span class="text-red-600 font-bold">⛔ ${p.outTimeBeforeIn}명은 출근시각이 ${t} 보다 늦습니다`
+                + ' — 이대로는 마감할 수 없습니다</span>');
+        }
+        if (p.invalid > 0) {
+            줄.push('· <span class="text-red-600 font-bold">⛔ '
+                + `${p.invalid}건은 시작시각이 HH:MM 형식이 아닙니다 — 이대로는 마감할 수 없습니다</span>`);
+        }
+        줄.push(`· 이미 종료된 기록 ${p.kept}건은 그대로 유지됩니다`);
+        box.innerHTML = 줄.map(x => `<div>${x}</div>`).join('');
+    };
+
+    const openEndShiftModal = () => {
+        const ongoingRecords = (State.appState.workRecords || []).filter(r => r.status === 'ongoing' || r.status === 'paused');
+
+        if (ongoingRecords.length > 0) {
+            const ongoingTaskNames = new Set(ongoingRecords.map(r => r.task));
+            const ongoingTaskCount = ongoingTaskNames.size;
+            if (DOM.endShiftConfirmTitle) DOM.endShiftConfirmTitle.textContent = `진행 중인 업무 ${ongoingTaskCount}종`;
+            if (DOM.endShiftConfirmMessage) DOM.endShiftConfirmMessage.textContent = `총 ${ongoingRecords.length}명이 참여 중인 ${ongoingTaskCount}종의 업무가 있습니다. 모두 종료하고 마감하시겠습니까?`;
+        } else {
+            if (DOM.endShiftConfirmTitle) DOM.endShiftConfirmTitle.textContent = `오늘 업무 마감`;
+            if (DOM.endShiftConfirmMessage) DOM.endShiftConfirmMessage.textContent = `진행 중인 업무가 없습니다. 이대로 오늘 업무를 마감하시겠습니까?`;
+        }
+        // 기본값은 현재시각 — 예전 동작과 같다. 그대로 누르면 결과가 달라지지 않는다.
+        if (DOM.endShiftTimeInput) DOM.endShiftTimeInput.value = getCurrentTime();
+        renderEndShiftPreview();
+        if (DOM.endShiftConfirmModal) DOM.endShiftConfirmModal.classList.remove('hidden');
+    };
+
+    if (DOM.endShiftTimeInput) {
+        DOM.endShiftTimeInput.addEventListener('input', renderEndShiftPreview);
+        DOM.endShiftTimeInput.addEventListener('change', renderEndShiftPreview);
     }
-    
+
+    if (DOM.endShiftBtn) {
+        DOM.endShiftBtn.addEventListener('click', openEndShiftModal);
+    }
+
     if (DOM.endShiftBtnMobile) {
         DOM.endShiftBtnMobile.addEventListener('click', () => {
-            const ongoingRecords = (State.appState.workRecords || []).filter(r => r.status === 'ongoing' || r.status === 'paused');
-
-            if (ongoingRecords.length > 0) {
-                const ongoingTaskNames = new Set(ongoingRecords.map(r => r.task));
-                const ongoingTaskCount = ongoingTaskNames.size;
-                if (DOM.endShiftConfirmTitle) DOM.endShiftConfirmTitle.textContent = `진행 중인 업무 ${ongoingTaskCount}종`;
-                if (DOM.endShiftConfirmMessage) DOM.endShiftConfirmMessage.textContent = `총 ${ongoingRecords.length}명이 참여 중인 ${ongoingTaskCount}종의 업무가 있습니다. 모두 종료하고 마감하시겠습니까?`;
-                if (DOM.endShiftConfirmModal) DOM.endShiftConfirmModal.classList.remove('hidden');
-            } else {
-                saveDayDataToHistory(true);
-            }
+            openEndShiftModal();
             if (DOM.navContent) DOM.navContent.classList.add('hidden');
         });
     }
@@ -295,9 +339,16 @@ export function setupMainScreenListeners() {
                 });
 
                 // 오늘 입력은 '가저장' 상태이므로 isQuantityVerified = false로 저장
-                saveProgress(false, false); 
+                // (isAutoSave=true 로 주어 saveProgress 자체 토스트를 끄고, 결과만 여기서 한 번 알린다)
+                // 처리량 자체는 위 updateDailyData 로 이미 반영됐다 — 확인은 먼저 알린다.
+                showToast('오늘의 처리량(예상)을 반영했습니다.');
 
-                showToast('오늘의 처리량(예상)이 저장되었습니다.');
+                // ⚠️ await 를 빼면 안 된다. 이 호출이 떠 있는 동안 사용자가 '업무 마감'을 누르면,
+                //    뒤늦게 끝난 이쪽이 마감 전 상태(ongoing)로 이력을 통째 덮어쓴다.
+                //    (workRecords 는 배열이라 merge 가 아니라 교체다)
+                const resToday = await saveProgress(true, false);
+                // 'nothing'(저장할 게 없음)은 정상, 'failed' 만 오류로 안내한다.
+                if (resToday === 'failed') showToast('처리량은 반영됐지만 이력 저장에 실패했습니다. 연결을 확인해 주세요.', true);
             };
 
             State.context.quantityModalContext.onCancel = () => {};
@@ -343,9 +394,11 @@ export function setupMainScreenListeners() {
                     confirmedZeroTasks: confirmedZeroTasks
                 });
                 
-                saveProgress(false, false);
+                showToast('오늘의 처리량(예상)을 반영했습니다.');
 
-                showToast('오늘의 처리량(예상)이 저장되었습니다.');
+                // await 필수 — 위 데스크톱 분기의 주석 참조(마감과의 경합).
+                const resToday2 = await saveProgress(true, false);
+                if (resToday2 === 'failed') showToast('처리량은 반영됐지만 이력 저장에 실패했습니다. 연결을 확인해 주세요.', true);
             };
 
             State.context.quantityModalContext.onCancel = () => {};

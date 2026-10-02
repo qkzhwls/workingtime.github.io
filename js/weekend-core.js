@@ -1,7 +1,7 @@
 // === js/weekend-core.js ===
-import * as State from './state.js';
-import { store } from './weekend-store.js';
-import { showToast } from './utils.js';
+import * as State from './state.js?v=202610021042';
+import { store } from './weekend-store.js?v=202610021042';
+import { showToast, showConfirm } from './utils.js?v=202610021042';
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 export async function createRequest(dateStr, member, status = 'requested') {
@@ -53,12 +53,12 @@ export async function handleDateClick(dateStr, isBlocked) {
     }
 
     if (store.myRequestsMap.has(dateStr)) {
-        if (confirm(`${dateStr} 근무 신청 내역을 완전히 삭제하시겠습니까?`)) {
+        if (await showConfirm(`${dateStr} 근무 신청 내역을 완전히 삭제하시겠습니까?`, { title: '신청 취소', okText: '삭제', danger: true })) {
             const docId = store.myRequestsMap.get(dateStr);
             await deleteRequest(docId);
         }
     } else {
-        if (confirm(`${dateStr} 근무를 신청하시겠습니까?`)) {
+        if (await showConfirm(`${dateStr} 근무를 신청하시겠습니까?`, { title: '주말 근무 신청', okText: '신청' })) {
             await createRequest(dateStr, member, 'requested');
         }
     }

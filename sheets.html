@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="업무관리">
+    <title>업무 시트 대시보드</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>tailwind.config = { darkMode: 'class' }</script>
+    <style>
+        body { font-family: 'Inter', 'Noto Sans KR', sans-serif; }
+        .data-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+        /* 표 머리글은 스크롤해도 맨 위에 붙어 있는다.
+           border-collapse: collapse 에서는 고정된 칸의 테두리가 같이 스크롤되어 사라지므로,
+           아래쪽 선은 box-shadow 로 그린다. */
+        .data-table th { background: #f1f5f9; color: #334155; font-weight: 700; padding: 6px 10px;
+                         border: 1px solid #e2e8f0; border-bottom: 0; white-space: nowrap;
+                         position: sticky; top: 0; z-index: 2; box-shadow: inset 0 -1px 0 #cbd5e1; }
+        .data-table td { padding: 5px 10px; border: 1px solid #eef2f7; color: #334155; white-space: nowrap; }
+        .data-table tr:nth-child(even) td { background: #fafcff; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; }
+        /* 시트 탭 */
+        .sheet-tab { flex: 0 0 auto; padding: 8px 14px; font-size: 13px; font-weight: 700; color: #64748b;
+                     background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; border-radius: 8px 8px 0 0; }
+        .sheet-tab:hover { color: #334155; background: #e2e8f0; }
+        .sheet-tab.active { color: #4338ca; border-bottom-color: #4f46e5; background: #fff; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+
+    <!-- 상단 바 -->
+    <header class="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between sticky top-0 z-20 shadow-sm">
+        <h1 class="text-lg font-extrabold text-slate-800 flex items-center gap-2">🗂️ 업무 시트 대시보드</h1>
+        <div class="flex items-center gap-2">
+            <button id="btn-settings" class="text-xs font-bold px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition">⚙️ 설정</button>
+            <button id="btn-add" class="text-xs font-bold px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition">➕ 시트 추가</button>
+            <button id="btn-refresh-all" class="text-xs font-bold px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white transition">🔄 전체 새로고침</button>
+            <button id="btn-close" class="text-xs font-bold px-3 py-2 rounded-lg bg-slate-100 hover:bg-red-100 hover:text-red-600 text-slate-700 transition ml-1" title="창 닫기">✕ 닫기</button>
+        </div>
+    </header>
+
+    <!-- 로그인 안내 게이트 -->
+    <div id="auth-gate" class="hidden max-w-md mx-auto mt-24 text-center p-8 bg-white rounded-2xl shadow">
+        <div class="text-4xl mb-3">🔒</div>
+        <div class="font-bold text-slate-800 mb-1">로그인이 필요합니다</div>
+        <div class="text-sm text-slate-500">메인 앱(업무관리)에서 먼저 로그인한 뒤<br>이 페이지를 열어주세요.</div>
+    </div>
+
+    <!-- 본문 -->
+    <!-- 폭 제한 없이 창을 꽉 채운다 -->
+    <main id="main" class="hidden px-4 py-4 space-y-3">
+        <div id="no-config" class="hidden text-center p-10 bg-white rounded-2xl border border-dashed border-slate-300 text-slate-500">
+            먼저 <b>⚙️ 설정</b>에서 Apps Script URL을 등록하고, <b>➕ 시트 추가</b>로 요약할 시트를 등록하세요.
+        </div>
+        <!-- 시트 탭 — 한 번에 한 시트만 보여준다(js/sheets-dashboard.js 가 만든다) -->
+        <div id="sheet-tabs" class="hidden flex gap-1 overflow-x-auto border-b border-slate-200 -mb-1"></div>
+        <div id="sheets-container"></div>
+    </main>
+
+    <!-- 설정 모달 -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+            <h2 class="text-base font-bold mb-1">⚙️ 설정</h2>
+            <p class="text-xs text-slate-500 mb-4">시트를 읽어오는 Apps Script Web App URL을 입력하세요. (키는 저장되지 않으며 이 URL만 사용)</p>
+            <label class="block text-xs font-bold text-slate-600 mb-1">Apps Script Web App URL</label>
+            <input id="inp-script-url" type="url" placeholder="https://script.google.com/macros/s/.../exec" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm mb-4">
+            <div class="flex justify-end gap-2">
+                <button data-close class="px-4 py-2 text-sm rounded-lg bg-slate-100 hover:bg-slate-200">취소</button>
+                <button id="btn-save-settings" class="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 시트 추가/편집 모달 -->
+    <div id="sheet-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+            <h2 id="sheet-modal-title" class="text-base font-bold mb-4">➕ 시트 추가</h2>
+            <input type="hidden" id="inp-sheet-localid">
+            <label class="block text-xs font-bold text-slate-600 mb-1">이름 (표시용)</label>
+            <input id="inp-sheet-name" type="text" placeholder="예: 발주 현황" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm mb-3">
+            <label class="block text-xs font-bold text-slate-600 mb-1">스프레드시트 URL 또는 ID</label>
+            <input id="inp-sheet-url" type="text" placeholder="https://docs.google.com/spreadsheets/d/...." class="w-full p-2.5 border border-slate-300 rounded-lg text-sm mb-1">
+            <p class="text-[11px] text-slate-400 mb-3">붙여넣으면 시트 ID를 자동 추출합니다.</p>
+
+            <div class="grid grid-cols-2 gap-3 mb-1">
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">탭 이름</label>
+                    <input id="inp-sheet-tab" type="text" placeholder="비우면 첫 번째 탭" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">가져올 범위</label>
+                    <input id="inp-sheet-range" type="text" placeholder="비우면 전체 (예: A1:H200)" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm">
+                </div>
+            </div>
+            <p id="range-hint" class="text-[11px] text-slate-400 mb-4 leading-relaxed">
+                범위의 <b>첫 줄이 머리글</b>이 됩니다. <code>A1:H200</code> · <code>B:F</code>(열만) ·
+                <code>A5:</code>(5행부터) · <code>3:100</code>(행만) 형태로 적습니다.<br>
+                <span class="text-amber-600">탭 이름</span>은 Apps Script가 <code>tab</code> 값을 지원할 때만 적용됩니다.
+                범위는 스크립트가 지원하지 않아도 받아온 뒤 잘라서 보여줍니다.
+            </p>
+            <label class="block text-xs font-bold text-slate-600 mb-1">보기 방식</label>
+            <select id="inp-sheet-view" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm mb-1">
+                <option value="table">기본 표 — 시트 내용을 그대로 보여줍니다</option>
+                <option value="kpi">금액관리 — 오더·결제 KPI 화면</option>
+            </select>
+            <p class="text-[11px] text-slate-400 mb-3 leading-relaxed">
+                시트마다 따로 정합니다. <b>금액관리</b>를 고른 시트에서만 특별 화면이 나오고,
+                나머지는 양식이 같아도 시트 내용을 그대로 보여줍니다.
+            </p>
+
+            <label class="block text-xs font-bold text-slate-600 mb-1">금액 칸 서식</label>
+            <select id="inp-sheet-money" class="w-full p-2.5 border border-slate-300 rounded-lg text-sm mb-1">
+                <option value="none">그대로 (시트 값 그대로)</option>
+                <option value="usd">달러 — $1,234.56 (소수점 둘째 자리)</option>
+            </select>
+            <p class="text-[11px] text-slate-400 mb-4 leading-relaxed">
+                금액 · 수수료 · 합계 · 송금액 · 잔액 · 단가처럼 <b>금액을 뜻하는 머리글</b>의 칸에만 적용됩니다.
+                주차 · 박스 같은 숫자 칸과 날짜 칸은 그대로 둡니다.
+            </p>
+
+            <div class="flex justify-between items-center">
+                <button id="btn-delete-sheet" class="hidden px-3 py-2 text-xs rounded-lg bg-red-50 hover:bg-red-100 text-red-600 font-bold">삭제</button>
+                <div class="flex gap-2 ml-auto">
+                    <button data-close class="px-4 py-2 text-sm rounded-lg bg-slate-100 hover:bg-slate-200">취소</button>
+                    <button id="btn-save-sheet" class="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 컬럼 선택 모달 -->
+    <div id="cols-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <h2 class="text-base font-bold mb-1">표시할 컬럼 선택</h2>
+            <p class="text-xs text-slate-500 mb-3">대시보드에 보일 컬럼만 체크하세요.</p>
+            <input type="hidden" id="inp-cols-localid">
+            <div id="cols-list" class="max-h-72 overflow-y-auto space-y-1.5 mb-4 border border-slate-200 rounded-lg p-3"></div>
+            <div class="flex justify-end gap-2">
+                <button data-close class="px-4 py-2 text-sm rounded-lg bg-slate-100 hover:bg-slate-200">취소</button>
+                <button id="btn-save-cols" class="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold">적용</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="js/sheets-dashboard.js?v=202610021042"></script>
+    <script src="js/connection-banner.js?v=202610021042"></script>
+    <script src="js/modal-esc.js?v=202610021042"></script>
+</body>
+</html>

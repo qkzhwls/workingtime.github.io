@@ -1,7 +1,7 @@
 // === js/china-stock-goods.js ===
 // 중국제작 미발계산기 Ver 9.9 (설정파일 분리: config.js → china-stock-config.js — 최종관리자 공유 config.js와 충돌 방지. 관리자 인계 PR 준비)
 
-import { initializeFirebase } from './china-stock-config.js?v=9.9'; // [Ver 9.9] 관리자 공유 config.js와 충돌 방지 — china-stock 전용 설정
+import { initializeFirebase } from './china-stock-config.js?v=202610021042'; // [Ver 9.9] 관리자 공유 config.js와 충돌 방지 — china-stock 전용 설정
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const { db } = initializeFirebase();
@@ -38,6 +38,27 @@ let scanDataReady = false; // [Ver 8.93] 초기 데이터 로드 완료 여부 �
 
 // 유틸리티
 const cleanKey = (str) => (str || '').toString().replace(/[^a-zA-Z0-9가-힣]/g, '');
+
+// 🔑 큰 맵(바코드 수만 건 등)은 '맵'이 아니라 'JSON 문자열'로 저장한다.
+//    맵으로 넣으면 Firestore 가 키마다 색인을 만들어, 문서 하나가 색인 한도(4만 건)를 넘기면
+//    "too many index entries for entity" 로 저장 자체가 막힌다. 문자열은 색인이 1건이라 안전하다.
+//    (재고로그를 dataStr 로 저장하는 것과 같은 이유)
+const MAP_STR_LIMIT = 900000;   // 문서 1MB 한도 안에서 여유를 둔 상한
+function packMap(obj) {
+    const mapStr = JSON.stringify(obj || {});
+    if (mapStr.length > MAP_STR_LIMIT) {
+        throw new Error(`저장할 자료가 너무 큽니다(${Math.round(mapStr.length / 1024)}KB). 오래된 항목을 정리해 주세요.`);
+    }
+    return { mapStr, count: Object.keys(obj || {}).length, updatedAt: new Date() };
+}
+/** 저장된 문서에서 맵을 꺼낸다 — 새 형식(mapStr)·옛 형식(map) 모두 지원 */
+function unpackMap(data) {
+    if (!data) return {};
+    if (typeof data.mapStr === 'string') {
+        try { return JSON.parse(data.mapStr) || {}; } catch (e) { return {}; }
+    }
+    return data.map || {};
+}
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 // [Ver 6.6] 위치 열 선택: known 배열의 '우선순위 순서'대로 찾음 (파일 열 순서 아님).
 //   예) 옵션추가항목1을 옵션보다 우선. 못 찾으면 상품코드가 아닌 첫 비어있지 않은 열.
@@ -59,10 +80,11 @@ function normalizeDate(dateStr) {
     if (!dateStr) return '';
     let s = dateStr.toString().trim();
     if (/^\d{4,5}(\.\d+)?$/.test(s)) s = formatExcelDate(parseFloat(s));
-    s = s.replace(/\./g, '-').replace(/\//g, '-');
+    // '2026. 9. 8.' 처럼 점·공백이 섞인 표기(구글시트 표시값)도 받아들인다
+    s = s.replace(/\./g, '-').replace(/\//g, '-').replace(/\s+/g, '').replace(/-+$/, '');
     const parts = s.split('-');
     if (parts.length === 3) {
-        let [y, m, d] = parts;
+        let [y, m, d] = parts.map(v => v.trim());
         if (y.length === 2) y = '20' + y;
         return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
     }
@@ -1082,10 +1104,44 @@ async function saveZoneCap() {
 async function saveSheetSettings() {
     csvUrlOrder = document.getElementById('modal-csv-order').value.trim();
     csvUrlBuy = document.getElementById('modal-csv-buy').value.trim();
-    await saveConfig();
-    closeSheetSettingsModal();
-    showToast('✅ CSV 링크 저장 완료');
-    syncOrderData();
+    // 저장이 실패해도 아무 표시가 없어 '눌러도 안 된다'로 보였다 → 이유를 알려준다
+    const btn = document.getElementById('btn-sheet-save');
+    const label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '저장 중…'; }
+    try {
+        await saveConfig();
+        closeSheetSettingsModal();
+        showToast('✅ CSV 링크 저장 완료');
+        syncOrderData();
+    } catch (e) {
+        console.error('[china-stock] CSV 링크 저장 실패:', e);
+        showToast(saveErrorMessage(e));
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = label || '저장'; }
+    }
+}
+
+/** 저장 실패 사유를 사람이 읽을 수 있게. 권한 오류가 가장 흔하다(규칙 미게시·로그아웃). */
+function saveErrorMessage(e) {
+    const code = (e && e.code) || '';
+    if (code === 'permission-denied')
+        return '❌ 저장 권한이 없습니다 — 로그인 상태와 Firestore 규칙(게시 여부)을 확인해 주세요.';
+    if (code === 'unauthenticated')
+        return '❌ 로그인이 풀렸습니다. 새로고침 후 다시 로그인해 주세요.';
+    if (code === 'unavailable')
+        return '❌ 네트워크에 연결되지 않아 저장하지 못했습니다.';
+    return '❌ 저장 실패: ' + (code || (e && e.message) || e);
+}
+
+/** 오더 자료를 언제 받은 것인지 날짜 바에 작게 표시 */
+function showCsvCacheNote(at) {
+    const el = document.getElementById('csv-updated-note');
+    if (!el || !at) return;
+    const d = new Date(at);
+    const p2 = (n) => String(n).padStart(2, '0');
+    const fresh = (Date.now() - at) < 60 * 1000;
+    el.textContent = fresh ? '방금 갱신' : `오더 ${p2(d.getHours())}:${p2(d.getMinutes())} 기준`;
+    el.title = '오더/사입 시트를 마지막으로 받아온 시각입니다. [🔄 동기화]로 지금 받아올 수 있습니다.';
 }
 
 // ---------------------------------------------------------
@@ -1150,22 +1206,162 @@ function loadFloor2() {
     });
 }
 
-async function syncOrderData(silent = false) {
+async function syncOrderData(silent = false, opts) {
     if (!csvUrlOrder && !csvUrlBuy) return;
+
+    // ⚡ 저장해 둔 값이 있으면 그걸로 먼저 그린다 — 화면이 바로 뜨고, 새 자료는 뒤에서 받아 갱신한다.
+    if (silent && !(opts && opts.force)) {
+        const co = csvUrlOrder ? readCsvCache(toCsvUrl(csvUrlOrder)) : null;
+        const cb = csvUrlBuy ? readCsvCache(toCsvUrl(csvUrlBuy)) : null;
+        // 설정된 시트가 '모두' 저장돼 있을 때만 쓴다 — 하나라도 없으면(오더시트는 2MB를 넘어 저장이 안 된다)
+        // 나머지 시트만으로 표가 그려져 패킹이 일부만 보이고, 그 일부가 스캐너 DB 로도 넘어간다
+        const okO = !csvUrlOrder || (co && co.fresh), okB = !csvUrlBuy || (cb && cb.fresh);
+        if (okO && okB) {
+            try {
+                orderDataOriginal = co ? parseCsvBody(co.text) : [];
+                orderDataBuy = cb ? parseCsvBody(cb.text) : [];
+                if (co) lastCsvText[toCsvUrl(csvUrlOrder)] = co.text;
+                if (cb) lastCsvText[toCsvUrl(csvUrlBuy)] = cb.text;
+                extractShipDates();
+                showCsvCacheNote(Math.max(co ? co.at : 0, cb ? cb.at : 0));
+                // 뒤에서 최신본 받아 조용히 교체
+                setTimeout(() => syncOrderData(true, { force: true }), 300);
+                return;
+            } catch (e) { console.warn('[china-stock] 저장해 둔 CSV 사용 실패 — 새로 받습니다:', e); }
+        }
+    }
+
     if(!silent) showLoading('🔄 오더리스트 동기화 중...');
     try {
-        const [dataOrder, dataBuy] = await Promise.all([fetchCSV(csvUrlOrder), fetchCSV(csvUrlBuy)]);
+        const csvSig = () => [csvUrlOrder, csvUrlBuy].map(u => (u && lastCsvText[toCsvUrl(u)]) || '').join(' ');
+        const before = csvSig();
+        const [dataOrder, dataBuy] = await Promise.all([fetchCSV(csvUrlOrder, opts), fetchCSV(csvUrlBuy, opts)]);
+        const changed = csvSig() !== before;
         orderDataOriginal = dataOrder; orderDataBuy = dataBuy;
-        extractShipDates(); 
+        extractShipDates();
+        // 새로 받은 자료가 다르면 선택된 출고일 표도 다시 만든다(예전엔 날짜 목록만 바뀌고 표는 옛 자료 그대로였다).
+        // 첫 로드(force 아님)·init 도중(재고로그 아직 없음)은 init 이 곧바로 applyDates 하므로 여기선 건너뛴다.
+        if (opts && opts.force && scanDataReady && changed && savedDates.length > 0) { renderSelectedTags(); applyDates(); }
+        showCsvCacheNote(Date.now());
         if(!silent) { hideLoading(); showToast('✅ 동기화 완료'); }
-    } catch (e) { if(!silent) hideLoading(); }
+    } catch (e) {
+        if(!silent) hideLoading();
+        // 예전에는 조용히 끝나서 '저장은 됐는데 데이터가 없다'로만 보였다
+        console.error('[china-stock] 동기화 실패:', e);
+        if(!silent) showToast('❌ ' + (e && e.userMessage ? e.userMessage : ('동기화 실패: ' + ((e && e.message) || e))));
+    }
 }
 
-async function fetchCSV(url) {
-    if(!url) return [];
+// ⚡ CSV 캐시 — 열 때마다 시트를 새로 받으면 몇 초씩 걸린다.
+//    받은 원문을 브라우저에 저장해 두고, 다음에 열 때는 그걸로 '먼저 그린 뒤'
+//    뒤에서 새로 받아 달라진 경우에만 다시 그린다(stale-while-revalidate).
+const CSV_CACHE_KEY = 'chinastock_csv_cache_v1';
+const CSV_CACHE_TTL = 6 * 60 * 60 * 1000;   // 6시간(그 이후엔 캐시를 쓰지 않고 기다렸다 받는다)
+const CSV_CACHE_MAX = 2 * 1024 * 1024;      // 한 주소당 2MB 까지만 저장
+const lastCsvText = {};                     // 주소 → 마지막으로 읽은 CSV 원문(바뀌었는지 가볍게 비교용)
+
+function readCsvCache(url) {
+    try {
+        const all = JSON.parse(localStorage.getItem(CSV_CACHE_KEY) || '{}');
+        const hit = all[url];
+        if (!hit || !hit.text) return null;
+        return { text: hit.text, at: hit.at || 0, fresh: (Date.now() - (hit.at || 0)) < CSV_CACHE_TTL };
+    } catch (e) { return null; }
+}
+function writeCsvCache(url, text) {
+    if (!url || !text) return;
+    try {
+        const all = JSON.parse(localStorage.getItem(CSV_CACHE_KEY) || '{}');
+        // 너무 크면 저장하지 않고, 예전에 저장된 옛 원문도 지운다(오프라인일 때 몇 주 전 자료가 쓰이지 않게)
+        if (text.length > CSV_CACHE_MAX) { if (all[url]) { delete all[url]; localStorage.setItem(CSV_CACHE_KEY, JSON.stringify(all)); } return; }
+        all[url] = { text, at: Date.now() };
+        localStorage.setItem(CSV_CACHE_KEY, JSON.stringify(all));
+    } catch (e) { /* 저장공간 부족 등은 무시 — 캐시는 있으면 좋은 것일 뿐 */ }
+}
+
+// 구글 시트 주소를 CSV로 읽을 수 있는 주소로 바꾼다.
+//   · .../edit?gid=123#gid=123      → .../export?format=csv&gid=123   (편집 링크를 그냥 붙여넣는 경우가 많다)
+//   · .../pub?output=csv            → 그대로 (웹에 게시한 주소 — 가장 확실하다)
+// ⚠️ '편집 링크'는 시트가 비공개면 어떤 방법으로도 못 읽는다. 그때는 [파일 > 공유 > 웹에 게시]로
+//    CSV 주소를 만들어 넣어야 한다(브라우저에서 남의 서버 자료를 읽으려면 그쪽이 허용해 줘야 한다).
+function toCsvUrl(url) {
+    const u = String(url || '').trim();
+    if (!u) return u;
+    if (!/docs\.google\.com\/spreadsheets/.test(u)) return u;      // 구글 시트가 아니면 그대로
+    if (/\/pub\?|output=csv|format=csv|tqx=out:csv/.test(u)) return u; // 이미 CSV 주소
+    const id = (u.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/) || [])[1];
+    if (!id) return u;
+    const gid = (u.match(/[?&#]gid=(\d+)/) || [])[1] || '0';
+    return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+}
+
+async function fetchCSV(rawUrl, opts) {
+    if(!rawUrl) return [];
+    const url = toCsvUrl(rawUrl);
+    const useCache = !(opts && opts.force);
     let textData = '';
-    try { const res = await fetch(url); textData = await res.text(); }
-    catch (e) { const res2 = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`); textData = await res2.text(); }
+    // 1) 직접 → 2) 프록시 두 곳 순서로 시도한다(브라우저 CORS 제한 우회).
+    const tries = [
+        url,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        `https://corsproxy.io/?${encodeURIComponent(url)}`
+    ];
+    let lastErr = null, ok = false, fatal = null;
+    for (const t of tries) {
+        try {
+            const res = await fetch(t);
+            if (!res.ok) { lastErr = new Error('HTTP ' + res.status); continue; }
+            textData = await res.text();
+            // Apps Script 가 돌려준 안내 문구는 그대로 사람에게 보여준다(표로 읽으면 '머리글 없음'으로만 보인다)
+            const head = textData.trim().slice(0, 80).toLowerCase();
+            if (head.startsWith('unauthorized')) {
+                fatal = '스크립트 열쇠(key)가 맞지 않습니다 — 주소의 key= 값과 Apps Script 의 KEY 가 같은지 확인해 주세요.';
+                break;
+            }
+            if (head.startsWith('sheet not found')) {
+                fatal = '시트(탭) 이름을 찾지 못했습니다 — ' + textData.trim().slice(0, 200);
+                break;
+            }
+            // 로그인 페이지(HTML)가 오면 비공개 시트다 — 표로 읽으면 엉뚱한 값이 된다
+            if (/^\s*<(!doctype|html)/i.test(textData) && /accounts\.google\.com|Sign in|로그인/i.test(textData)) {
+                lastErr = new Error('비공개 시트');
+                textData = '';
+                continue;
+            }
+            ok = true;
+            break;
+        } catch (e) { lastErr = e; }
+    }
+    if (fatal) {
+        const err = new Error(fatal); err.userMessage = fatal;
+        console.error('[china-stock] CSV 응답:', textData.trim().slice(0, 200));
+        throw err;
+    }
+    if (!ok && useCache) {
+        // 네트워크가 안 되면 저장해 둔 값이라도 쓴다(오프라인·프록시 장애)
+        const c = readCsvCache(url);
+        if (c && c.fresh) { console.warn('[china-stock] 새로 받지 못해 저장해 둔 값을 씁니다:', url); lastCsvText[url] = c.text; return parseCsvBody(c.text); }
+    }
+    if (!ok) {
+        const msg = (lastErr && lastErr.message === '비공개 시트')
+            ? 'CSV를 읽지 못했습니다 — 시트가 비공개입니다. [파일 > 공유 > 웹에 게시]에서 CSV 주소를 만들어 넣어 주세요.'
+            : 'CSV를 읽지 못했습니다 — 주소를 확인해 주세요. 구글 시트는 [파일 > 공유 > 웹에 게시]로 만든 CSV 주소가 가장 확실합니다.';
+        const err = new Error(msg);
+        err.userMessage = msg;
+        console.error('[china-stock] CSV 읽기 실패:', url, lastErr);
+        throw err;
+    }
+    writeCsvCache(url, textData);
+    const parsed = parseCsvBody(textData);
+    lastCsvText[url] = textData;
+    return parsed;
+}
+
+/** CSV 원문 → 표(객체 배열). 머리글(상품코드) 행을 찾아 그 아래를 읽는다. */
+function parseCsvBody(textData) {
+    // 시트 셀 안의 줄바꿈이 따옴표 없이 '\r' 하나로 들어오는 경우가 있다(예: '메이드 코튼 와이드PT⏎').
+    // 그대로 읽으면 그 자리에서 행이 잘리고 뒤 행들이 어긋나 패킹 값이 통째로 빠진다 → 셀 안 '\r' 은 공백으로.
+    textData = String(textData || '').replace(/\r\n/g, '\n').replace(/\r/g, ' ');
     const wb = XLSX.read(textData, { type: 'string' });
     const rawData = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
     let headerIdx = -1, headers = [];
@@ -1178,6 +1374,13 @@ async function fetchCSV(url) {
             break; 
         }
     }
+    if (headerIdx === -1) {
+        const msg = '표의 머리글을 찾지 못했습니다 — 시트(탭) 이름이 맞는지, 첫 20줄 안에 \'상품코드\' 열이 있는지 확인해 주세요.';
+        const err = new Error(msg); err.userMessage = msg;
+        console.error('[china-stock] 머리글 없음. 받은 첫 줄:', (rawData[0] || []).join(' | '));
+        throw err;
+    }
+
     const result = [];
     for (let i = headerIdx + 1; i < rawData.length; i++) {
         let obj = {}, empty = true;
@@ -1185,6 +1388,12 @@ async function fetchCSV(url) {
         for (let j = 0; j < headers.length; j++) { if (headers[j]) { const v = rawData[i][j]; if (!(headers[j] in obj) || obj[headers[j]] === '' || obj[headers[j]] === undefined) obj[headers[j]] = v; if (v !== '') empty = false; } }
         if (!empty) result.push(obj);
     }
+    if (result.length === 0) {
+        const msg = '표는 읽었지만 데이터 행이 없습니다 — 시트(탭)를 확인해 주세요.';
+        const err = new Error(msg); err.userMessage = msg;
+        throw err;
+    }
+    console.log(`[china-stock] CSV ${result.length}행 · 머리글: ${headers.filter(Boolean).slice(0, 12).join(', ')}`);
     return result;
 }
 
@@ -1276,7 +1485,7 @@ function handleStockLogUpload(e) {
                 const bc = (row['바코드'] || '').toString().trim().toUpperCase();
                 if (c && bc && bc !== c) bcMap[bc] = c;
             });
-            try { await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_MAP'), { map: bcMap, count: Object.keys(bcMap).length, updatedAt: new Date() }); } catch (e) {}
+            try { await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_MAP'), packMap(bcMap)); } catch (e) { console.warn('BARCODE_MAP 저장 실패:', e); }
             hideLoading();
             showToast(`✅ 미발재고 저장 완료 (바코드≠상품코드 ${Object.keys(bcMap).length}건 매핑)`);
             if (tableData.length > 0) applyDates();
@@ -1330,10 +1539,10 @@ async function handleLocationMapUpload(e) {
 // [Ver 8.62] 위치매핑 관리 모달: LOCATION_MAP(상품코드→스캐너 고정 위치) 조회/추가/수정/삭제
 let locationMapData = {};
 async function loadLocationMapDoc() {
-    try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'LOCATION_MAP')); locationMapData = (s.exists() && s.data().map) ? s.data().map : {}; } catch (e) { locationMapData = {}; }
+    try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'LOCATION_MAP')); locationMapData = s.exists() ? unpackMap(s.data()) : {}; } catch (e) { locationMapData = {}; }
 }
 async function saveLocationMapDoc() {
-    try { await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_MAP'), { map: locationMapData, count: Object.keys(locationMapData).length, updatedAt: new Date() }); } catch (e) { alert('저장 실패: ' + e.message); }
+    try { await setDoc(doc(db, CHINA_COLLECTION, 'LOCATION_MAP'), packMap(locationMapData)); } catch (e) { alert('저장 실패: ' + e.message); }
 }
 async function openLocationMapModal() {
     closeAllMenus();
@@ -1395,14 +1604,14 @@ function escBa(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').rep
 function baCode(v) { return (v && typeof v === 'object') ? (v.code || '') : (v || ''); }
 function baMemo(v) { return (v && typeof v === 'object') ? (v.memo || '') : ''; }
 async function loadBarcodeAlias() {
-    try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS')); barcodeAlias = (s.exists() && s.data().map) ? s.data().map : {}; } catch (e) { barcodeAlias = {}; }
+    try { const s = await getDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS')); barcodeAlias = s.exists() ? unpackMap(s.data()) : {}; } catch (e) { barcodeAlias = {}; }
 }
 async function saveBarcodeAlias() {
     try {
-        await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS'), { map: barcodeAlias, count: Object.keys(barcodeAlias).length, updatedAt: new Date() });
+        await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_ALIAS'), packMap(barcodeAlias));
         // [Ver 8.88] 사유만 담은 작은 문서 → 스캐너가 큰 목록(315KB)과 무관하게 빠르고 확실하게 사유 로드
         const memoMap = {}; for (const b in barcodeAlias) { const m = baMemo(barcodeAlias[b]); if (m) memoMap[b] = m; }
-        await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_MEMO'), { map: memoMap, updatedAt: new Date() });
+        await setDoc(doc(db, CHINA_COLLECTION, 'BARCODE_MEMO'), packMap(memoMap));
     } catch (e) { alert('저장 실패: ' + e.message); }
 }
 async function openBarcodeAliasModal() {
@@ -1879,7 +2088,21 @@ function extractShipDates() {
     arrivalByShip = {};
     Object.entries(dateMap).forEach(([ship, info]) => { arrivalByShip[ship] = [...info.arrivals].sort(); });
     const sorted = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0]));
-    if (sorted.length === 0) { checklistContainer.innerHTML = '출고 데이터 없음'; return; }
+    if (sorted.length === 0) {
+        // 왜 없는지 알 수 있게 — 행은 불러왔는지, 출고일 열이 있는지
+        const total = (orderDataOriginal.length + orderDataBuy.length);
+        const sample = orderDataOriginal[0] || orderDataBuy[0] || {};
+        const hasShipCol = oCols.some(c => c in sample);
+        const why = total === 0
+            ? '불러온 행이 없습니다.'
+            : (hasShipCol ? `출고일이 채워진 행이 없습니다(또는 도착일+유예가 지났습니다).`
+                          : `'1차패킹리스트출고일' 같은 열을 찾지 못했습니다.`);
+        checklistContainer.innerHTML =
+            `<div style="font-size:12px; color:#8d6e63; line-height:1.7;">출고 데이터 없음<br>`
+          + `<span style="color:#a1887f;">불러온 행 ${total.toLocaleString()}개 — ${why}</span></div>`;
+        if (total > 0 && !hasShipCol) console.warn('[china-stock] 첫 행의 열 이름:', Object.keys(sample).join(', '));
+        return;
+    }
     let html = '';
     sorted.forEach(([date, info]) => {
         const isChecked = savedDates.includes(date) ? 'checked' : '';
@@ -2573,6 +2796,8 @@ function setupEventListeners() {
 
     // 5. #btn-open-sheet-settings (CSV 링크 설정 모달 열기)
     document.getElementById('btn-open-sheet-settings')?.addEventListener('click', () => openSheetSettingsModal());
+    // 저장해 둔 값 무시하고 시트를 지금 다시 받아온다
+    document.getElementById('btn-csv-refresh')?.addEventListener('click', () => syncOrderData(false, { force: true }));
 
 
     // 7. #upload-stock-log (미발재고로그 업로드)

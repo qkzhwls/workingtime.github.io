@@ -1,37 +1,97 @@
 // === js/weekend-ui.js ===
-import * as State from './state.js';
-import { store } from './weekend-store.js';
-import { handleDateClick } from './weekend-core.js';
-import { openAdminDatePopup, openPastDateEditPopup, handleAdminBadgeClick } from './weekend-admin.js';
+import * as State from './state.js?v=202610021042';
+// 공휴일 표는 utils.js 로 옮겼다(업무 예상에서도 쓰기 위해). 기존 사용처를 위해 그대로 다시 내보낸다.
+import { getHolidayName } from './utils.js?v=202610021042';
+export { getHolidayName };
+import { store } from './weekend-store.js?v=202610021042';
+import { handleDateClick } from './weekend-core.js?v=202610021042';
+import { openAdminDatePopup, openPastDateEditPopup, handleAdminBadgeClick } from './weekend-admin.js?v=202610021042';
 
-// 🔥 법정 공휴일 데이터를 반환하는 헬퍼 함수 (달력 뷰에서만 사용)
-export function getHolidayName(year, month, day) {
-    const mm = String(month).padStart(2, '0');
-    const dd = String(day).padStart(2, '0');
-    const md = `${mm}-${dd}`;
-    const ymd = `${year}-${mm}-${dd}`;
+// 주말근무 기준 관리자 명단 (계정 역할이 admin이 아니어도 관리자 권한 부여)
+const WEEKEND_ADMINS = ['박영철', '박호진', '유아라', '이승운'];
 
-    const fixedHolidays = {
-        '01-01': '신정', '03-01': '3·1절', '05-05': '어린이날', '06-06': '현충일',
-        '08-15': '광복절', '10-03': '개천절', '10-09': '한글날', '12-25': '기독탄신일(크리스마스)'
-    };
+// 주말근무 가시성 기준 관리자 여부: 계정 역할 admin 또는 관리 명단 포함
+function isWeekendAdmin() {
+    return State.appState.currentUserRole === 'admin'
+        || WEEKEND_ADMINS.includes(State.appState.currentUser);
+}
 
-    const variableHolidays = {
-        '2024-02-09': '설날 연휴', '2024-02-10': '설날', '2024-02-11': '설날 연휴', '2024-02-12': '대체공휴일',
-        '2024-04-10': '국회의원선거', '2024-05-06': '대체공휴일', '2024-05-15': '부처님오신날',
-        '2024-09-16': '추석 연휴', '2024-09-17': '추석', '2024-09-18': '추석 연휴',
-        '2025-01-28': '설날 연휴', '2025-01-29': '설날', '2025-01-30': '설날 연휴',
-        '2025-03-03': '대체공휴일', '2025-05-05': '어린이날/부처님오신날', '2025-05-06': '대체공휴일',
-        '2025-10-05': '추석 연휴', '2025-10-06': '추석', '2025-10-07': '추석 연휴', '2025-10-08': '대체공휴일',
-        '2026-02-16': '설날 연휴', '2026-02-17': '설날', '2026-02-18': '설날 연휴',
-        '2026-03-02': '대체공휴일', '2026-05-24': '부처님오신날', '2026-05-25': '대체공휴일',
-        '2026-06-03': '지방선거', '2026-08-16': '대체공휴일',
-        '2026-09-24': '추석 연휴', '2026-09-25': '추석', '2026-09-26': '추석 연휴', '2026-10-04': '대체공휴일', '2026-10-05': '대체공휴일'
-    };
+// 📅 해당 월 주말 근무일 수 + 1인당 적정(공평) 횟수 계산 후 상단 배너에 표시
+// 규칙: 하루 정원 중 1명은 무조건 관리자 고정 → 팀원 몫 = (정원 - 1).
+//       정원 미설정 날짜는 기본 3명으로 계산.
+//       1인당 적정 = 팀원 몫 합계 ÷ 참여 가능 팀원 수
+export const WEEKEND_DEFAULT_CAPACITY = 3; // 별도 설정 없으면 하루 정원 3명
 
-    if (variableHolidays[ymd]) return variableHolidays[ymd];
-    if (fixedHolidays[md]) return fixedHolidays[md];
-    return null;
+// 날짜별 실제 적용 정원 — 관리자가 따로 설정하지 않은 주말은 기본 3명으로 본다.
+export function getWeekendCapacity(dateStr) {
+    const v = Number(store.capacityMap.get(dateStr)) || 0;
+    return v > 0 ? v : WEEKEND_DEFAULT_CAPACITY;
+}
+
+// 📌 해당 월 전체 주말의 정원/팀원 몫을 합산한다.
+// ⚠️ 마감(blocked) 여부·확정 인원과 무관하게 "그 달 전체 주말 총 횟수" 기준으로 계산하여
+//    확정이 진행돼도 1인당 적정 횟수가 줄어들지 않는 고정값을 만든다.
+export function getMonthlyWeekendSlots(year, month, capacityMap) {
+    const mm = String(month + 1).padStart(2, '0');
+    const lastDate = new Date(year, month + 1, 0).getDate();
+
+    let weekendDays = 0;     // 그 달 전체 주말(토·일) 수
+    let totalCapacity = 0;   // 정원 합계 (미설정=기본 3명)
+    let teamSlots = 0;       // 팀원 몫 합계 = Σ(정원-1) (관리자 1명 고정 제외)
+    for (let d = 1; d <= lastDate; d++) {
+        const dow = new Date(year, month, d).getDay();
+        if (dow !== 0 && dow !== 6) continue; // 토(6)·일(0)만
+        const dateStr = `${year}-${mm}-${String(d).padStart(2, '0')}`;
+        const setCap = Number(capacityMap && capacityMap.get(dateStr)) || 0;
+        const cap = setCap > 0 ? setCap : WEEKEND_DEFAULT_CAPACITY; // 미설정 → 기본 3
+        weekendDays++;
+        totalCapacity += cap;
+        teamSlots += Math.max(0, cap - 1); // 1명은 관리자 고정
+    }
+
+    return { weekendDays, totalCapacity, teamSlots };
+}
+
+// 1인당 적정(공평) 횟수 = 팀원 몫 합계 ÷ 참여 가능 팀원 수 (고정값)
+export function getMonthlyFairCount(year, month, capacityMap, eligibleCount) {
+    const { teamSlots } = getMonthlyWeekendSlots(year, month, capacityMap);
+    if (!eligibleCount || eligibleCount <= 0 || teamSlots <= 0) return { avg: 0, rec: 0, teamSlots };
+    const avg = teamSlots / eligibleCount;
+    return { avg, rec: Math.round(avg), teamSlots };
+}
+
+export function renderWeekendFairness(year, month, capacityMap, blockedDatesSet, eligibleCount) {
+    const el = document.getElementById('weekend-fairness-banner');
+    if (!el) return;
+
+    // ⚠️ 확정/마감과 무관한 고정값: 그 달 전체 주말 기준으로 계산
+    const { weekendDays: openDays, totalCapacity, teamSlots } = getMonthlyWeekendSlots(year, month, capacityMap);
+
+    if (openDays === 0) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+
+    const adminSlots = totalCapacity - teamSlots; // 관리자 몫(≈ 운영일수)
+    let rightHtml;
+    if (eligibleCount > 0 && teamSlots > 0) {
+        const avg = teamSlots / eligibleCount;
+        const rec = Math.round(avg);
+        rightHtml = `
+            <div class="text-right whitespace-nowrap leading-tight">
+                <div class="text-sm md:text-base font-extrabold text-indigo-700">1인당 적정 <span class="text-indigo-900 text-base md:text-lg">${rec}회</span></div>
+                <div class="text-[10px] md:text-[11px] text-indigo-500">참여 ${eligibleCount}명 · 월 고정 기준(평균 ${avg.toFixed(1)})</div>
+            </div>`;
+    } else {
+        rightHtml = `<div class="text-[11px] md:text-xs text-indigo-500 text-right leading-tight">참여 가능 팀원이 없습니다</div>`;
+    }
+
+    el.innerHTML = `
+        <div class="flex items-center justify-between gap-3 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+            <div class="text-[11px] md:text-xs text-indigo-900 leading-snug">
+                <div><span class="font-bold">📅 ${year}년 ${month + 1}월</span> 주말 근무일 <b class="text-indigo-800">${openDays}일</b></div>
+                <div class="text-indigo-700">정원 합 <b>${totalCapacity}명</b> = 관리자 <b>${adminSlots}</b> + 팀원 <b>${teamSlots}</b> <span class="text-indigo-400">(기본 ${WEEKEND_DEFAULT_CAPACITY}명)</span></div>
+            </div>
+            ${rightHtml}
+        </div>`;
+    el.classList.remove('hidden');
 }
 
 export function renderWeekendStats(memberStats, yearlyStatsMap) {
@@ -41,8 +101,13 @@ export function renderWeekendStats(memberStats, yearlyStatsMap) {
     if (!sidebar || !list) return;
 
     const excludedMembers = ['박영철', '박호진', '유아라', '이승운'];
-    
-    const filteredMembers = [...memberStats.entries()].filter(([name, counts]) => !excludedMembers.includes(name));
+    const isAdmin = isWeekendAdmin();
+
+    let filteredMembers = [...memberStats.entries()].filter(([name, counts]) => !excludedMembers.includes(name));
+    // 일반 직원은 본인 신청 현황만 표시 (다른 팀원 내역 비공개)
+    if (!isAdmin) {
+        filteredMembers = filteredMembers.filter(([name]) => name === State.appState.currentUser);
+    }
 
     if (filteredMembers.length === 0) {
         sidebar.classList.add('!hidden');
@@ -101,7 +166,7 @@ export function renderWeekendList(year, month) {
 
     const lastDate = new Date(year, month + 1, 0).getDate();
     let hasWeekend = false;
-    const isAdmin = (State.appState.currentUserRole === 'admin');
+    const isAdmin = isWeekendAdmin();
 
     const bulkBar = document.getElementById('admin-bulk-action-bar');
     if (bulkBar && document.getElementById('weekend-list-view').classList.contains('hidden') === false) {
@@ -128,7 +193,7 @@ export function renderWeekendList(year, month) {
             
             const isBlocked = store.blockedDatesSet.has(dateStr);
             const isAppliedByMe = store.myRequestsMap.has(dateStr);
-            const capacity = store.capacityMap.get(dateStr); 
+            const capacity = getWeekendCapacity(dateStr); // 미설정 시 기본 3명
             const isPast = dateObj < today;
 
             // 주말 색상만 적용 (공휴일 무시)
@@ -231,9 +296,12 @@ export function renderWeekendList(year, month) {
                     return timeA.localeCompare(timeB);
                 });
 
-                store.requestsByDate[dateStr].forEach(req => {
-                    addBadgeToCalendar(dateStr, req, isAdmin && !isPast); 
-                });
+                store.requestsByDate[dateStr]
+                    // 신청 받는 중(열린 일자)은 본인 것만. 마감(blocked)·지난 일자는 최종 확정본이므로 전체 공개
+                    .filter(req => isAdmin || isBlocked || isPast || req.member === State.appState.currentUser)
+                    .forEach(req => {
+                        addBadgeToCalendar(dateStr, req, isAdmin && !isPast);
+                    });
             }
         }
     }
@@ -260,7 +328,7 @@ export function renderWeekendGrid(year, month) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const isAdmin = (State.appState.currentUserRole === 'admin');
+    const isAdmin = isWeekendAdmin();
 
     for (let i = 0; i < firstDay; i++) {
         const emptyCell = document.createElement('div');
@@ -285,7 +353,7 @@ export function renderWeekendGrid(year, month) {
         if (dayOfWeek === 0 || dayOfWeek === 6) {
             const isBlocked = store.blockedDatesSet.has(dateStr);
             const isAppliedByMe = store.myRequestsMap.has(dateStr);
-            const capacity = store.capacityMap.get(dateStr); 
+            const capacity = getWeekendCapacity(dateStr); // 미설정 시 기본 3명
             const isPast = dateObj < today;
 
             if (isPast || isBlocked) {
@@ -340,9 +408,12 @@ export function renderWeekendGrid(year, month) {
                         return (a.createdAt || "").localeCompare(b.createdAt || "");
                     });
 
-                    store.requestsByDate[dateStr].forEach(req => {
-                        addBadgeToGrid(dateStr, req, isAdmin && !isPast); 
-                    });
+                    store.requestsByDate[dateStr]
+                        // 신청 받는 중(열린 일자)은 본인 것만. 마감(blocked)·지난 일자는 최종 확정본이므로 전체 공개
+                        .filter(req => isAdmin || isBlocked || isPast || req.member === State.appState.currentUser)
+                        .forEach(req => {
+                            addBadgeToGrid(dateStr, req, isAdmin && !isPast);
+                        });
                 }
             }, 0);
 

@@ -1,8 +1,17 @@
 // === js/ui-history-reports-renderer.js ===
 
-import { formatDuration, calculateDateDifference } from './utils.js';
-import { getDiffHtmlForMetric, createTableRow, PRODUCTIVITY_METRIC_DESCRIPTIONS, generateProductivityDiagnosis } from './ui-history-reports-logic.js';
-import { context } from './state.js';
+import { formatDuration } from './utils.js?v=202610021042';
+import { getDiffHtmlForMetric, createTableRow, PRODUCTIVITY_METRIC_DESCRIPTIONS, generateProductivityDiagnosis } from './ui-history-reports-logic.js?v=202610021042';
+import { context, LEAVE_TYPES } from './state.js?v=202610021042';
+import { matchesFilter, hasFilter, filterCount, multiFilterBody } from './table-filter.js?v=202610021042';
+
+// 근태 요약 표의 열 순서. LEAVE_TYPES에 있는데 여기 없는 종류는 뒤에 자동으로 붙는다
+// → 근태 종류가 추가돼도 표에서 누락되지 않는다.
+const ATT_COL_BASE = ['지각', '외출', '조퇴', '결근', '연차', '출장', '매장근무', '재택근무', '기타', '외근'];
+const ATT_COLS = [...ATT_COL_BASE, ...LEAVE_TYPES.filter(t => !ATT_COL_BASE.includes(t))];
+// 데이터에 실제로 존재하는 종류만 뒤에 덧붙인다(예: 예전 '휴직' 기록).
+// 쓰지 않는 옛 종류로 빈 열이 생기지 않으면서, 남아 있는 기록도 숨겨지지 않는다.
+const attColsFor = (types) => [...ATT_COLS, ...[...new Set(types)].filter(t => t && !ATT_COLS.includes(t))];
 
 // --- 헬퍼: 정렬 아이콘 ---
 const getSortIcon = (currentKey, currentDir, targetKey) => {
@@ -12,32 +21,26 @@ const getSortIcon = (currentKey, currentDir, targetKey) => {
         : '<span class="text-blue-600 text-[10px] ml-1">▼</span>';
 };
 
-// --- 헬퍼: 필터 드롭다운 ---
+// --- 헬퍼: 필터 드롭다운 (여러 값을 동시에 고를 수 있다) ---
 const getFilterDropdown = (target, key, currentFilterValue, options = []) => {
     const dropdownId = `${target}-${key}`;
     const isActive = context.activeFilterDropdown === dropdownId;
-    const hasValue = currentFilterValue && currentFilterValue !== '';
+    const hasValue = hasFilter(currentFilterValue);
+    const nSel = filterCount(currentFilterValue);
     const iconColorClass = hasValue ? 'text-blue-600 bg-blue-50' : 'text-gray-400 hover:bg-gray-200';
 
-    let inputHtml = '';
-    if (options && options.length > 0) {
-        const optionsHtml = options.map(opt => 
-            `<option value="${opt}" ${currentFilterValue === opt ? 'selected' : ''}>${opt}</option>`
-        ).join('');
-        inputHtml = `<select class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none cursor-pointer" data-filter-target="${target}" data-filter-key="${key}"><option value="">(전체)</option>${optionsHtml}</select>`;
-    } else {
-        inputHtml = `<input type="text" class="w-full p-2 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none" placeholder="검색..." value="${currentFilterValue || ''}" data-filter-target="${target}" data-filter-key="${key}" autocomplete="off">`;
-    }
+    const inputHtml = multiFilterBody(target, key, currentFilterValue, options);
 
     return `
         <div class="relative inline-block ml-1 filter-container">
-            <button type="button" class="filter-icon-btn p-1 rounded transition ${iconColorClass}" data-dropdown-id="${dropdownId}" title="필터">
+            <button type="button" class="filter-icon-btn p-1 rounded transition inline-flex items-center gap-0.5 ${iconColorClass}" data-dropdown-id="${dropdownId}" title="필터">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L12 11.414V15a1 1 0 01-.293.707l-2 2A1 1 0 018 17v-5.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd" /></svg>
+                ${nSel > 0 ? `<span class="text-[9px] font-bold leading-none">${nSel}</span>` : ''}
             </button>
-            <div class="filter-dropdown absolute top-full right-0 mt-2 w-56 bg-white border border-gray-200 rounded-lg shadow-xl z-[60] p-3 ${isActive ? 'block' : 'hidden'} text-left cursor-default">
+            <div class="filter-dropdown absolute top-full right-0 mt-2 w-60 bg-white border border-gray-200 rounded-lg shadow-xl z-[60] p-3 ${isActive ? 'block' : 'hidden'} text-left cursor-default">
                 <div class="text-xs font-bold text-gray-500 mb-2 flex justify-between items-center">
                     <span>필터 조건</span>
-                    ${hasValue ? `<button class="text-[10px] text-red-500 hover:underline" onclick="const i=this.closest('.filter-dropdown').querySelector('input,select'); i.value=''; i.dispatchEvent(new Event('input', {bubbles:true}));">지우기</button>` : ''}
+                    ${hasValue ? `<button type="button" class="text-[10px] text-red-500 hover:underline" data-filter-all data-filter-target="${target}" data-filter-key="${key}">지우기</button>` : ''}
                 </div>
                 ${inputHtml}
             </div>
@@ -45,7 +48,22 @@ const getFilterDropdown = (target, key, currentFilterValue, options = []) => {
     `;
 };
 
+// ✅ [수정] 상단 KPI 카드 - COQ 비율 툴팁 추가
 const _generateKPIHTML = (tKPIs, pKPIs) => {
+    const coqTooltip = `<span class="group relative ml-1 inline-block cursor-help text-red-400 hover:text-red-600 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 inline">
+          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3 3 0 112.871 5.026v.345a.75.75 0 01-1.5 0v-.5c0-.72.57-1.172 1.081-1.287A1.5 1.5 0 108.94 6.94zM10 15a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+        </svg>
+        <span class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition bg-gray-800 text-white text-xs rounded-lg p-3 absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 break-keep leading-relaxed text-left shadow-xl pointer-events-none" data-html2canvas-ignore="true">
+            <strong class="block mb-1 text-yellow-300 text-sm font-bold">💡 COQ (품질비용) 비율</strong>
+            <span class="block mb-2 font-mono bg-gray-700 p-1.5 rounded text-center font-bold tracking-wide text-xs">
+                (품질관리 인건비 ÷ 총 인건비) × 100
+            </span>
+            <span class="text-gray-200 block">전체 인건비 중에서 검수, 재작업, 불량 처리 등 <strong>품질을 유지하거나 실패를 복구하는 데 쓰인 인건비</strong>의 비율입니다. 수치가 낮을수록 비용 효율이 높습니다.</span>
+            <svg class="absolute text-gray-800 h-2 w-full left-0 top-full" x="0px" y="0px" viewBox="0 0 255 255" xml:space="preserve"><polygon class="fill-current" points="0,0 127.5,127.5 255,0"/></svg>
+        </span>
+    </span>`;
+
     return `
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
             <div class="bg-white p-3 rounded-lg shadow-sm">
@@ -84,12 +102,87 @@ const _generateKPIHTML = (tKPIs, pKPIs) => {
                 ${getDiffHtmlForMetric('nonWorkTime', tKPIs.nonWorkMinutes, pKPIs.nonWorkMinutes)}
             </div>
             <div class="bg-white p-3 rounded-lg shadow-sm border-2 border-red-200 cursor-pointer hover:bg-red-50 transition" data-action="show-coq-modal">
-                <div class="text-xs text-red-600 font-semibold">COQ 비율 (총 ${Math.round(tKPIs.totalQualityCost).toLocaleString()}원) ⓘ</div>
+                <div class="text-xs text-red-600 font-semibold flex items-center justify-center">
+                    COQ 비율 (총 ${Math.round(tKPIs.totalQualityCost).toLocaleString()}원)
+                    ${coqTooltip}
+                </div>
                 <div class="text-xl font-bold text-red-600">${tKPIs.coqPercentage.toFixed(1)} %</div>
                 ${getDiffHtmlForMetric('coqPercentage', tKPIs.coqPercentage, pKPIs.coqPercentage)}
             </div>
         </div>
     `;
+};
+
+// ✅ [신규] 인당 생산성 지표 카드 렌더러 (설명 툴팁 아이콘 추가)
+const _generateProductivityPerPersonHTML = (tMetrics, pMetrics) => {
+    const getTaskProd = (aggr, taskName) => {
+        if (!aggr || !aggr.taskSummary) return 0;
+        let task = aggr.taskSummary[taskName];
+        if (!task && taskName === '중국제작(입고)') {
+            task = aggr.taskSummary['중국제작입고'] || aggr.taskSummary['중국제작'];
+        }
+        if (task && task.duration > 0) {
+            // 인당 시간당 생산성 (총 개수 / 총 시간 * 60)
+            return (task.quantity / task.duration) * 60;
+        }
+        return 0;
+    };
+
+    const tOverall = tMetrics.kpis.totalDuration > 0 ? (tMetrics.kpis.totalQuantity / tMetrics.kpis.totalDuration) * 60 : 0;
+    const pOverall = pMetrics?.kpis?.totalDuration > 0 ? (pMetrics.kpis.totalQuantity / pMetrics.kpis.totalDuration) * 60 : 0;
+
+    const tasks = [
+        { label: '종합 (전체)', t: tOverall, p: pOverall },
+        { label: '국내배송', t: getTaskProd(tMetrics.aggr, '국내배송'), p: getTaskProd(pMetrics?.aggr, '국내배송') },
+        { label: '중국제작(입고)', t: getTaskProd(tMetrics.aggr, '중국제작(입고)'), p: getTaskProd(pMetrics?.aggr, '중국제작(입고)') },
+        { label: '직진배송', t: getTaskProd(tMetrics.aggr, '직진배송'), p: getTaskProd(pMetrics?.aggr, '직진배송') }
+    ];
+
+    // 💡 계산식 및 의미를 설명하는 툴팁 HTML 정의
+    const infoTooltip = `<span class="group relative ml-2 inline-block cursor-pointer text-indigo-500 hover:text-indigo-700 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-6 h-6 inline">
+          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM8.94 6.94a.75.75 0 11-1.061-1.061 3 3 0 112.871 5.026v.345a.75.75 0 01-1.5 0v-.5c0-.72.57-1.172 1.081-1.287A1.5 1.5 0 108.94 6.94zM10 15a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+        </svg>
+        <span class="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition bg-gray-800 text-white text-xs rounded-lg p-4 absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 break-keep leading-relaxed text-left shadow-xl pointer-events-none" data-html2canvas-ignore="true">
+            <strong class="block mb-2 text-yellow-300 text-sm font-bold">💡 인당 생산성 (UPH)</strong>
+            <span class="block mb-3 font-mono bg-gray-700 p-2 rounded text-center font-bold tracking-wide text-sm">
+                (총 수량 ÷ 총 소요시간) × 60
+            </span>
+            <ul class="list-disc pl-4 space-y-1.5 text-gray-200">
+                <li><span class="text-white font-semibold">총 소요시간:</span> 투입된 모든 작업자의 분(Minute) 단위 누적 업무 시간의 합</li>
+                <li><span class="text-white font-semibold">의미:</span> 1명의 작업자가 1시간 동안 평균적으로 몇 개를 처리했는지 나타내는 체력 지표</li>
+            </ul>
+            <svg class="absolute text-gray-800 h-2 w-full left-0 top-full" x="0px" y="0px" viewBox="0 0 255 255" xml:space="preserve"><polygon class="fill-current" points="0,0 127.5,127.5 255,0"/></svg>
+        </span>
+    </span>`;
+
+    let html = `
+        <div class="bg-white p-5 rounded-lg shadow-sm">
+            <h3 class="text-lg font-bold mb-4 text-gray-800 flex items-center">
+                🧑‍💻 주요 업무 인당 생산성
+                ${infoTooltip}
+            </h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+    `;
+
+    tasks.forEach(task => {
+        // 국내배송은 1건당 평균 1.3개라 건/H 병기
+        const isDomestic = task.label === '국내배송';
+        const caseSuffix = (isDomestic && task.t > 0)
+            ? `<div class="text-xs text-gray-500 mt-0.5">${(task.t / 1.3).toFixed(1)} <span class="text-[10px] text-gray-400">건/H</span></div>`
+            : '';
+        html += `
+            <div class="bg-indigo-50/50 p-4 rounded-lg border border-indigo-100 shadow-sm relative group">
+                <div class="text-sm font-bold text-gray-700 mb-1">${task.label}</div>
+                <div class="text-2xl font-extrabold text-indigo-700">${task.t.toFixed(1)} <span class="text-sm font-medium text-gray-500">개/H</span></div>
+                ${caseSuffix}
+                ${getDiffHtmlForMetric('overallAvgThroughput', task.t, task.p)}
+            </div>
+        `;
+    });
+
+    html += `</div></div>`;
+    return html;
 };
 
 const _renderTooltip = (metricKey) => {
@@ -488,9 +581,7 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
     const allPartNames = [...new Set(partData.map(d => d.partName))].sort();
     
     // 필터
-    if (filterState.partSummary?.partName) {
-        partData = partData.filter(d => d.partName === filterState.partSummary.partName);
-    }
+    partData = partData.filter(d => matchesFilter(d.partName, filterState.partSummary?.partName));
     // 정렬
     const pSort = sortState.partSummary || { key: 'partName', dir: 'asc' };
     partData.sort((a, b) => {
@@ -526,8 +617,8 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
     const allMemberParts = [...new Set(memberData.map(d => d.part))].sort();
 
     // 필터
-    if (filterState.memberSummary?.memberName) memberData = memberData.filter(d => d.memberName === filterState.memberSummary.memberName);
-    if (filterState.memberSummary?.part) memberData = memberData.filter(d => d.part === filterState.memberSummary.part);
+    memberData = memberData.filter(d => matchesFilter(d.memberName, filterState.memberSummary?.memberName)
+                                     && matchesFilter(d.part, filterState.memberSummary?.part));
     // 정렬
     const mSort = sortState.memberSummary || { key: 'memberName', dir: 'asc' };
     memberData.sort((a, b) => {
@@ -563,7 +654,7 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
     const allTaskNames = [...new Set(taskData.map(d => d.taskName))].sort();
 
     // 필터
-    if (filterState.taskSummary?.taskName) taskData = taskData.filter(d => d.taskName === filterState.taskSummary.taskName);
+    taskData = taskData.filter(d => matchesFilter(d.taskName, filterState.taskSummary?.taskName));
     // 정렬
     const tSort = sortState.taskSummary || { key: 'taskName', dir: 'asc' };
     taskData.sort((a, b) => {
@@ -582,8 +673,7 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="workDays">진행 일수 ${getSortIcon(tSort.key, tSort.dir, 'workDays')}</th>
             
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgThroughput">분당 처리량 ${getSortIcon(tSort.key, tSort.dir, 'avgThroughput')}</th>
-            <th class="px-4 py-2">표준 속도 (Top3)</th>
-            <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgCostPerItem">개당 처리비용 ${getSortIcon(tSort.key, tSort.dir, 'avgCostPerItem')}</th>
+            <th class="px-4 py-2">기간 평균 속도</th> <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgCostPerItem">개당 처리비용 ${getSortIcon(tSort.key, tSort.dir, 'avgCostPerItem')}</th>
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgDailyStaff">평균 투입인원 ${getSortIcon(tSort.key, tSort.dir, 'avgDailyStaff')}</th>
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgStaff">총 인원 ${getSortIcon(tSort.key, tSort.dir, 'avgStaff')}</th>
             <th class="px-4 py-2 cursor-pointer" data-sort-target="taskSummary" data-sort-key="avgTime">평균 시간 ${getSortIcon(tSort.key, tSort.dir, 'avgTime')}</th>
@@ -593,22 +683,33 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
     taskData.forEach(d => {
         const stdSpeed = standardThroughputs[d.taskName] || 0;
         const avgDailyStaff = d.avgDailyStaff || 0;
-        
+
+        // 국내배송: 1건당 평균 1.3개 → 처리량/처리속도에 건수 병기
+        const isDomestic = d.taskName === '국내배송';
+        const caseText = (val, digits) => {
+            if (!isDomestic || val <= 0) return '';
+            const cases = val / 1.3;
+            const text = digits === 0 ? Math.round(cases).toLocaleString() : cases.toFixed(digits);
+            return ` <span class="text-[10px] text-gray-400 font-normal">(${text} 건)</span>`;
+        };
+        const qtyCell = `${d.quantity.toLocaleString()}${caseText(d.quantity, 0)}`;
+        const thpCell = `${d.avgThroughput.toFixed(2)}${caseText(d.avgThroughput, 2)}`;
+
         html += createTableRow([
-            { content: d.taskName, class: "font-medium text-gray-900" }, 
-            { content: formatDuration(d.duration), diff: getDiffHtmlForMetric('duration', d.duration, d.p.duration) }, 
-            { content: `${Math.round(d.cost).toLocaleString()} 원`, diff: getDiffHtmlForMetric('totalCost', d.cost, d.p.cost) }, 
-            { content: d.quantity.toLocaleString(), diff: getDiffHtmlForMetric('quantity', d.quantity, d.p.quantity) }, 
-            
+            { content: d.taskName, class: "font-medium text-gray-900" },
+            { content: formatDuration(d.duration), diff: getDiffHtmlForMetric('duration', d.duration, d.p.duration) },
+            { content: `${Math.round(d.cost).toLocaleString()} 원`, diff: getDiffHtmlForMetric('totalCost', d.cost, d.p.cost) },
+            { content: qtyCell, diff: getDiffHtmlForMetric('quantity', d.quantity, d.p.quantity) },
+
             // ✅ [수정] 진행 일수 데이터 바인딩 (0일이면 - 표시)
             { content: (d.workDays || 0) > 0 ? `${d.workDays}일` : '-', diff: getDiffHtmlForMetric('workDays', d.workDays, d.p.workDays) },
-            
-            { content: d.avgThroughput.toFixed(2), diff: getDiffHtmlForMetric('avgThroughput', d.avgThroughput, d.p.avgThroughput) }, 
+
+            { content: thpCell, diff: getDiffHtmlForMetric('avgThroughput', d.avgThroughput, d.p.avgThroughput) },
             { content: stdSpeed > 0 ? stdSpeed.toFixed(2) : '-', class: "text-indigo-600 font-mono bg-indigo-50" },
-            { content: `${Math.round(d.avgCostPerItem).toLocaleString()} 원`, diff: getDiffHtmlForMetric('avgCostPerItem', d.avgCostPerItem, d.p.avgCostPerItem) }, 
+            { content: `${Math.round(d.avgCostPerItem).toLocaleString()} 원`, diff: getDiffHtmlForMetric('avgCostPerItem', d.avgCostPerItem, d.p.avgCostPerItem) },
             { content: avgDailyStaff.toFixed(1), diff: getDiffHtmlForMetric('avgDailyStaff', avgDailyStaff, d.p.avgDailyStaff) },
-            { content: d.avgStaff.toLocaleString(), diff: getDiffHtmlForMetric('avgStaff', d.avgStaff, d.p.avgStaff) }, 
-            { content: formatDuration(d.avgTime), diff: getDiffHtmlForMetric('avgTime', d.avgTime, d.p.avgTime) }, 
+            { content: d.avgStaff.toLocaleString(), diff: getDiffHtmlForMetric('avgStaff', d.avgStaff, d.p.avgStaff) },
+            { content: formatDuration(d.avgTime), diff: getDiffHtmlForMetric('avgTime', d.avgTime, d.p.avgTime) },
             { content: d.efficiency.toFixed(2), diff: getDiffHtmlForMetric('avgThroughput', d.efficiency, d.p.efficiency), class: "font-bold" }
         ]);
     });
@@ -618,12 +719,13 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
     // 4. 근태 현황
     let attDataList = [];
     const attSummaryMap = {};
+    const seenAttTypes = new Set();  // 실제 데이터에 등장한 근태 종류(옛 종류 포함)
     
     (attendanceData || []).forEach(entry => {
         if (!attSummaryMap[entry.member]) {
             attSummaryMap[entry.member] = {
                 member: entry.member,
-                counts: { '지각': 0, '외출': 0, '조퇴': 0, '결근': 0, '연차': 0, '출장': 0 },
+                counts: ATT_COLS.reduce((acc, t) => { acc[t] = 0; return acc; }, {}),
                 totalCount: 0,
                 totalLeaveDays: 0,
                 totalAbsenceDays: 0
@@ -631,6 +733,7 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
         }
         const rec = attSummaryMap[entry.member];
         const type = entry.type;
+        if (type) seenAttTypes.add(type);
 
         if (rec.counts.hasOwnProperty(type)) {
             rec.counts[type]++;
@@ -640,13 +743,10 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
 
         if (type !== '연차') rec.totalCount++;
 
-        if (type === '연차') {
-             const days = calculateDateDifference(entry.startDate, entry.endDate || entry.startDate);
-             rec.totalLeaveDays += days;
-        } else if (type === '결근') {
-             const days = calculateDateDifference(entry.startDate, entry.endDate || entry.startDate);
-             rec.totalAbsenceDays += days;
-        }
+        // 일수는 '그 날 하루'만 더한다. attendanceData는 이미 날짜별로 펼쳐진 기록이라
+        // 여기서 다시 전체 기간을 더하면 2일짜리 연차가 4일로 부풀었다.
+        if (type === '연차') rec.totalLeaveDays += 1;
+        else if (type === '결근') rec.totalAbsenceDays += 1;
     });
     
     attDataList = Object.values(attSummaryMap);
@@ -656,6 +756,8 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
         attDataList = attDataList.filter(d => d.member === filterState.attendanceSummary.member);
     }
 
+    // 데이터에 실제로 있는 종류까지 포함해 열을 구성한다
+    const attCols = attColsFor(seenAttTypes);
     const aSort = sortState.attendanceSummary || { key: 'member', dir: 'asc' };
     attDataList.sort((a, b) => {
         let vA = 0, vB = 0;
@@ -679,12 +781,7 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
             <thead class="text-xs text-gray-700 uppercase bg-gray-100 sticky top-0">
                 <tr>
                     ${th_att('member', '이름', 'sticky left-0 bg-gray-100 z-10')}
-                    ${th_att('지각', '지각')}
-                    ${th_att('외출', '외출')}
-                    ${th_att('조퇴', '조퇴')}
-                    ${th_att('결근', '결근')}
-                    ${th_att('연차', '연차')}
-                    ${th_att('출장', '출장')}
+                    ${attCols.map(t => th_att(t, t)).join('')}
                     ${th_att('totalCount', '총 횟수')}
                     ${th_att('totalAbsenceDays', '총 결근일')}
                     ${th_att('totalLeaveDays', '총 연차일')}
@@ -699,12 +796,12 @@ const _generateTablesHTML = (tAggr, pAggr, periodText, sortState, memberToPartMa
             html += `
                 <tr class="bg-white hover:bg-gray-50">
                     <td class="px-4 py-3 font-medium text-gray-900 sticky left-0 bg-white shadow-sm">${item.member}</td>
-                    ${cell('지각', 'text-gray-300')}
-                    ${cell('외출', 'text-gray-300')}
-                    ${cell('조퇴', 'text-gray-300')}
-                    <td class="px-4 py-3 text-center ${item.counts['결근']>0?'text-red-600 font-bold':'text-gray-300'}">${item.counts['결근']||0}</td>
-                    <td class="px-4 py-3 text-center ${item.counts['연차']>0?'text-blue-600 font-bold':'text-gray-300'}">${item.counts['연차']||0}</td>
-                    ${cell('출장', 'text-gray-300')}
+                    ${attCols.map(t => {
+                        const v = item.counts[t] || 0;
+                        if (t === '결근') return `<td class="px-4 py-3 text-center ${v>0?'text-red-600 font-bold':'text-gray-300'}">${v}</td>`;
+                        if (t === '연차') return `<td class="px-4 py-3 text-center ${v>0?'text-blue-600 font-bold':'text-gray-300'}">${v}</td>`;
+                        return cell(t, 'text-gray-300');
+                    }).join('')}
                     <td class="px-4 py-3 text-center font-bold text-indigo-600 bg-indigo-50">${item.totalCount}</td>
                     <td class="px-4 py-3 text-center font-bold text-red-600 bg-red-50">${item.totalAbsenceDays}</td>
                     <td class="px-4 py-3 text-center font-bold text-blue-600 bg-blue-50">${item.totalLeaveDays}</td>
@@ -738,6 +835,8 @@ export const renderGenericReport = (targetId, title, tData, tMetrics, pMetrics, 
 
     let html = `<div class="space-y-6">${headerHtml}`;
     html += _generateKPIHTML(tMetrics.kpis, pMetrics.kpis);
+    // ✅ [신규] 인당 생산성 (시간당 UPH) 영역 추가
+    html += _generateProductivityPerPersonHTML(tMetrics, pMetrics);
     html += _generateProductivityAnalysisHTML(tMetrics, pMetrics, periodText, benchmarkOEE);
     html += _generateRevenueAnalysisHTML(periodText, tMetrics.revenueAnalysis, tMetrics.revenueTrend, currentRevenue, prevRevenue);
     html += _generateInsightsHTML(tMetrics.aggr, pMetrics.aggr, appConfig, periodText);

@@ -1,9 +1,43 @@
 // === js/weekend-admin.js ===
-import * as State from './state.js';
-import { store, currentManageDateStr, setCurrentManageDateStr } from './weekend-store.js';
-import { createRequest } from './weekend-core.js';
-import { showToast } from './utils.js';
+import * as State from './state.js?v=202610021042';
+import { store, currentManageDateStr, setCurrentManageDateStr } from './weekend-store.js?v=202610021042';
+import { createRequest } from './weekend-core.js?v=202610021042';
+import { showToast } from './utils.js?v=202610021042';
+import { getMonthlyFairCount, getWeekendCapacity } from './weekend-ui.js?v=202610021042';
 import { doc, updateDoc, deleteDoc, setDoc, collection } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const WEEKEND_ADMIN_MEMBERS = ['박영철', '박호진', '유아라', '이승운'];
+
+// 📌 정원만큼 확정되면 해당 날짜를 자동 마감(blocked) 처리한다.
+// expectedConfirmed: 이번 작업 후 예상되는 확정 인원 수(스토어 반영 전 결정용).
+//                    생략 시 현재 스토어 기준으로 계산한다.
+async function autoCloseDateIfFull(dateStr, expectedConfirmed) {
+    if (!dateStr) return;
+    if (store.blockedDatesSet.has(dateStr)) return; // 이미 마감됨
+    const cap = getWeekendCapacity(dateStr);
+    let confirmedCount = expectedConfirmed;
+    if (typeof confirmedCount !== 'number') {
+        const reqs = store.requestsByDate[dateStr] || [];
+        confirmedCount = reqs.filter(r => r.status === 'confirmed').length;
+    }
+    if (confirmedCount >= cap) {
+        await setDateBlocked(dateStr, true);
+        showToast(`${dateStr} 정원(${cap}명)이 충족되어 자동 마감되었습니다.`);
+    }
+}
+
+// 임의 날짜의 마감(blocked) 상태를 설정한다.
+export async function setDateBlocked(dateStr, blocked) {
+    if (!dateStr) return;
+    const docId = `BLOCKED_${dateStr}`;
+    const docRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'weekend_requests', docId);
+    if (blocked) {
+        const monthStr = dateStr.substring(0, 7);
+        await setDoc(docRef, { type: 'blocked', date: dateStr, month: monthStr, createdAt: new Date().toISOString() });
+    } else {
+        await deleteDoc(docRef);
+    }
+}
 
 export function handleAdminBadgeClick(docId, data) {
     const popup = document.getElementById('weekend-admin-popup');
@@ -40,6 +74,10 @@ export async function processAdminAction(docId, action, data) {
             showToast("승인 완료");
             const notiRef = doc(collection(State.db, 'artifacts', 'team-work-logger-v2', 'notifications'));
             await setDoc(notiRef, { targetMember: data.member, type: 'weekend_confirmed', message: `${data.date} 주말 근무 신청이 확정(승인)되었습니다.`, createdAt: new Date().toISOString(), isRead: false });
+            // 정원 충족 시 자동 마감: 이 건을 포함한 예상 확정 인원 계산
+            const reqs = store.requestsByDate[data.date] || [];
+            const willConfirm = reqs.filter(r => r.status === 'confirmed' && r.member !== data.member).length + 1;
+            await autoCloseDateIfFull(data.date, willConfirm);
         } else if (action === 'canceled') {
             await updateDoc(docRef, { status: 'canceled', confirmedAt: null });
             showToast("취소 처리되었습니다.");
@@ -67,7 +105,8 @@ export async function processSelectedDatesBulkAction(action) {
         for (const cb of checkboxes) {
             const dateStr = cb.dataset.date;
             const reqs = store.requestsByDate[dateStr] || [];
-            
+            let confirmedAfter = 0;
+
             for (const req of reqs) {
                 const docRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'weekend_requests', req.id);
                 if (action === 'delete') {
@@ -79,9 +118,13 @@ export async function processSelectedDatesBulkAction(action) {
                         const msg = action === 'confirmed' ? `${dateStr} 주말 근무 배정이 확정(승인)되었습니다.` : `${dateStr} 주말 근무 신청이 관리자에 의해 일괄 취소(반려)되었습니다.`;
                         await setDoc(notiRef, { targetMember: req.member, type: action === 'confirmed' ? 'weekend_confirmed' : 'weekend_canceled', message: msg, createdAt: new Date().toISOString(), isRead: false });
                     }
+                    if (action === 'confirmed') confirmedAfter++;
                 }
                 count++;
             }
+
+            // 정원 충족 시 자동 마감
+            if (action === 'confirmed') await autoCloseDateIfFull(dateStr, confirmedAfter);
         }
         showToast(`선택 날짜의 총 ${count}건 일괄 ${actionText} 완료 및 알림 전송됨.`);
         document.getElementById('select-all-dates-checkbox').checked = false;
@@ -265,14 +308,15 @@ export function calculateSmartAllocation() {
     const reqs = store.requestsByDate[currentManageDateStr] || [];
     const activeReqs = reqs.filter(r => r.status !== 'canceled');
     const applicants = activeReqs.map(r => r.member);
-    
+    const appliedOnThisDate = new Set(applicants); // 이 날짜에 신청/확정된 인원
+
     let allMembers = [];
     if (State.appConfig && State.appConfig.teamGroups) {
         State.appConfig.teamGroups.forEach(g => { if (g.members) allMembers = allMembers.concat(g.members); });
     }
     allMembers = [...new Set(allMembers)];
-    
-    const adminMembers = ['박영철', '박호진', '유아라', '이승운'];
+
+    const adminMembers = WEEKEND_ADMIN_MEMBERS;
     const eligibleMembers = allMembers.filter(m => !adminMembers.includes(m));
 
     const adminApplicants = applicants.filter(m => adminMembers.includes(m));
@@ -280,11 +324,23 @@ export function calculateSmartAllocation() {
 
     const availableCapacity = Math.max(0, capacity - adminApplicants.length);
 
+    // 이 달의 1인당 적정(고정) 횟수
+    const [yStr, mStr] = currentManageDateStr.split('-');
+    const fair = getMonthlyFairCount(parseInt(yStr, 10), parseInt(mStr, 10) - 1, store.capacityMap, eligibleMembers.length);
+    const fairCount = fair.rec;
+
+    // ⚠️ 이 날짜를 제외한 "다른 날" 당월 근무 부담으로 비교한다.
+    //    (신청자는 이 날짜 1건이 이미 포함돼 있으므로 빼서 동일 기준으로 맞춤)
+    const otherMonthCount = (m) => {
+        const ms = store.currentMonthStats.get(m) || { confirmed: 0, requested: 0 };
+        let total = ms.confirmed + ms.requested;
+        if (appliedOnThisDate.has(m)) total -= 1;
+        return Math.max(0, total);
+    };
+
     const getScore = (m) => {
         const y = store.currentYearlyStats.get(m) || 0;
-        const ms = store.currentMonthStats.get(m) || {confirmed: 0, requested: 0};
-        const monthTotal = ms.confirmed + ms.requested;
-        return (monthTotal * 1000) + (y * 10); 
+        return (otherMonthCount(m) * 1000) + (y * 10);
     };
 
     const sortedGeneralApplicants = [...generalApplicants].sort((a, b) => {
@@ -298,24 +354,24 @@ export function calculateSmartAllocation() {
         return diff !== 0 ? diff : a.localeCompare(b);
     });
 
-    let toConfirm = [...adminApplicants]; 
-    let toDecline = []; 
-    let toAdd = [];     
+    let toConfirm = [...adminApplicants];
+    let toDecline = [];
+    let toAdd = [];
 
     if (generalApplicants.length > availableCapacity) {
         toConfirm = toConfirm.concat(sortedGeneralApplicants.slice(0, availableCapacity));
         toDecline = sortedGeneralApplicants.slice(availableCapacity);
-        store.recommendOffset = 0; 
+        store.recommendOffset = 0;
     } else if (generalApplicants.length < availableCapacity) {
         toConfirm = toConfirm.concat(sortedGeneralApplicants);
         const needed = availableCapacity - generalApplicants.length;
-        
+
         if (sortedNonApplicants.length > 0) {
             if (store.recommendOffset >= sortedNonApplicants.length) {
-                store.recommendOffset = 0; 
+                store.recommendOffset = 0;
                 showToast("모든 후보를 순회하여 다시 1순위부터 추천합니다.");
             }
-            
+
             for (let i = 0; i < needed; i++) {
                 const index = (store.recommendOffset + i) % sortedNonApplicants.length;
                 if (!toAdd.includes(sortedNonApplicants[index])) {
@@ -325,28 +381,51 @@ export function calculateSmartAllocation() {
             store.recommendOffset += needed;
         }
     } else {
-        toConfirm = toConfirm.concat(sortedGeneralApplicants);
+        // 정원에 딱 맞게 신청된 경우: 전원 확정이 기본이지만,
+        // 적정 횟수를 이미 채운 신청자가 있고 적정 횟수에 못 미치는 비신청자가 있으면
+        // 형평성을 위해 교체(반려↔추가) 추천한다. (요구사항 #2)
+        let confirmedGeneral = [...sortedGeneralApplicants];
+
+        if (fairCount > 0) {
+            // 적정 초과 신청자: 부담 많은 순(내림차순)
+            const overApplicants = confirmedGeneral
+                .filter(m => otherMonthCount(m) >= fairCount)
+                .sort((a, b) => otherMonthCount(b) - otherMonthCount(a));
+            // 적정 미달 비신청자: 부담 적은 순(오름차순, 이미 정렬됨)
+            const underPool = sortedNonApplicants.filter(m => otherMonthCount(m) < fairCount);
+
+            let ui = 0;
+            for (const over of overApplicants) {
+                if (ui >= underPool.length) break;
+                const under = underPool[ui];
+                // 실제로 형평성이 개선될 때만 교체
+                if (otherMonthCount(under) < otherMonthCount(over)) {
+                    confirmedGeneral = confirmedGeneral.filter(x => x !== over);
+                    toDecline.push(over);
+                    toAdd.push(under);
+                    ui++;
+                }
+            }
+        }
+
+        toConfirm = toConfirm.concat(confirmedGeneral);
         store.recommendOffset = 0;
     }
 
-    let totalMonthlyCapacity = 0;
-    store.capacityMap.forEach(v => totalMonthlyCapacity += parseInt(v, 10) || 0);
-    const avgPossibleShifts = (totalMonthlyCapacity / eligibleMembers.length).toFixed(1);
-
-    renderSmartCalcResult(toConfirm, toDecline, toAdd, capacity, applicants.length, adminApplicants.length, avgPossibleShifts);
+    renderSmartCalcResult(toConfirm, toDecline, toAdd, capacity, applicants.length, adminApplicants.length, fair.avg.toFixed(1), fairCount);
 }
 
-export function renderSmartCalcResult(toConfirm, toDecline, toAdd, capacity, appCount, adminCount, avgPossible) {
+export function renderSmartCalcResult(toConfirm, toDecline, toAdd, capacity, appCount, adminCount, avgPossible, fairCount) {
     const area = document.getElementById('smart-calc-result-area');
     area.classList.remove('hidden');
 
     let html = `<div class="text-xs text-gray-700 font-medium space-y-3 mb-4">
                     <div class="flex flex-col gap-1 border-b border-indigo-100 pb-2">
                         <div class="flex justify-between">
-                            <span>설정 정원: <b class="text-emerald-600">${capacity}명</b> (관리자 ${adminCount}명 포함)</span> 
+                            <span>설정 정원: <b class="text-emerald-600">${capacity}명</b> (관리자 ${adminCount}명 포함)</span>
                             <span>신청: <b>${appCount}명</b></span>
                         </div>
-                        <div class="text-[10px] text-indigo-500 font-normal">* 이 달의 팀원당 권장 근무: 약 ${avgPossible}회</div>
+                        <div class="text-[10px] text-indigo-500 font-normal">* 이 달의 팀원당 적정 근무: <b>${fairCount}회</b> (평균 ${avgPossible}회, 고정 기준)</div>
                     </div>`;
     
     const finalConfirmed = [...toConfirm, ...toAdd];
@@ -377,7 +456,7 @@ export function renderSmartCalcResult(toConfirm, toDecline, toAdd, capacity, app
     html += `</div></div>`;
 
     if (toDecline.length > 0) {
-        html += `<div class="pt-1"><span class="text-red-600 font-bold">➖ 정원 초과로 자동 취소 (${toDecline.length}명)</span><br><span class="text-gray-400 text-[10px]">당월 신청 횟수가 많아 배정에서 제외되며, 취소(노란색) 상태로 변경됩니다.</span><div class="mt-2 flex flex-wrap gap-1.5">`;
+        html += `<div class="pt-1"><span class="text-red-600 font-bold">➖ 형평성·정원 조정으로 제외 (${toDecline.length}명)</span><br><span class="text-gray-400 text-[10px]">당월 근무 횟수가 적정 횟수 이상이라 배정에서 제외되며, 취소(노란색) 상태로 변경됩니다.</span><div class="mt-2 flex flex-wrap gap-1.5">`;
         toDecline.forEach(m => {
             const ms = store.currentMonthStats.get(m) || {confirmed: 0, requested: 0};
             html += `<span class="bg-yellow-100 text-yellow-700 border border-yellow-400 px-1.5 py-1 rounded-md text-[11px] line-through shadow-sm">❌ ${m} <span class="text-[10px] opacity-70">(당월 ${ms.confirmed+ms.requested}회)</span></span>`;
@@ -386,7 +465,7 @@ export function renderSmartCalcResult(toConfirm, toDecline, toAdd, capacity, app
     }
 
     if(toAdd.length === 0 && toDecline.length === 0) {
-         html += `<div class="text-blue-600 font-bold py-1 bg-blue-50 px-2 rounded mt-2">인원이 정원과 일치하여 전원 확정 추천합니다.</div>`;
+         html += `<div class="text-blue-600 font-bold py-1 bg-blue-50 px-2 rounded mt-2">인원이 정원과 일치하며 모두 적정 횟수 이내라 전원 확정 추천합니다.</div>`;
     }
     
     html += `</div>`;
@@ -432,10 +511,14 @@ export async function applySmartAllocation() {
             await setDoc(notiRef, { targetMember: m, type: 'weekend_confirmed', message: `${currentManageDateStr} 주말 근무가 배정(확정)되었습니다.`, createdAt: new Date().toISOString(), isRead: false });
         }
 
+        // 정원만큼 확정되면 해당 날짜 자동 마감 (요구사항 #3)
+        const finalConfirmed = toConfirm.length + toAdd.length;
+        await autoCloseDateIfFull(currentManageDateStr, finalConfirmed);
+
         showToast("스마트 배분이 성공적으로 적용되었으며, 알림이 발송되었습니다.");
         document.getElementById('smart-calc-result-area').classList.add('hidden');
         store.smartCalcCache = null;
-        store.recommendOffset = 0; 
+        store.recommendOffset = 0;
     } catch (e) {
         console.error("Smart Allocation Error:", e);
         showToast("적용 중 오류가 발생했습니다.", true);
@@ -524,16 +607,11 @@ export async function adminRandomSelectMembers(count) {
 
 export async function toggleBlockDate(isBlocked) {
     if (!currentManageDateStr) return;
-    const docId = `BLOCKED_${currentManageDateStr}`;
-    const docRef = doc(State.db, 'artifacts', 'team-work-logger-v2', 'weekend_requests', docId);
-
     try {
+        await setDateBlocked(currentManageDateStr, isBlocked);
         if (isBlocked) {
-            const monthStr = currentManageDateStr.substring(0, 7);
-            await setDoc(docRef, { type: 'blocked', date: currentManageDateStr, month: monthStr, createdAt: new Date().toISOString() });
             showToast(`${currentManageDateStr} 신청이 마감되었습니다.`);
         } else {
-            await deleteDoc(docRef);
             showToast(`${currentManageDateStr} 신청이 다시 활성화되었습니다.`);
         }
     } catch (e) {

@@ -1,0 +1,81 @@
+rules_version = '2';
+
+// ============================================================================
+// Firestore 보안 규칙 — 물류팀 업무관리 (work-tool-e2943)
+//
+// ⚠️ 이 파일은 GitHub Pages가 아니라 "Firebase"에 배포해야 적용됩니다.
+//    배포 방법 (둘 중 하나):
+//    1) Firebase Console → Firestore Database → 규칙(Rules) 탭에 아래 내용을
+//       전체 붙여넣고 "게시(Publish)".
+//    2) CLI:  firebase deploy --only firestore:rules
+//
+// 목적: 이 앱은 공개 페이지라 누구나 소스/설정을 볼 수 있으므로,
+//       데이터 보호는 전적으로 이 규칙에 달려 있습니다.
+//       기본 원칙 = "로그인한 사용자만" 접근, 그 외 전부 차단(기본 deny).
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 로그인(이메일/비밀번호 인증) 여부
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // ── (선택) 관리자 전용 제한을 쓰려면 아래 함수를 사용하세요 ──
+    // 주의: memberRoles 의 키(이메일) 대소문자가 토큰 이메일과 일치해야 동작합니다.
+    //       실제 데이터로 먼저 테스트한 뒤 적용하세요. (불일치 시 관리자도 잠길 수 있음)
+    // function isAdmin() {
+    //   return signedIn()
+    //     && get(/databases/$(database)/documents/artifacts/team-work-logger-v2/config/mainConfig)
+    //          .data.memberRoles[request.auth.token.email] == 'admin';
+    // }
+
+    // 앱 데이터 네임스페이스 전체 (config, daily_data, history, notifications,
+    // weekend_requests, manuals, persistent_data, 그리고 모든 하위 컬렉션)
+    match /artifacts/team-work-logger-v2/{document=**} {
+      allow read, write: if signedIn();
+
+      // ── 더 강하게 잠그고 싶을 때(권장 다음 단계) 예시 ──
+      // 관리 설정 문서는 관리자만 수정 가능하게 하려면 위 allow 를 지우고
+      // 컬렉션별로 아래처럼 분리하세요:
+      //   match /config/{cfg} { allow read: if signedIn(); allow write: if isAdmin(); }
+      //   match /weekend_requests/{id} { allow read: if signedIn();
+      //       allow create: if signedIn();
+      //       allow update, delete: if isAdmin() || request.auth.token.email == resource.data.ownerEmail; }
+    }
+
+    // 검수 상품 이력 (최상위 컬렉션)
+    match /product_history/{document=**} {
+      allow read, write: if signedIn();
+    }
+
+    // 로케이션 관리 데이터 (최상위 컬렉션들)
+    match /Locations/{document=**}         { allow read, write: if signedIn(); } // 로케이션/존 본체
+    match /ZikjinData/{document=**}         { allow read, write: if signedIn(); } // 직진배송
+    match /WeeklyData/{document=**}         { allow read, write: if signedIn(); } // 주차별
+    match /IncomingData/{document=**}       { allow read, write: if signedIn(); } // 입고
+    match /DeprecatedLog/{document=**}      { allow read, write: if signedIn(); } // 폐기 로그
+    match /OrderPairsChunks/{document=**}   { allow read, write: if signedIn(); } // 주문 페어 청크
+    match /OrderStatsChunks/{document=**}   { allow read, write: if signedIn(); } // 주문 통계 청크
+    match /ProcessedOrders/{document=**}    { allow read, write: if signedIn(); } // 처리된 주문
+
+    // ── china-stock (중국제작 미발계산기 · 입고 스캐너) ──────────────────
+    // 2026-09-04 프로젝트 통합으로 이 프로젝트에 들어왔다.
+    // 웹(china-stock-goods.html)과 폰 스캐너(scan.html) 모두 로그인 후 사용한다.
+    //   · 폰에서도 업무관리에 한 번 로그인하면 그 뒤로는 그대로 열린다.
+    //   · 만약 작업자 폰을 로그인 상태로 유지하기 어렵다면, 아래 두 줄 중
+    //     signedIn() 을 true 로 바꾸면 로그인 없이도 동작한다.
+    //     (단, 주소를 아는 사람은 누구나 이 컬렉션을 읽고 쓸 수 있게 되므로 권장하지 않는다)
+    match /ChinaStockGoods/{document=**}                 { allow read, write: if signedIn(); } // 상품/설정/손입력 문서
+    match /ChinaStockGoods_ScanDB/{document=**}          { allow read, write: if signedIn(); } // 스캔 기준 DB
+    match /ChinaStockGoods_ScanDB_Versions/{document=**} { allow read, write: if signedIn(); } // 스캔 DB 버전 스냅샷
+    match /ChinaStockGoods_InboundHistory/{document=**}  { allow read, write: if signedIn(); } // 입고 이력
+    match /ChinaStockGoods_StockLog/{document=**}        { allow read, write: if signedIn(); } // 미발재고로그 청크
+
+    // 그 외 경로는 명시적으로 차단 (기본 deny와 동일, 의도 명확화용)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,10 +1,109 @@
 // === js/ui-history-dashboard.js ===
-import * as State from './state.js';
-import { analyzeUnitCost } from './ui-history-reports-logic.js';
+import * as State from './state.js?v=202610021042';
+import { analyzeUnitCost } from './ui-history-reports-logic.js?v=202610021042';
+import { getWeekOfYear, toDateString, buildMemberHourlyWageMap } from './utils.js?v=202610021042';
+import { revenueTotalOf, orderCountTotalOf } from './revenue-channels.js?v=202610021042';
 
 let dashboardChartInstance = null;
 
+// 주어진 일자 데이터들의 종합 UPH 계산 (대시보드 종합 UPH 정의와 동일)
+const computeAvgUphFromDays = (days) => {
+    let totalDur = 0, totalQty = 0;
+    (days || []).forEach(d => {
+        (d.workRecords || []).forEach(r => { totalDur += (r.duration || 0); });
+        Object.values(d.taskQuantities || {}).forEach(q => { totalQty += (Number(q) || 0); });
+    });
+    return totalDur > 0 ? (totalQty / (totalDur / 60)) : 0;
+};
+
+/**
+ * 하이브리드 기준 데이터 선정
+ *  - 일:  최근 7일 평균(롤링)
+ *  - 주:  최근 4주 평균(롤링)
+ *  - 월:  작년 같은 달 우선 → 없으면 최근 3개월 평균(롤링) 폴백
+ *  - 년:  전년도 우선 → 없으면 비교 불가
+ * @returns { data, type, description, range } — data 빈 배열이면 비교 기준 없음
+ */
+const getBaselinePeriod = (granularity, selectedKey, allHistoryData) => {
+    const none = { data: [], type: 'none', description: '비교용 기준 데이터 없음', range: null };
+    if (!selectedKey || !Array.isArray(allHistoryData) || allHistoryData.length === 0) return none;
+
+    if (granularity === 'day') {
+        const target = new Date(selectedKey + 'T00:00:00');
+        if (isNaN(target.getTime())) return none;
+        const start = new Date(target); start.setDate(start.getDate() - 7);
+        const end   = new Date(target); end.setDate(end.getDate() - 1);
+        const startStr = toDateString(start);
+        const endStr   = toDateString(end);
+        const data = allHistoryData.filter(d => d.id >= startStr && d.id <= endStr);
+        if (data.some(d => (d.workRecords||[]).length > 0)) {
+            return { data, type: 'rolling', description: `최근 7일 평균 (${startStr} ~ ${endStr})`, range: `${startStr} ~ ${endStr}` };
+        }
+        return none;
+    }
+
+    if (granularity === 'week') {
+        const allWeekKeys = [...new Set(allHistoryData.map(d => {
+            try { return getWeekOfYear(new Date(d.id + 'T00:00:00')); } catch (e) { return null; }
+        }).filter(Boolean))].sort();
+        const idx = allWeekKeys.indexOf(selectedKey);
+        if (idx <= 0) return none;
+        const prevKeys = allWeekKeys.slice(Math.max(0, idx - 4), idx);
+        if (prevKeys.length === 0) return none;
+        const data = allHistoryData.filter(d => {
+            try { return prevKeys.includes(getWeekOfYear(new Date(d.id + 'T00:00:00'))); } catch (e) { return false; }
+        });
+        const desc = prevKeys.length >= 4
+            ? `최근 4주 평균 (${prevKeys[0]} ~ ${prevKeys[prevKeys.length-1]})`
+            : `최근 ${prevKeys.length}주 평균 (${prevKeys.join(', ')})`;
+        return { data, type: prevKeys.length >= 4 ? 'rolling' : 'rolling_short', description: desc, range: `${prevKeys[0]} ~ ${prevKeys[prevKeys.length-1]}` };
+    }
+
+    if (granularity === 'month') {
+        const m = selectedKey.match(/^(\d{4})-(\d{2})$/);
+        if (!m) return none;
+        const year = parseInt(m[1], 10);
+        const mm = m[2];
+        // 1순위: 작년 같은 달
+        const yoyKey = `${year - 1}-${mm}`;
+        const yoyData = allHistoryData.filter(d => typeof d.id === 'string' && d.id.substring(0,7) === yoyKey);
+        if (yoyData.some(d => (d.workRecords||[]).length > 0)) {
+            return { data: yoyData, type: 'yoy', description: `작년 같은 달 (${yoyKey})`, range: yoyKey };
+        }
+        // 폴백: 최근 3개월 롤링
+        const allMonthKeys = [...new Set(allHistoryData.map(d => typeof d.id === 'string' ? d.id.substring(0,7) : null).filter(Boolean))].sort();
+        const idx = allMonthKeys.indexOf(selectedKey);
+        if (idx <= 0) return { ...none, description: `${yoyKey} 데이터 없고 직전 월도 없어 비교 불가` };
+        const prevKeys = allMonthKeys.slice(Math.max(0, idx - 3), idx);
+        const data = allHistoryData.filter(d => prevKeys.includes(d.id.substring(0,7)));
+        const desc = (prevKeys.length >= 3 ? `최근 3개월 평균` : `최근 ${prevKeys.length}개월 평균`)
+            + ` (${prevKeys[0]} ~ ${prevKeys[prevKeys.length-1]}) — 작년 동월(${yoyKey}) 데이터 없어 폴백`;
+        return { data, type: 'rolling_fallback', description: desc, range: `${prevKeys[0]} ~ ${prevKeys[prevKeys.length-1]}` };
+    }
+
+    if (granularity === 'year') {
+        if (!/^\d{4}$/.test(selectedKey)) return none;
+        const year = parseInt(selectedKey, 10);
+        const prevYearKey = String(year - 1);
+        const prevYearData = allHistoryData.filter(d => typeof d.id === 'string' && d.id.substring(0,4) === prevYearKey);
+        if (prevYearData.some(d => (d.workRecords||[]).length > 0)) {
+            return { data: prevYearData, type: 'yoy', description: `전년도 (${prevYearKey})`, range: prevYearKey };
+        }
+        return { ...none, description: `전년도(${prevYearKey}) 데이터 없어 비교 불가` };
+    }
+
+    return none;
+};
+
 export function renderDashboardTab(filteredData, appConfig) {
+    // 📍 마일스톤 위젯 (lazy import, 비동기 — 실패해도 메인 렌더에는 영향 없음)
+    const milestoneWidget = document.getElementById('dashboard-milestones-widget');
+    if (milestoneWidget) {
+        import('./ui-history-milestones.js?v=202610021042').then(mod => {
+            mod.renderMilestonesInsightWidget(milestoneWidget);
+        }).catch(e => console.warn('milestones widget load failed:', e));
+    }
+
     if (!filteredData || filteredData.length === 0) {
         document.getElementById('ai-dashboard-comment').textContent = "조회된 기간에 이력 데이터가 없습니다.";
         document.getElementById('kpi-total-time').innerHTML = `0<span class="text-sm font-medium text-gray-500 ml-1">h</span>`;
@@ -34,9 +133,17 @@ export function renderDashboardTab(filteredData, appConfig) {
     let totalActualDurationMin = 0; 
     let totalQty = 0;
     
-    // 평균 근무일수 계산용 변수 추가
-    const uniqueMembersAllTime = new Set();
-    let totalWorkerDays = 0;
+    // 평균 근무일수 계산용 (출근=dailyAttendance 기준, 정규 팀원만 집계)
+    const _excludedForHeadcount = new Set([
+        ...(appConfig.systemAccounts || []),
+        ...(appConfig.headcountExcludedMembers || [])
+    ]);
+    const regularMembers = new Set();
+    (appConfig.teamGroups || []).forEach(g => (g.members || []).forEach(m => {
+        if (m && !_excludedForHeadcount.has(m)) regularMembers.add(m);
+    }));
+    const attendedRegularMembers = new Set(); // 기간 내 1번이라도 출근한 정규 팀원 (분모)
+    let totalAttendanceDays = 0;              // 정규 팀원 출근 연인원 (분자)
 
     const trendLabels = [];
     const uphTrendData = [];
@@ -50,7 +157,7 @@ export function renderDashboardTab(filteredData, appConfig) {
         '직진배송': { duration: 0, qty: 0 }
     };
 
-    const wageMap = { ...(appConfig.memberWages || {}) };
+    const wageMap = buildMemberHourlyWageMap(appConfig.memberWages); // 월기본급 → 시급(÷209)
 
     const aggregatedWorkRecords = [];
     const aggregatedQuantities = {};
@@ -77,7 +184,6 @@ export function renderDashboardTab(filteredData, appConfig) {
             dayDuration += (r.duration || 0);
             if (r.member) {
                 uniqueMembers.add(r.member);
-                uniqueMembersAllTime.add(r.member); // 전체 기간 중 활동한 고유 인원 수집
             }
             
             const matchedType = taskTypes.find(t => (r.taskType && r.taskType.includes(t)) || (r.task && r.task.includes(t)));
@@ -86,8 +192,14 @@ export function renderDashboardTab(filteredData, appConfig) {
             aggregatedWorkRecords.push({ ...r, date: day.id });
         });
 
-        // 하루 동안 투입된 총 인원수를 더함 (연인원 개념)
-        totalWorkerDays += uniqueMembers.size;
+        // 평균 근무일수: 출근(dailyAttendance) 기준으로 그날 출근한 정규 팀원 집계
+        const dayAttendance = day.dailyAttendance || {};
+        Object.keys(dayAttendance).forEach(name => {
+            if (!regularMembers.has(name)) return;                            // 정규 팀원만
+            if (!dayAttendance[name] || !dayAttendance[name].inTime) return;  // 실제 출근(inTime)만
+            totalAttendanceDays++;
+            attendedRegularMembers.add(name);
+        });
 
         Object.entries(day.taskQuantities || {}).forEach(([taskKey, qty]) => {
             const numQty = Number(qty) || 0;
@@ -100,8 +212,8 @@ export function renderDashboardTab(filteredData, appConfig) {
         });
 
         const mgmt = day.management || {};
-        totalOrderCount += (Number(mgmt.orderCount) || 0);
-        totalRevenue += (Number(mgmt.revenue) || 0);
+        totalOrderCount += orderCountTotalOf(mgmt);
+        totalRevenue += revenueTotalOf(mgmt);
         
         if (Number(mgmt.inventoryAmt) > 0) {
             totalInventoryAmt += Number(mgmt.inventoryAmt);
@@ -139,11 +251,18 @@ export function renderDashboardTab(filteredData, appConfig) {
     const avgInventoryAmt = daysWithInventory > 0 ? (totalInventoryAmt / daysWithInventory) : 0;
     const turnoverRate = avgInventoryAmt > 0 ? (totalRevenue / avgInventoryAmt) : 0;
     
-    // 평균 근무일수 계산 (총 투입 연인원 / 전체 기간 중 일한 고유 인원)
-    const avgWorkDays = uniqueMembersAllTime.size > 0 ? (totalWorkerDays / uniqueMembersAllTime.size) : 0;
+    // 평균 근무일수 = 정규 팀원 출근 연인원 / 기간 내 출근한 정규 팀원 고유 인원
+    // (출근=dailyAttendance.inTime 기준, 시스템/제외계정·파트타이머 제외)
+    const avgWorkDays = attendedRegularMembers.size > 0 ? (totalAttendanceDays / attendedRegularMembers.size) : 0;
 
-    const TARGET_UPH = 200; 
-    const oee = Math.min(100, Math.max(0, (avgUph / TARGET_UPH) * 100)); 
+    // 하이브리드 기준치: 단위에 따라 롤링/전년 동기 선택
+    const granularity = State.context?.globalGranularity || 'day';
+    const selectedKey = document.querySelector('.history-date-btn.bg-blue-100')?.dataset.key || null;
+    const baseline = getBaselinePeriod(granularity, selectedKey, State.allHistoryData);
+    const baselineUph = computeAvgUphFromDays(baseline.data);
+    const hasBaseline = baselineUph > 0;
+    // oee = 현재 UPH / 기준 UPH × 100 (100%면 평소 수준)
+    const oee = hasBaseline ? Math.min(200, Math.max(0, (avgUph / baselineUph) * 100)) : 0;
 
     // KPI 렌더링 업데이트
     document.getElementById('kpi-total-time').innerHTML = `
@@ -159,7 +278,18 @@ export function renderDashboardTab(filteredData, appConfig) {
     if(totalQtyEl) totalQtyEl.innerHTML = `${Math.round(totalQty).toLocaleString()}<span class="text-sm font-medium text-gray-500 ml-1">건</span>`;
 
     document.getElementById('kpi-avg-uph').innerHTML = `${avgUph.toFixed(1)}<span class="text-sm font-medium text-blue-400 ml-1">개/시</span>`;
-    document.getElementById('kpi-total-oee').innerHTML = `${oee.toFixed(1)}<span class="text-sm font-medium text-green-400 ml-1">%</span>`;
+    const oeeEl = document.getElementById('kpi-total-oee');
+    if (oeeEl) {
+        const oeeLabel = oeeEl.previousElementSibling;
+        if (oeeLabel) {
+            oeeLabel.textContent = '기준 대비 효율';
+            oeeLabel.title = hasBaseline ? `${baseline.description} (기준 UPH ${baselineUph.toFixed(1)}개/시)` : baseline.description;
+        }
+        oeeEl.innerHTML = hasBaseline
+            ? `${oee.toFixed(1)}<span class="text-sm font-medium text-green-400 ml-1">%</span>`
+            : `—<span class="text-sm font-medium text-gray-400 ml-1">%</span>`;
+        oeeEl.title = oeeLabel?.title || '';
+    }
     
     const unitCostEl = document.getElementById('kpi-unit-cost');
     if(unitCostEl) {
@@ -182,35 +312,53 @@ export function renderDashboardTab(filteredData, appConfig) {
         }
     });
 
+    // 기준 정보 메타 (마우스오버 + 화면 표기)
+    const baselineMetaHtml = hasBaseline
+        ? `<div class="text-[11px] text-indigo-600/80 dark:text-indigo-300/80 mt-2 pt-2 border-t border-indigo-100 dark:border-indigo-800/50" title="${baseline.description} · 기준 UPH ${baselineUph.toFixed(1)}개/시">📊 비교 기준: <strong>${baseline.description}</strong> · 기준 UPH <strong>${baselineUph.toFixed(1)}</strong>개/시 · 현재 UPH <strong>${avgUph.toFixed(1)}</strong></div>`
+        : `<div class="text-[11px] text-gray-500 dark:text-gray-400 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700" title="${baseline.description}">📊 비교 기준: <strong>${baseline.description}</strong></div>`;
+
     let diagnosticHtml = '';
-    if (oee < 60) {
+    if (!hasBaseline) {
         diagnosticHtml = `
-            <div class="text-red-700 mb-2">⚠️ <strong class="font-bold text-lg">생산 효율 경고: 기준치 대비 ${Math.round(100 - oee)}% 저하되었습니다.</strong></div>
+            <div class="text-gray-700 mb-2">ℹ️ <strong class="font-bold text-lg">비교 기준 데이터 부족 — 절대치만 표시</strong></div>
+            <ul class="list-disc pl-5 space-y-1 text-sm">
+                <li>현재 기간 평균 UPH: <strong>${avgUph.toFixed(1)}</strong>개/시</li>
+                <li>건당 총 출고 원가: <strong>${Math.round(unitCost).toLocaleString()}원</strong></li>
+                <li><span class="font-bold text-gray-900">모니터링 대상:</span> <span class="bg-yellow-100 text-yellow-800 px-1 rounded">${lowestPart || '일부 파트'}</span> 파트의 처리량 추이를 관찰하세요.</li>
+            </ul>
+            ${baselineMetaHtml}
+        `;
+    } else if (oee < 80) {
+        diagnosticHtml = `
+            <div class="text-red-700 mb-2">⚠️ <strong class="font-bold text-lg">생산 효율 경고: 기준 대비 ${Math.round(100 - oee)}% 저하</strong></div>
             <ul class="list-disc pl-5 space-y-1 text-sm">
                 <li><span class="font-bold text-gray-900">가장 취약한 파트:</span> <span class="bg-red-100 text-red-800 px-1 rounded">${lowestPart || '전반적'}</span> (현재 UPH: ${lowestUph === Infinity ? 0 : Math.round(lowestUph)})</li>
-                <li><span class="font-bold text-gray-900">조치 권고사항:</span> 
-                    해당 파트에 <span class="text-blue-600 font-bold">인력을 추가 배치(1~2명)</span>하거나, 
+                <li><span class="font-bold text-gray-900">조치 권고사항:</span>
+                    해당 파트에 <span class="text-blue-600 font-bold">인력을 추가 배치(1~2명)</span>하거나,
                     작업자들의 피로도를 고려하여 <span class="text-green-600 font-bold">10분간 강제 휴식</span>을 부여하세요.
                 </li>
-                <li>현재 건당 총 출고 원가가 <strong>${Math.round(unitCost).toLocaleString()}원</strong>으로 상승 추세입니다. 병목 해소가 시급합니다.</li>
+                <li>현재 건당 총 출고 원가가 <strong>${Math.round(unitCost).toLocaleString()}원</strong>입니다. 병목 해소가 시급합니다.</li>
             </ul>
+            ${baselineMetaHtml}
         `;
-    } else if (oee >= 90) {
-         diagnosticHtml = `
-            <div class="text-blue-700 mb-2">🔥 <strong class="font-bold text-lg">최상 컨디션: 목표 달성률 ${Math.round(oee)}%</strong></div>
+    } else if (oee > 110) {
+        diagnosticHtml = `
+            <div class="text-blue-700 mb-2">🔥 <strong class="font-bold text-lg">상승세: 기준 대비 ${Math.round(oee - 100)}% 향상</strong></div>
             <ul class="list-disc pl-5 space-y-1 text-sm">
                 <li>현재의 속도가 지속될 경우, 남은 업무량 대비 투입 인원이 남을 수 있습니다.</li>
                 <li><span class="font-bold text-gray-900">조치 권고사항:</span> 작업 속도가 빠른 인원을 <span class="text-blue-600 font-bold">내일 업무 준비나 재고 조사 등</span> 다른 업무로 전환하여 유휴 시간을 줄이세요.</li>
                 <li>건당 총 출고 원가가 <strong>${Math.round(unitCost).toLocaleString()}원</strong>으로 낮게 방어되어 수익성이 매우 좋습니다.</li>
             </ul>
+            ${baselineMetaHtml}
         `;
     } else {
-         diagnosticHtml = `
-            <div class="text-green-700 mb-2">✅ <strong class="font-bold text-lg">안정적 운영 상태 (효율 ${Math.round(oee)}%)</strong></div>
+        diagnosticHtml = `
+            <div class="text-green-700 mb-2">✅ <strong class="font-bold text-lg">평소 수준 (효율 ${Math.round(oee)}%)</strong></div>
             <ul class="list-disc pl-5 space-y-1 text-sm">
-                <li>현재 목표 UPH(${TARGET_UPH}) 대비 <span class="font-bold">${avgUph.toFixed(1)}</span>으로 안정적인 처리 속도를 유지 중입니다.</li>
+                <li>현재 UPH <strong>${avgUph.toFixed(1)}</strong> / 기준 UPH <strong>${baselineUph.toFixed(1)}</strong> — 평소 수준으로 안정적으로 운영 중입니다.</li>
                 <li><span class="font-bold text-gray-900">모니터링 대상:</span> <span class="bg-yellow-100 text-yellow-800 px-1 rounded">${lowestPart || '일부 파트'}</span> 파트의 처리량이 약간 저하되고 있는지 지속 관찰하세요.</li>
             </ul>
+            ${baselineMetaHtml}
         `;
     }
     aiCommentEl.innerHTML = diagnosticHtml;

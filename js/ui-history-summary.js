@@ -1,18 +1,12 @@
-// === ui-history-summary.js (업무 이력 주/월별 요약 담당) ===
+// === ui-history-summary.js ===
 
-import { formatDuration, getWeekOfYear } from './utils.js';
-// 헬퍼 함수를 reports 파일에서 가져옴 (순환 참조 해결)
-import { getDiffHtmlForMetric } from './ui-history-reports-logic.js';
+import { formatDuration, getWeekOfYear, buildMemberHourlyWageMap } from './utils.js?v=202610021042';
+import { getDiffHtmlForMetric } from './ui-history-reports-logic.js?v=202610021042';
 
-/**
- * 주/월별 요약 뷰 렌더링 (내부 헬퍼)
- * (ui-history.js -> ui-history-summary.js)
- */
 const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPeriodDataset = null) => {
     const records = dataset.workRecords || [];
     const quantities = dataset.taskQuantities || {};
 
-    // --- 1. 이전 기간(Previous) 데이터 계산 ---
     let prevTaskSummary = {};
     let prevTotalDuration = 0;
     let prevTotalQuantity = 0;
@@ -46,7 +40,6 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
             return acc;
         }, {});
 
-        // 1b. 이전 기간 Post-process (업무별)
         Object.keys(prevTaskSummary).forEach(task => {
             const summary = prevTaskSummary[task];
             const qty = Number(prevQuantities[task]) || 0;
@@ -69,7 +62,6 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
         });
     }
 
-    // --- 2. 현재 기간(Current) 데이터 계산 ---
     const totalDuration = records.reduce((s, r) => s + (r.duration || 0), 0);
     const totalQuantity = Object.values(quantities || {}).reduce((s, q) => s + (Number(q) || 0), 0);
     const totalCost = records.reduce((s, r) => {
@@ -77,9 +69,15 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
         return s + ((r.duration || 0) / 60) * wage;
     }, 0);
 
+    const overallMembers = new Set();
+    records.forEach(r => {
+        if(r.member) overallMembers.add(r.member);
+    });
+    // 실제 소요시간 (인당 평균)
+    const actualTotalDuration = overallMembers.size > 0 ? totalDuration / overallMembers.size : 0;
+
     const overallAvgThroughputNum = totalDuration > 0 ? (totalQuantity / totalDuration) : 0;
     const overallAvgCostPerItemNum = totalQuantity > 0 ? (totalCost / totalQuantity) : 0;
-
     const overallAvgThroughputStr = overallAvgThroughputNum.toFixed(2);
     const overallAvgCostPerItemStr = overallAvgCostPerItemNum.toFixed(0);
 
@@ -122,7 +120,6 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
         }
     });
 
-    // --- 3. HTML 렌더링 ---
     const durationDiff = previousPeriodDataset ? getDiffHtmlForMetric('totalDuration', totalDuration, prevTotalDuration) : '';
     const quantityDiff = previousPeriodDataset ? getDiffHtmlForMetric('totalQuantity', totalQuantity, prevTotalQuantity) : '';
     const costDiff = previousPeriodDataset ? getDiffHtmlForMetric('totalCost', totalCost, prevTotalCost) : '';
@@ -134,8 +131,9 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
 
     html += `<div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6 text-center">
         <div class="bg-gray-50 p-3 rounded">
-            <div class="text-xs text-gray-500">총 시간</div>
+            <div class="text-xs text-gray-500">총 시간 (실제 소요시간)</div>
             <div class="text-lg font-bold">${formatDuration(totalDuration)}</div>
+            <div class="text-sm font-bold text-blue-600 bg-blue-50 inline-block px-1 mt-1 rounded">실제: ${formatDuration(Math.round(actualTotalDuration))}</div>
             ${durationDiff}
         </div>
         <div class="bg-gray-50 p-3 rounded">
@@ -160,19 +158,20 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
         </div>
     </div>`;
 
+    const prevLabel = mode === 'weekly' ? '전주' : (mode === 'yearly' ? '전년' : '전월');
     html += `<h4 class="text-lg font-semibold mb-3 text-gray-700">업무별 평균 (
-                ${previousPeriodDataset ? (mode === 'weekly' ? '전주' : '전월') + ' 대비' : '이전 데이터 없음'}
+                ${previousPeriodDataset ? prevLabel + ' 대비' : '이전 데이터 없음'}
             )</h4>`;
     
     html += `<div class="overflow-x-auto max-h-[60vh]">
                <table class="w-full text-sm text-left text-gray-600">
-                 <thead class="text-xs text-gray-700 uppercase bg-gray-100 sticky top-0">
+                 <thead class="text-xs text-gray-700 uppercase bg-gray-100 sticky top-0 shadow-sm z-10">
                    <tr>
-                     <th scope="col" class="px-4 py-2">업무</th>
-                     <th scope="col" class="px-4 py-2 text-right">평균 처리량 (개/분)</th>
-                     <th scope="col" class="px-4 py-2 text-right">평균 처리비용 (원/개)</th>
-                     <th scope="col" class="px-4 py-2 text-right">총 참여인원 (명)</th>
-                     <th scope="col" class="px-4 py-2 text-right">평균 처리시간 (건)</th>
+                     <th scope="col" class="px-4 py-3">업무</th>
+                     <th scope="col" class="px-4 py-3 text-right">평균 처리량 (개/분)</th>
+                     <th scope="col" class="px-4 py-3 text-right">평균 처리비용 (원/개)</th>
+                     <th scope="col" class="px-4 py-3 text-right">총 참여인원 (명)</th>
+                     <th scope="col" class="px-4 py-3 text-right">총 투입시간 / 실제 소요시간</th>
                    </tr>
                  </thead>
                  <tbody>`;
@@ -190,25 +189,27 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
                 const tableThroughputDiff = previousPeriodDataset ? getDiffHtmlForMetric('avgThroughput', summary.avgThroughput, prevSummary?.avgThroughput) : '';
                 const tableCostDiff = previousPeriodDataset ? getDiffHtmlForMetric('avgCostPerItem', summary.avgCostPerItem, prevSummary?.avgCostPerItem) : '';
                 const tableStaffDiff = previousPeriodDataset ? getDiffHtmlForMetric('avgStaff', summary.avgStaff, prevSummary?.avgStaff) : '';
-                const tableTimeDiff = previousPeriodDataset ? getDiffHtmlForMetric('avgTime', summary.avgTime, prevSummary?.avgTime) : '';
+                
+                // 해당 업무의 실제(인당 평균) 소요 시간
+                const actualTaskDuration = summary.members.size > 0 ? summary.duration / summary.members.size : 0;
 
                 html += `<tr class="bg-white border-b hover:bg-gray-50">
-                           <td class="px-4 py-2 font-medium text-gray-900">${task}</td>
-                           <td class="px-4 py-2 text-right">
+                           <td class="px-4 py-3 font-medium text-gray-900">${task}</td>
+                           <td class="px-4 py-3 text-right">
                                 <div>${summary.avgThroughput.toFixed(2)}</div>
                                 ${tableThroughputDiff}
                            </td>
-                           <td class="px-4 py-2 text-right">
+                           <td class="px-4 py-3 text-right">
                                 <div>${summary.avgCostPerItem.toFixed(0)}</div>
                                 ${tableCostDiff}
                            </td>
-                           <td class="px-4 py-2 text-right">
+                           <td class="px-4 py-3 text-right">
                                 <div>${summary.avgStaff}</div>
                                 ${tableStaffDiff}
                            </td>
-                           <td class="px-4 py-2 text-right">
-                                <div>${formatDuration(summary.avgTime)}</div>
-                                ${tableTimeDiff}
+                           <td class="px-4 py-3 text-right">
+                                <div class="font-bold text-gray-800">총합: ${formatDuration(summary.duration)}</div>
+                                <div class="text-xs font-bold text-blue-600 mt-0.5">실제: ${formatDuration(Math.round(actualTaskDuration))}</div>
                            </td>
                          </tr>`;
             }
@@ -216,7 +217,7 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
     }
 
     if (!hasTaskData) {
-        html += `<tr><td colspan="5" class="text-center py-4 text-gray-500">데이터 없음</td></tr>`;
+        html += `<tr><td colspan="5" class="text-center py-8 text-gray-500">데이터 없음</td></tr>`;
     }
 
     html += `    </tbody>
@@ -227,10 +228,6 @@ const renderSummaryView = (mode, dataset, periodKey, wageMap = {}, previousPerio
     return html;
 };
 
-/**
- * 업무 이력 - 주별 요약 렌더링
- * (ui-history.js -> ui-history-summary.js)
- */
 export const renderWeeklyHistory = (selectedWeekKey, allHistoryData, appConfig) => {
     const view = document.getElementById('history-weekly-view');
     if (!view) return;
@@ -245,7 +242,7 @@ export const renderWeeklyHistory = (selectedWeekKey, allHistoryData, appConfig) 
                 }
             });
         });
-        const combinedWageMap = { ...historyWageMap, ...(appConfig.memberWages || {}) };
+        const combinedWageMap = { ...historyWageMap, ...buildMemberHourlyWageMap(appConfig.memberWages) }; // 월기본급 → 시급(÷209)
 
         const weeklyData = (allHistoryData || []).reduce((acc, day) => {
             if (!day || !day.id || !day.workRecords || typeof day.id !== 'string') return acc;
@@ -290,10 +287,6 @@ export const renderWeeklyHistory = (selectedWeekKey, allHistoryData, appConfig) 
     }
 };
 
-/**
- * 업무 이력 - 월별 요약 렌더링
- * (ui-history.js -> ui-history-summary.js)
- */
 export const renderMonthlyHistory = (selectedMonthKey, allHistoryData, appConfig) => {
     const view = document.getElementById('history-monthly-view');
     if (!view) return;
@@ -308,7 +301,7 @@ export const renderMonthlyHistory = (selectedMonthKey, allHistoryData, appConfig
                 }
             });
         });
-        const combinedWageMap = { ...historyWageMap, ...(appConfig.memberWages || {}) };
+        const combinedWageMap = { ...historyWageMap, ...buildMemberHourlyWageMap(appConfig.memberWages) }; // 월기본급 → 시급(÷209)
 
         const monthlyData = (allHistoryData || []).reduce((acc, day) => {
             if (!day || !day.id || !day.workRecords || typeof day.id !== 'string' || day.id.length < 7) return acc;
@@ -346,5 +339,60 @@ export const renderMonthlyHistory = (selectedMonthKey, allHistoryData, appConfig
     } catch (error) {
         console.error("Error in renderMonthlyHistory:", error);
         view.innerHTML = '<div class="text-center text-red-500 p-4">월별 데이터를 표시하는 중 오류가 발생했습니다. 개발자 콘솔을 확인하세요.</div>';
+    }
+};
+
+export const renderYearlyHistory = (selectedYearKey, allHistoryData, appConfig) => {
+    const view = document.getElementById('history-yearly-view');
+    if (!view) return;
+    view.innerHTML = '<div class="text-center text-gray-500">연간 데이터 집계 중...</div>';
+
+    try {
+        const historyWageMap = {};
+        (allHistoryData || []).forEach(dayData => {
+            (dayData.partTimers || []).forEach(pt => {
+                if (pt && pt.name && !historyWageMap[pt.name]) {
+                     historyWageMap[pt.name] = pt.wage || 0;
+                }
+            });
+        });
+        const combinedWageMap = { ...historyWageMap, ...buildMemberHourlyWageMap(appConfig.memberWages) }; // 월기본급 → 시급(÷209)
+
+        const yearlyData = (allHistoryData || []).reduce((acc, day) => {
+            if (!day || !day.id || !day.workRecords || typeof day.id !== 'string' || day.id.length < 4) return acc;
+            try {
+                const yearKey = day.id.substring(0, 4);
+                if (!/^\d{4}$/.test(yearKey)) return acc;
+
+                if (!acc[yearKey]) acc[yearKey] = { workRecords: [], taskQuantities: {} };
+                acc[yearKey].workRecords.push(...(day.workRecords || []).map(r => ({ ...r, date: day.id })));
+                Object.entries(day.taskQuantities || {}).forEach(([task, qty]) => {
+                    acc[yearKey].taskQuantities[task] = (acc[yearKey].taskQuantities[task] || 0) + (Number(qty) || 0);
+                });
+            } catch (e) {
+                console.error("Error processing day in yearly aggregation:", day.id, e);
+            }
+            return acc;
+        }, {});
+
+        const sortedYears = Object.keys(yearlyData).sort((a, b) => b.localeCompare(a));
+
+        const currentData = yearlyData[selectedYearKey];
+        if (!currentData) {
+            view.innerHTML = `<div class="text-center text-gray-500">${selectedYearKey}년에 해당하는 데이터가 없습니다.</div>`;
+            return;
+        }
+
+        const currentIndex = sortedYears.indexOf(selectedYearKey);
+        const prevYearKey = (currentIndex > -1 && currentIndex + 1 < sortedYears.length)
+                             ? sortedYears[currentIndex + 1]
+                             : null;
+        const prevData = prevYearKey ? yearlyData[prevYearKey] : null;
+
+        view.innerHTML = renderSummaryView('yearly', currentData, selectedYearKey, combinedWageMap, prevData);
+
+    } catch (error) {
+        console.error("Error in renderYearlyHistory:", error);
+        view.innerHTML = '<div class="text-center text-red-500 p-4">연간 데이터를 표시하는 중 오류가 발생했습니다. 개발자 콘솔을 확인하세요.</div>';
     }
 };

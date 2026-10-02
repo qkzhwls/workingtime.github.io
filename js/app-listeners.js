@@ -1,34 +1,23 @@
 // === js/app-listeners.js ===
 
-import { setupMainScreenListeners } from './listeners-main.js';
-import { setupHistoryModalListeners } from './listeners-history.js';
-import { setupGeneralModalListeners } from './listeners-modals.js';
-import { setupSimulationModalListeners } from './listeners-modals-sim.js';
-import { setupConfirmationModalListeners } from './listeners-modals-confirm.js';
-import { setupFormModalListeners } from './listeners-modals-form.js';
-import { setupAuthListeners } from './listeners-auth.js';
+import { setupMainScreenListeners } from './listeners-main.js?v=202610021042';
+import { setupHistoryModalListeners } from './listeners-history.js?v=202610021042';
+import { setupGeneralModalListeners } from './listeners-modals.js?v=202610021042';
+import { setupConfirmationModalListeners } from './listeners-modals-confirm.js?v=202610021042';
+import { setupFormModalListeners } from './listeners-modals-form.js?v=202610021042';
+import { setupAuthListeners } from './listeners-auth.js?v=202610021042';
 // ✅ [신규] 분리된 메인 현황판 리스너 임포트
-import { setupMainBoardListeners } from './listeners-main-board.js';
+import { setupMainBoardListeners } from './listeners-main-board.js?v=202610021042';
+// ✅ [신규] 전량 검수 리스너 임포트
+import { setupTotalInspectionListeners } from './listeners-form-total-inspection.js?v=202610021042';
 
 export function initializeAppListeners() {
     setupMainScreenListeners(); // (출퇴근, 하단 로그, 메뉴 등)
     setupHistoryModalListeners();
     setupGeneralModalListeners(); // (공통 닫기 버튼)
-    setupSimulationModalListeners(); 
     setupConfirmationModalListeners();
     setupFormModalListeners();
     setupAuthListeners();
     setupMainBoardListeners(); // ✅ [신규] 메인 현황판 리스너 호출
-    
-    document.getElementById('btn-location-management')?.addEventListener('click', () => {
-        window.open('location.html', '_blank');
-    }); // ✅ [신규] 로케이션 관리 버튼
-
-    // ✅ [신규] 중국제작 버튼 (PC + 모바일)
-    document.getElementById('btn-china-production')?.addEventListener('click', () => {
-        window.open('china-stock-goods.html', '_blank');
-    });
-    document.getElementById('btn-china-production-mobile')?.addEventListener('click', () => {
-        window.open('china-stock-goods.html', '_blank');
-    });
+    setupTotalInspectionListeners(); // ✅ [신규] 전량 검수 리스너 호출
 }

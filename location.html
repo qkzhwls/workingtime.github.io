@@ -3,14 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="업무관리">
     <title>3층 로케이션 관리 시스템 (통합 DB)</title>
     <style>
         :root { --primary: #3d5afe; --bg: #f8f9fa; --card: #ffffff; }
         body { background: var(--bg); margin: 0; font-family: 'Noto Sans KR', sans-serif; overflow: hidden; } 
         
-        .controls-header { margin: 15px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; }
-        .tabs { display: flex; background: #eee; padding: 5px; border-radius: 8px; width: fit-content; align-items: center; }
-        .tab-btn { padding: 10px 20px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; background: none; }
+        .controls-header { margin: 8px 12px 6px 12px; display: flex; justify-content: space-between; align-items: center; }
+        .tabs { display: flex; background: #eee; padding: 3px; border-radius: 8px; width: fit-content; align-items: center; }
+        .tab-btn { padding: 7px 14px; border: none; cursor: pointer; border-radius: 6px; font-weight: bold; font-size: 13px; background: none; }
         .tab-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 
         .usage-container { position: relative; display: inline-block; margin-left: 10px; }
@@ -50,41 +55,42 @@
         .btn-delete-bulk { padding: 6px 12px; background: #ff5252; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
         .btn-delete-bulk:hover { background: #e04848; }
 
-        .list-container { 
-            overflow: auto; 
-            background: white; 
-            margin: 0 20px 10px 20px;
-            padding: 0; 
-            border-radius: 12px; 
-            border: 1px solid #ccc; 
-            height: calc(100vh - 120px); 
+        .list-container {
+            overflow: auto;
+            background: white;
+            margin: 0 8px 6px 8px;
+            padding: 0;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            height: calc(100vh - 88px);
         }
         .list-table { width: 100%; border-collapse: collapse; min-width: 1000px; }
-        .list-table th, .list-table td { 
-            padding: 12px 15px; 
-            text-align: center; 
-            border: 1px solid #ccc; 
-            font-size: 14px; 
+        .list-table th, .list-table td {
+            padding: 4px 7px;
+            text-align: center;
+            border: 1px solid #ccc;
+            font-size: 12.5px;
+            line-height: 1.35;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        
+
         .list-table tbody tr { cursor: pointer; transition: background 0.2s; }
         .list-table tbody tr:hover { filter: brightness(0.95); }
-        
-        .list-table th { 
-            background: #f4f4f4; 
-            position: sticky; 
-            top: -1px; 
-            z-index: 10; 
+
+        .list-table th {
+            background: #f4f4f4;
+            position: sticky;
+            top: -1px;
+            z-index: 10;
             user-select: none;
-            box-shadow: inset 0 -1px 0 #ccc, inset 0 1px 0 #ccc; 
+            box-shadow: inset 0 -1px 0 #ccc, inset 0 1px 0 #ccc;
         }
-        .th-content { display: flex; justify-content: center; align-items: center; gap: 8px; }
-        .title-text { font-size: 15px; font-weight: 800; color: #222; }
-        
-        .filter-btn { cursor: pointer; padding: 2px 6px; border-radius: 4px; color: #666; font-size: 12px; background: #e0e0e0; transition: 0.2s; }
+        .th-content { display: flex; justify-content: center; align-items: center; gap: 6px; }
+        .title-text { font-size: 12.5px; font-weight: 800; color: #222; }
+
+        .filter-btn { cursor: pointer; padding: 1px 5px; border-radius: 4px; color: #666; font-size: 11px; background: #e0e0e0; transition: 0.2s; }
         .filter-btn:hover { background: #d0d0d0; color: var(--primary); }
         .filter-btn.active { background: var(--primary); color: white; }
 
@@ -96,6 +102,15 @@
 
         .checkbox-cell { width: 40px; }
         .loc-check { cursor: pointer; width: 16px; height: 16px; }
+
+        /* ★ 헤더 드래그앤드롭(컬럼 순서 변경) */
+        th[data-col] { cursor: grab; }
+        th[data-col]:active { cursor: grabbing; }
+        th[data-col].th-dragging { opacity: 0.45; background: #e8eaf6; }
+        th[data-col].th-drop-left { box-shadow: inset 3px 0 0 0 var(--primary); }
+        th[data-col].th-drop-right { box-shadow: inset -3px 0 0 0 var(--primary); }
+        /* 필터 ▼ 버튼은 드래그 대신 클릭이 우선되도록 */
+        th[data-col] .filter-btn { cursor: pointer; }
 
         .modal-overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
@@ -300,6 +315,128 @@
             color: #c62828;
             border-color: #ef9a9a;
         }
+        /* ====== 📊 대시보드 전용 스타일 ====== */
+        .dash-container {
+            padding: 0 20px 20px 20px;
+            height: calc(100vh - 120px);
+            overflow-y: auto;
+        }
+        .dash-toolbar {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 15px;
+        }
+        .dash-toolbar h2 { margin: 0; font-size: 20px; color: #263238; }
+        .dash-toolbar .dash-refresh {
+            padding: 6px 14px; background: var(--primary); color: white;
+            border: none; border-radius: 6px; font-weight: bold; cursor: pointer;
+            font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+        .dash-toolbar .dash-refresh:hover { background: #324ee0; }
+
+        /* KPI 카드 */
+        .dash-kpi-row {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;
+            margin-bottom: 18px;
+        }
+        @media (max-width: 1100px) { .dash-kpi-row { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); } }
+        .dash-kpi-card {
+            background: white; border-radius: 12px; padding: 16px 18px;
+            border: 1px solid #e0e6ed; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+            display: flex; align-items: center; gap: 12px; min-height: 90px;
+        }
+        .dash-kpi-card .kpi-icon {
+            width: 44px; height: 44px; border-radius: 10px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; flex-shrink: 0;
+        }
+        .dash-kpi-card .kpi-body { flex: 1; min-width: 0; }
+        .dash-kpi-card .kpi-title { font-size: 12px; color: #607d8b; font-weight: bold; margin-bottom: 4px; }
+        .dash-kpi-card .kpi-value { font-size: 22px; font-weight: 900; color: #263238; line-height: 1.1; }
+        .dash-kpi-card .kpi-sub { font-size: 11px; color: #90a4ae; margin-top: 2px; }
+        .kpi-icon.blue { background: #e3f2fd; color: #1565c0; }
+        .kpi-icon.green { background: #e8f5e9; color: #2e7d32; }
+        .kpi-icon.amber { background: #fff8e1; color: #ef6c00; }
+        .kpi-icon.purple { background: #f3e5f5; color: #6a1b9a; }
+        .kpi-icon.red { background: #ffebee; color: #c62828; }
+
+        /* 도넛 미니 (KPI 카드 안) */
+        .kpi-donut { width: 56px; height: 56px; flex-shrink: 0; }
+        .kpi-donut text { font-size: 12px; font-weight: 900; fill: #263238; }
+
+        /* 차트 박스 */
+        .dash-charts-row {
+            display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px;
+            margin-bottom: 18px;
+        }
+        @media (max-width: 1100px) { .dash-charts-row { grid-template-columns: 1fr; } }
+        .dash-panel {
+            background: white; border-radius: 12px; padding: 16px 18px;
+            border: 1px solid #e0e6ed; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+        }
+        .dash-panel h3 { margin: 0 0 12px 0; font-size: 14px; color: #37474f; font-weight: 800; }
+
+        /* 구역별 사용률 막대 */
+        .zone-bars { display: flex; flex-direction: column; gap: 8px; }
+        .zone-bar-row { display: grid; grid-template-columns: 60px 1fr 90px; align-items: center; gap: 10px; }
+        .zone-bar-row .zb-label { font-weight: bold; font-size: 13px; color: #455a64; }
+        .zone-bar-row .zb-track { background: #eceff1; height: 18px; border-radius: 9px; overflow: hidden; }
+        .zone-bar-row .zb-fill { height: 100%; background: linear-gradient(90deg, #5c6bc0, #3d5afe); transition: width 0.4s; }
+        .zone-bar-row .zb-text { font-size: 12px; color: #546e7a; text-align: right; }
+
+        /* 마지막배송일 분포 (수평 bar 5개) */
+        .delivery-bars { display: flex; flex-direction: column; gap: 8px; }
+        .delivery-bars .zb-fill { background: linear-gradient(90deg, #66bb6a, #2e7d32); }
+        .delivery-bars .zb-fill.warn { background: linear-gradient(90deg, #ffa726, #ef6c00); }
+        .delivery-bars .zb-fill.danger { background: linear-gradient(90deg, #ef5350, #c62828); }
+        .delivery-bars .zb-fill.gray { background: linear-gradient(90deg, #b0bec5, #78909c); }
+
+        /* 인사이트 카드 */
+        .dash-insight-row {
+            display: grid; grid-template-columns: 1fr 1fr 1.6fr 0.7fr; gap: 12px;
+            margin-bottom: 18px;
+        }
+        @media (max-width: 1100px) { .dash-insight-row { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 640px) { .dash-insight-row { grid-template-columns: 1fr; } }
+        .insight-card {
+            background: white; border-radius: 12px; padding: 14px 16px;
+            border: 1px solid #e0e6ed; box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+        }
+        .insight-card h4 { margin: 0 0 10px 0; font-size: 13px; color: #37474f; font-weight: 800; }
+        .insight-card .ins-big { font-size: 28px; font-weight: 900; color: #263238; }
+        .insight-card .ins-desc { font-size: 12px; color: #607d8b; margin-top: 6px; line-height: 1.5; }
+        .insight-card .ins-list { font-size: 12px; color: #455a64; margin-top: 8px; line-height: 1.7; }
+        .insight-card .ins-list .pill {
+            display: inline-block; background: #eceff1; color: #37474f;
+            padding: 2px 8px; border-radius: 12px; margin-right: 6px; font-weight: bold;
+        }
+
+        /* 빠른 작업 버튼 */
+        .dash-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+        .dash-action-btn {
+            padding: 12px 18px; border-radius: 10px; border: none;
+            font-weight: bold; font-size: 13px; cursor: pointer;
+            display: flex; align-items: center; gap: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08); transition: 0.2s;
+            color: white;
+        }
+        .dash-action-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+        .dash-action-btn.act-orange { background: #e65100; }
+        .dash-action-btn.act-green { background: #2e7d32; }
+        .dash-action-btn.act-purple { background: #6a1b9a; }
+        .dash-action-btn .badge {
+            background: rgba(255,255,255,0.25); padding: 2px 8px; border-radius: 10px;
+            font-size: 11px;
+        }
+
+        /* 데이터 신선도 */
+        .dash-freshness {
+            background: #fafafa; border: 1px dashed #cfd8dc; border-radius: 10px;
+            padding: 10px 14px; font-size: 12px; color: #546e7a;
+            display: flex; flex-wrap: wrap; gap: 16px;
+        }
+        .dash-freshness b { color: #263238; }
+    </style>
+</head>
     </style>    
 </head>
 <body onclick="closeAllPopups()">
@@ -363,11 +500,11 @@
     <div id="firebase-guide" style="display:none;"><pre>match /Locations/{document=**} { allow read, write: if true; }</pre></div>
 
     <div class="controls-header">
+        <div style="display:flex; align-items:center; gap:16px;">
         <div class="tabs">
-            <button class="tab-btn active" id="tab-btn-list" onclick="switchView('list')">데이터 리스트</button>
+            <button class="tab-btn active" id="tab-btn-locdash" onclick="switchView('locdash')">📊 대시보드</button>
+            <button class="tab-btn" id="tab-btn-list" onclick="switchView('list')">데이터 리스트</button>
             <button class="tab-btn" id="tab-btn-map" onclick="switchView('map')">도면 보기</button>
-            <!-- v4.4: 종합 대시보드 탭 (기존 사용률 팝업 통합) -->
-            <button class="tab-btn" id="tab-btn-dashboard" onclick="switchView('dashboard')">📊 종합 대시보드</button>
             
             <!-- v4.4: 기존 사용률 팝업 영역 제거 (대시보드 탭으로 통합), 단 hidden 컨테이너로 남겨둠 (calculateAndRenderUsage가 usage-popup 엘리먼트를 직접 사용함) -->
             <div class="usage-container" style="display:none;">
@@ -376,9 +513,12 @@
             
             <button class="btn-clear-filters" onclick="window.clearAllFilters(event)" style="margin-left: 10px; padding: 8px 15px; background: #78909c; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s;" onmouseover="this.style.background='#546e7a'" onmouseout="this.style.background='#78909c'">🧹 필터 전체 해제</button>
         </div>
-        
+        <span id="last-data-update" style="font-size:12px; color:#607d8b; font-weight:700; white-space:nowrap;" title="마지막 데이터 최신화 시각">🕒 최신화: —</span>
+        <button id="zikjin-update-info" type="button" onclick="window.openZikjinDetail && window.openZikjinDetail()" style="font-size:12px; color:#455a64; font-weight:700; white-space:nowrap; background:#eceff1; border:1px solid #cfd8dc; border-radius:6px; padding:4px 10px; cursor:pointer; margin-left:8px;" title="직진·에이블리(ZG&AB) 출고 전송 기록 — 클릭 시 상세">📂 ZG&AB 출고: —</button>
+        </div>
+
         <div class="header-actions">
-            <div class="version-badge">🚀 Ver 4.4 (종합 대시보드)</div>
+            <div class="version-badge">🚀 Ver 4.4</div>
             
             <button onclick="window.downloadMainExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 4px rgba(0,0,0,0.1); display:flex; align-items:center; gap:5px; font-size:13px;">📥 다운로드</button>
 
@@ -395,7 +535,7 @@
                     <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">💡 로케이션 변경 추천</div>
     
                    <label style="border-bottom: 1px solid #eee;" for="excel-upload-zikjin">
-                        <span style="color:#1976d2;">📂 1-1. 직진배송 데이터 업로드<span class="info-tip" data-tip-key="menu-zikjin" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content">📂 <b>직진배송 데이터</b><br>직진배송 엑셀 파일을 업로드합니다.<br><br>로케이션 변경 추천 점수 계산의 <b>'직진배송'</b> 항목에 사용됩니다.</span></span></span>
+                        <span style="color:#1976d2;">📂 1-1. ZG&AB 출고 데이터 업로드<span class="info-tip" data-tip-key="menu-zikjin" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content">📂 <b>ZG&AB 출고 데이터</b><br>직진+에이블리 출고를 합친 엑셀 파일(상품코드 + 수량 또는 날짜별 컬럼)을 업로드합니다.<br><br>점수 계산의 <b>'ZG&AB 출고'</b> 항목에 사용됩니다.</span></span></span>
                         <input type="file" id="excel-upload-zikjin" accept=".xls,.xlsx,.csv,.html,.htm,.txt">
                     </label>
                     <label style="border-bottom: 1px solid #eee;" for="excel-upload-weekly">
@@ -408,7 +548,7 @@
                     </label>
     
                     <div class="menu-item" style="text-align:center; color:var(--primary);" onclick="window.openRecommendModal(); closeAllPopups();">
-                        🚀 <strong>2. 로케이션 변경 리스트 보기</strong><span class="info-tip" data-tip-key="menu-recommend" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content">🚀 <b>로케이션 변경 리스트</b><br>업로드된 직진배송/주차별 데이터를 기반으로 계산된 추천 리스트를 확인합니다.<br><br>각 상품별로 최적의 빈 로케이션이 추천되며, 이동 방향(전진/후퇴/수평/신규)도 함께 표시됩니다.<br><br>📊 페어 통계 및 동선 최적화 옵션도 함께 표시됩니다.</span></span>
+                        🚀 <strong>2. 로케이션 변경 리스트 보기</strong><span class="info-tip" data-tip-key="menu-recommend" onclick="event.stopPropagation(); event.preventDefault();">i<span class="info-tip-content">🚀 <b>로케이션 변경 리스트</b><br>업로드된 직진배송·에이블리(ZG&AB 출고)/주차별 데이터를 기반으로 계산된 추천 리스트를 확인합니다.<br><br>각 상품별로 최적의 빈 로케이션이 추천되며, 이동 방향(전진/후퇴/수평/신규)도 함께 표시됩니다.<br><br>📊 페어 통계 및 동선 최적화 옵션도 함께 표시됩니다.</span></span>
                     </div>
 
                     <div style="padding: 8px 15px; background: #eceff1; font-size: 12px; color: #546e7a; font-weight: bold; border-top: 1px solid #ddd;">📦 입고 관리</div>
@@ -423,7 +563,18 @@
         </div>
     </div>
 
-    <div id="view-list" class="content-view active">
+    <div id="view-list" class="content-view" style="display:none;">
+        <!-- 체크한 줄의 동·위치·대분류를 바로 고치는 막대 (선택이 있을 때만 보임) -->
+        <div id="loc-bulk-bar" style="display:none; align-items:center; gap:10px; flex-wrap:wrap;
+                                      margin: 0 20px 8px 20px; padding:10px 14px; background:#e8f0fe;
+                                      border:1px solid #90caf9; border-radius:10px; font-size:13px;">
+            <b style="color:#1565c0;">✔ <span id="loc-bulk-count">0</span>개 선택됨</b>
+            <button onclick="window.openLocBulkEdit()"
+                    style="padding:6px 14px; background:#1565c0; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">✏️ 동·위치·대분류 수정</button>
+            <button onclick="window.clearLocSelection()"
+                    style="padding:6px 12px; background:#eceff1; color:#455a64; border:1px solid #cfd8dc; border-radius:6px; font-weight:bold; cursor:pointer;">선택 해제</button>
+            <span style="color:#607d8b;">※ 상품·재고가 아니라 <b>자리 정보</b>만 바뀝니다. 자리 번호(로케이션)는 바뀌지 않습니다.</span>
+        </div>
         <div class="list-container" id="list-container">
             <table class="list-table">
                 <thead>
@@ -468,16 +619,170 @@
         "></div>
     </div>
 
-    <!-- v4.4: 종합 대시보드 영역 -->
-    <div id="view-dashboard" class="content-view" style="display:none;">
-        <div id="dashboard-root" style="margin: 0 20px 10px 20px; background:#f9fafc; border:1px solid #ddd; border-radius:10px; padding:0; overflow:auto; max-height:calc(100vh - 180px);">
-            <div id="dashboard-content">
-                <div style="padding:40px; text-align:center; color:#888; font-size:13px;">📊 대시보드 데이터를 불러오는 중...</div>
+    <!-- 로케이션 현황 대시보드 영역 (메인 탭) -->
+    <div id="view-locdash" class="content-view active">
+        <div class="dash-container">
+            <div class="dash-toolbar">
+                <h2>📊 로케이션 현황 대시보드</h2>
+                <button class="dash-refresh" onclick="window.renderLocationDashboard && window.renderLocationDashboard()">🔄 새로고침</button>
+            </div>
+
+            <!-- KPI 카드 -->
+            <div class="dash-kpi-row" id="dash-kpi-row">
+                <div class="dash-kpi-card"><div class="kpi-icon blue">📊</div><div class="kpi-body"><div class="kpi-title">데이터 로딩 중...</div></div></div>
+            </div>
+
+            <!-- 인사이트 (다중위치 / 데드스톡 / 빈자리 동) -->
+            <div class="dash-insight-row" id="dash-insight-row"></div>
+
+            <!-- 빠른 작업 -->
+            <div class="dash-panel" style="margin-bottom: 18px;">
+                <h3>⚡ 빠른 작업</h3>
+                <div class="dash-actions" id="dash-actions"></div>
+            </div>
+
+            <!-- 데이터 신선도 -->
+            <div class="dash-freshness" id="dash-freshness" style="margin-bottom: 18px;"></div>
+
+            <!-- 차트 -->
+            <div class="dash-charts-row">
+                <div class="dash-panel">
+                    <h3>📍 구역별 사용률</h3>
+                    <div class="zone-bars" id="dash-zone-bars"></div>
+                </div>
+                <div class="dash-panel">
+                    <h3>📅 마지막출고.배송일 분포</h3>
+                    <div class="delivery-bars" id="dash-delivery-bars"></div>
+                    <div style="font-size: 11px; color: #90a4ae; margin-top: 10px; text-align: right;">※ 정상재고 있는 상품 기준</div>
+                </div>
+            </div>
+
+            <!-- 구역·동별 데드스톡 분석 (동선 비효율 진단) -->
+            <div class="dash-panel" style="margin-bottom: 18px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom: 12px;">
+                    <h3 style="margin:0;">🗺️ 구역·동별 데드스톡 분석 <span style="font-size:11px; color:#90a4ae; font-weight:normal;">(데드율 높은 순 = 동선 비효율 후보)</span></h3>
+                    <div style="display:flex; gap:14px; align-items:center; font-size:12px;">
+                        <label style="cursor:pointer; user-select:none;">
+                            <input type="checkbox" id="dash-zd-include-none" onchange="window.renderLocationDashboard && window.renderLocationDashboard()" style="vertical-align: middle;">
+                            <span style="vertical-align: middle;">기록없음 포함</span>
+                        </label>
+                        <label style="cursor:pointer; user-select:none;">
+                            <span>최소 사용 슬롯</span>
+                            <input type="number" id="dash-zd-min-slots" value="10" min="0" style="width:48px; padding:2px 4px; border:1px solid #ccc; border-radius:4px; font-size:12px; text-align:center;" onchange="window.renderLocationDashboard && window.renderLocationDashboard()">
+                        </label>
+                    </div>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="usage-table" id="dash-zonedong-table" style="width:100%; min-width:780px; text-align:center; font-size:12px;">
+                        <thead id="dash-zonedong-thead"></thead>
+                        <tbody id="dash-zonedong-tbody"></tbody>
+                    </table>
+                </div>
+                <div id="dash-zonedong-summary" style="margin-top: 10px; font-size: 12px; color: #607d8b;"></div>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="dash-bucket-modal" class="modal-overlay" onclick="if(event.target.id==='dash-bucket-modal') document.getElementById('dash-bucket-modal').style.display='none'">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 1200px; max-width: 96vw; max-height: 92vh; padding: 22px 20px; display:flex; flex-direction:column;">
+            <div class="modal-header" id="dash-bucket-title" style="display:flex; align-items:center; justify-content:space-between;">
+                <span>📅 상품 리스트</span>
+                <button onclick="document.getElementById('dash-bucket-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer;">×</button>
+            </div>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom: 12px;">
+                <div id="dash-bucket-meta" style="font-size:12px; color:#607d8b;"></div>
+                <label style="font-size:12px; color:#6d4c41; cursor:pointer; user-select:none; white-space:nowrap;"
+                       title="비축·SAM 등 피킹 자리가 아닌 위치까지 '현재 위치'에 표시합니다">
+                    <input type="checkbox" id="dash-bucket-include-etc" style="vertical-align:middle;"
+                           onchange="window.__dashRerenderBucketList && window.__dashRerenderBucketList()">
+                    <span style="vertical-align:middle;">📦 비축랙 위치도 표시</span>
+                </label>
+            </div>
+            <div style="flex:1; min-height:0; overflow-y:auto; border:1px solid #ccc; border-radius:8px;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none; font-size:12px;">
+                    <thead style="position:sticky; top:0; box-shadow:0 2px 4px rgba(0,0,0,0.1); z-index:1;">
+                        <tr>
+                            <th style="border-top:none;">상품코드</th>
+                            <th style="border-top:none;">상품명</th>
+                            <th style="border-top:none;">옵션</th>
+                            <th style="border-top:none;">현재 위치</th>
+                            <th style="border-top:none;">정상재고</th>
+                            <th style="border-top:none;">비축창고재고</th>
+                            <th style="border-top:none;">마지막출고.배송일</th>
+                            <th style="border-top:none;">최근활동</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dash-bucket-tbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 12px;">
+                <button onclick="window.__dashDownloadBucketExcel && window.__dashDownloadBucketExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:5px;">📥 엑셀 다운로드</button>
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="document.getElementById('dash-bucket-modal').style.display='none'">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- KPI 카드 클릭(빈자리/선지정·당일지정/다중위치) 상세 리스트 모달 -->
+    <div id="dash-loc-modal" class="modal-overlay" onclick="if(event.target.id==='dash-loc-modal') document.getElementById('dash-loc-modal').style.display='none'">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 1000px; max-width: 96vw; max-height: 90vh; padding: 22px 20px; display:flex; flex-direction:column;">
+            <div class="modal-header" id="dash-loc-title" style="display:flex; align-items:center; justify-content:space-between;">
+                <span>리스트</span>
+                <button onclick="document.getElementById('dash-loc-modal').style.display='none'" style="background:none; border:none; font-size:24px; cursor:pointer;">×</button>
+            </div>
+            <div id="dash-loc-meta" style="font-size:12px; color:#607d8b; margin-bottom: 12px;"></div>
+            <div style="flex:1; min-height:0; overflow-y:auto; border:1px solid #ccc; border-radius:8px;">
+                <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none; font-size:12px; text-align:center;">
+                    <thead id="dash-loc-thead" style="position:sticky; top:0; box-shadow:0 2px 4px rgba(0,0,0,0.1); z-index:1;"></thead>
+                    <tbody id="dash-loc-tbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer" style="justify-content: flex-end; margin-top: 12px;">
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="document.getElementById('dash-loc-modal').style.display='none'">닫기</button>
             </div>
         </div>
     </div>
 
     <div id="dynamic-popups"></div>
+
+    <!-- 선택한 로케이션의 동·위치·대분류 일괄 수정 -->
+    <div id="loc-bulk-modal" class="modal-overlay" onclick="if(event.target.id==='loc-bulk-modal') document.getElementById('loc-bulk-modal').style.display='none'">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width:520px; max-width:94vw;">
+            <div class="modal-header">✏️ 선택한 로케이션 수정</div>
+            <div id="loc-bulk-target" style="font-size:12px; color:#546e7a; background:#f5f7fa; border:1px solid #e0e6ed; border-radius:8px; padding:10px; margin-bottom:14px; max-height:110px; overflow-y:auto;"></div>
+
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                <label style="display:flex; align-items:center; gap:10px; font-size:13px;">
+                    <input type="checkbox" id="loc-bulk-use-dong" onchange="document.getElementById('loc-bulk-dong').disabled = !this.checked">
+                    <span style="width:60px; font-weight:bold;">동</span>
+                    <input type="text" id="loc-bulk-dong" class="action-input" disabled placeholder="예: 3" style="flex:1;">
+                </label>
+                <label style="display:flex; align-items:center; gap:10px; font-size:13px;">
+                    <input type="checkbox" id="loc-bulk-use-pos" onchange="document.getElementById('loc-bulk-pos').disabled = !this.checked">
+                    <span style="width:60px; font-weight:bold;">위치</span>
+                    <input type="text" id="loc-bulk-pos" class="action-input" disabled placeholder="예: 041" style="flex:1;">
+                </label>
+                <label style="display:flex; align-items:center; gap:10px; font-size:13px;">
+                    <input type="checkbox" id="loc-bulk-use-cat" onchange="document.getElementById('loc-bulk-cat').disabled = !this.checked">
+                    <span style="width:60px; font-weight:bold;">대분류</span>
+                    <select id="loc-bulk-cat" class="action-input" disabled style="flex:1;">
+                        <option value="피킹용">피킹용</option>
+                        <option value="기타">기타(비축·샘플)</option>
+                    </select>
+                </label>
+            </div>
+
+            <div style="font-size:12px; color:#8d6e63; background:#fff8e1; border:1px solid #ffe082; border-radius:8px; padding:10px; margin-top:14px; line-height:1.6;">
+                ※ 체크한 항목만 바뀝니다. 체크하지 않은 항목은 그대로 둡니다.<br>
+                ※ <b>영구보전 데이터를 다시 업로드하면 그 파일 내용으로 덮어써집니다.</b> 계속 유지하려면 원본 엑셀도 함께 고쳐 주세요.
+            </div>
+
+            <div class="modal-footer" style="justify-content:space-between; margin-top:16px;">
+                <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="document.getElementById('loc-bulk-modal').style.display='none'">취소</button>
+                <button onclick="window.applyLocBulkEdit()" style="padding:8px 18px; background:#1565c0; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">저장</button>
+            </div>
+        </div>
+    </div>
 
     <div id="settings-modal" class="modal-overlay" onclick="closeSettingsModal(event)">
         <div class="modal-content" onclick="event.stopPropagation()">
@@ -614,12 +919,12 @@
     </div>
 
     <div id="recommend-modal" class="modal-overlay" onclick="closeRecommendModal(event)">
-        <div class="modal-content" onclick="event.stopPropagation()" style="width: 980px; max-width: 96vw; padding: 25px 20px;">
-            <div class="modal-header" style="color: #4caf50; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 1400px; max-width: 98vw; padding: 22px 20px; height: 94vh; max-height: 94vh; box-sizing: border-box; display: flex; flex-direction: column;">
+            <div class="modal-header" style="color: #4caf50; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex-shrink: 0;">
                 💡 로케이션 변경 리스트
                 <button onclick="window.runActiveRecommendation()" style="padding:6px 12px; font-size:13px; background:#4caf50; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🔍 계산</button>
                 <button onclick="window.openRatioModal()" style="padding:6px 12px; font-size:13px; background:#e65100; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">⚙️ 점수반영비율 설정</button>
-                <button onclick="window.show2FRecommendation()" style="padding:6px 12px; font-size:13px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">🏢 2F 이동 추천</button>
+                <button onclick="window.show2FRecommendation()" style="padding:6px 12px; font-size:13px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📭 빈칸확보</button>
             </div>
             <div style="font-size:12px; color:#666; margin-bottom:15px; margin-top:-10px;">
                 ※ 선지정으로 찜해둔 자리는 물건이 없더라도 이 추천 목록에서 완벽히 보호(제외)됩니다.
@@ -653,21 +958,23 @@
                 <button id="rec-tab-btn-pair" onclick="window.switchRecTab('pair')" style="padding:8px 18px; font-size:13px; background:#e0e0e0; color:#555; border:none; border-radius:6px 6px 0 0; cursor:pointer; font-weight:bold; margin-left:2px;">🔗 페어 추천</button>
             </div>
             
-            <div id="rec-tab-single" class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+            <div id="rec-tab-single" class="modal-body" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
                     <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <tr>
-                            <th style="width: 60px; border-top:none; font-size:13px;">순위</th>
-                            <th style="border-top:none; font-size:13px;">상품</th>
-                            <th style="width: 160px; border-top:none; font-size:13px;">현재 자리</th>
-                            <th style="width: 160px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:13px;">➡️ 추천 자리</th>
+                            <th style="width: 92px; border-top:none; font-size:12px;">순위(점수)</th>
+                            <th style="width: 110px; border-top:none; font-size:12px;">상품코드</th>
+                            <th style="border-top:none; font-size:12px;">상품명 (옵션)</th>
+                            <th style="width: 78px; background:#fff8e1; color:#e65100; border-top:none; font-size:12px;">이동수량</th>
+                            <th style="width: 130px; border-top:none; font-size:12px;">현재 위치</th>
+                            <th style="width: 260px; background:#e8f5e9; color:#2e7d32; border-top:none; font-size:12px;">➡️ 추천 로케이션 (방향)</th>
                         </tr>
                     </thead>
                     <tbody id="recommend-single-tbody"></tbody>
                 </table>
             </div>
             
-            <div id="rec-tab-pair" class="modal-body" style="max-height: 55vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0; display:none;">
+            <div id="rec-tab-pair" class="modal-body" style="flex: 1 1 auto; min-height: 0; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0; display:none;">
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
                     <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <tr>
@@ -682,7 +989,7 @@
                 </table>
             </div>
             
-            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px; flex-shrink: 0;">
                 <button onclick="downloadRecommendationExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer; display:flex; align-items:center; gap:5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📥 엑셀 다운로드</button>
                 <button class="btn-modal-cancel" style="background:#555; width:100px;" onclick="closeRecommendModal()">닫기</button>
             </div>
@@ -763,32 +1070,28 @@
 
     <div id="toast"></div>
 
-    <!-- 2F 이동 추천 모달 -->
+    <!-- 빈칸확보 모달 (구 2F 이동 추천) -->
     <div id="modal-2f" class="modal-overlay" onclick="if(event.target.id==='modal-2f') document.getElementById('modal-2f').style.display='none'">
-        <div class="modal-content" onclick="event.stopPropagation()" style="width: 1050px; max-width: 96vw; padding: 25px 20px;">
-            <div class="modal-header" style="color: #7b1fa2; display: flex; align-items: center; gap: 10px; flex-wrap:wrap;">
-                🏢 2F 이동 추천 리스트
+        <div class="modal-content" onclick="event.stopPropagation()" style="width: 1500px; max-width: 98vw; padding: 25px 20px; height: 94vh; max-height: 94vh; box-sizing: border-box; display: flex; flex-direction: column;">
+            <div class="modal-header" style="color: #7b1fa2; display: flex; align-items: center; gap: 10px; flex-wrap:wrap; flex-shrink:0;">
+                📭 빈칸확보 리스트
                 <button onclick="document.getElementById('modal-2f').style.display='none'" style="margin-left:auto; background:none; border:none; font-size:24px; cursor:pointer;">×</button>
             </div>
             <div style="background:#f3e5f5; border:1px solid #ce93d8; border-radius:8px; padding:12px 15px; margin-bottom:15px;">
-                <div style="display:flex; align-items:center; gap:15px; flex-wrap:wrap;">
-                    <label style="font-size:13px; font-weight:bold; color:#4a148c;">📅 기준 기간:<span class="info-tip" data-tip-key="2f-period">i<span class="info-tip-content">⏱️ <b>마지막배송일 기준</b><br>여기서 설정한 기간 <b>이상</b> 배송이 없었던 상품을 2F 이동 대상으로 추천합니다.<br><br>예: "3개월"로 설정하면 3개월 이상 배송 기록이 없는 상품이 표시됩니다.<br><br>※ 마지막배송일이 아예 없는 상품(기록없음)도 포함됩니다.</span></span></label>
-                    <input type="number" id="2f-period-value" value="1" min="1" style="width:50px; padding:5px; text-align:center; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
-                    <select id="2f-period-unit" style="padding:5px 10px; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
-                        <option value="week">주</option>
-                        <option value="month" selected>개월</option>
-                    </select>
-                    <span style="font-size:12px; color:#666;">이상 배송 없는 상품</span>
-                    <label style="font-size:13px; font-weight:bold; color:#4a148c; margin-left:10px;">📦 재고 기준:</label>
-                    <input type="number" id="2f-stock-limit" value="999999" min="0" style="width:80px; padding:5px; text-align:center; border:1px solid #ce93d8; border-radius:4px; font-weight:bold;">
-                    <span style="font-size:12px; color:#666;">개 이하</span>
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+                    <label style="font-size:13px; font-weight:bold; color:#4a148c;">🏷️ 제외할 공급처 선택<span class="info-tip" data-tip-key="2f-supplier">i<span class="info-tip-content">🏷️ <b>공급처 제외</b><br>체크한 공급처의 상품은 빈칸확보 목록에서 제외됩니다.<br><br>공급처 정보는 업로드한 재고 엑셀의 <b>공급처</b> 컬럼에서 가져옵니다.</span></span></label>
+                    <span style="font-size:11px; color:#666;">체크한 공급처의 상품은 목록에서 제외</span>
+                    <label style="margin-left:auto; font-size:12px; font-weight:bold; color:#4a148c; cursor:pointer; user-select:none;"><input type="checkbox" id="2f-supplier-all" onclick="window.toggle2FSupplierAll(this)" style="vertical-align:middle;"> 전체 선택</label>
                     <button onclick="window.calc2FList()" style="padding:8px 16px; background:#7b1fa2; color:white; border:none; border-radius:5px; cursor:pointer; font-weight:bold;">🔍 조회</button>
+                </div>
+                <div id="2f-supplier-box" style="max-height:110px; overflow-y:auto; display:flex; flex-wrap:wrap; gap:6px 16px; background:#fff; border:1px solid #ce93d8; border-radius:6px; padding:8px 10px;">
+                    <span style="font-size:12px; color:#999;">조회하면 공급처 목록이 표시됩니다.</span>
                 </div>
             </div>
             <div style="font-size:11px; color:#666; margin-bottom:10px;">
-                ※ 마지막배송일 기준으로 설정 기간 동안 배송이 없고, 재고가 기준 이하인 상품을 2F 이동 대상으로 추천합니다.
+                ※ <b>현재고 0개</b>이고 <b>입고대기에 포함되지 않은</b> 상품을 빈칸확보 대상으로 표시합니다. (체크한 공급처는 제외)
             </div>
-            <div class="modal-body" style="max-height: 50vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
+            <div class="modal-body" style="flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid #ccc; border-radius: 8px; padding: 0;">
                 <table class="usage-table" style="width:100%; border-left:none; border-right:none; border-bottom:none;">
                     <thead style="position: sticky; top: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                         <tr>
@@ -797,8 +1100,9 @@
                             <th style="width:120px; border-top:none; font-size:13px;">상품코드</th>
                             <th style="border-top:none; font-size:13px;">상품명</th>
                             <th style="width:100px; border-top:none; font-size:13px;">옵션</th>
+                            <th style="width:110px; border-top:none; font-size:13px;">공급처</th>
                             <th style="width:70px; border-top:none; font-size:13px;">정상재고</th>
-                            <th style="width:100px; border-top:none; font-size:13px; cursor:pointer;" onclick="window.sort2FList()">마지막배송일 <span id="2f-sort-icon">▲</span></th>
+                            <th style="width:100px; border-top:none; font-size:13px; cursor:pointer;" onclick="window.sort2FList()">마지막출고.배송일 <span id="2f-sort-icon">▲</span></th>
                             <th style="width:100px; border-top:none; font-size:13px;">현재위치</th>
                             <th style="width:180px; background:#f3e5f5; border-top:none; font-size:13px;">변경값<span class="info-tip" data-tip-key="2f-change-value">i<span class="info-tip-content">🏷️ <b>2F 이동 시 넣을 값</b><br>형식: <b>2F-상품코드 옵션추가항목1</b><br><br>이 값을 복사해서 재고관리 시스템의 로케이션 컬럼에 붙여넣으면, 해당 상품이 2층 창고로 이동된 것으로 처리됩니다.</span></span></th>
                         </tr>
@@ -806,7 +1110,7 @@
                     <tbody id="2f-tbody"></tbody>
                 </table>
             </div>
-            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px;">
+            <div class="modal-footer" style="justify-content: space-between; margin-top: 15px; flex-shrink:0;">
                 <div style="display:flex; gap:8px;">
                     <button onclick="window.download2FExcel()" style="padding:8px 15px; background:#1976d2; color:white; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">📥 엑셀 다운로드 (체크 시 선택만)</button>
                 </div>
@@ -816,20 +1120,20 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script type="module" src="js/location.js"></script>
+    <script type="module" src="js/location.js?v=202610021042"></script>
     <script>
         function switchView(view) {
             document.getElementById('view-list').style.display = view === 'list' ? 'block' : 'none';
             document.getElementById('view-map').style.display = view === 'map' ? 'block' : 'none';
-            // v4.4: 대시보드 탭
-            const dashView = document.getElementById('view-dashboard');
-            if (dashView) dashView.style.display = view === 'dashboard' ? 'block' : 'none';
+            // 로케이션 현황 대시보드 탭
+            const locdashView = document.getElementById('view-locdash');
+            if (locdashView) locdashView.style.display = view === 'locdash' ? 'block' : 'none';
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             event.currentTarget.classList.add('active');
             if (view === 'map' && typeof window.renderMap === 'function') window.renderMap();
-            // v4.4: 대시보드 전환 시 렌더링
-            if (view === 'dashboard' && typeof window._v44_renderDashboard === 'function') {
-                window._v44_renderDashboard();
+            // 로케이션 현황 대시보드 전환 시 렌더링
+            if (view === 'locdash' && typeof window.renderLocationDashboard === 'function') {
+                window.renderLocationDashboard();
             }
         }
 
@@ -883,5 +1187,7 @@
             }
         }
     </script>
+    <script src="js/connection-banner.js?v=202610021042"></script>
+    <script src="js/modal-esc.js?v=202610021042"></script>
 </body>
 </html>
