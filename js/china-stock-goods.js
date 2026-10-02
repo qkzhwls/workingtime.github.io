@@ -1,5 +1,5 @@
 // === js/china-stock-goods.js ===
-// 중국제작 미발계산기 Ver 10.2 (위치지정 당일입고: 목록=비축 입고분+당일 위치전송분 전부, [🔒 마감]=미지정 줄 빨강·맨 위만, '파일에 없던 상품'=비축 입고파일 기준)
+// 중국제작 미발계산기 Ver 10.3 (위치지정 당일입고: 목록=비축 입고분+당일 위치전송분 전부, 자리 미지정 줄은 항상 빨강·맨 위(마감 버튼 없음), '파일에 없던 상품'=비축 입고파일 기준)
 
 import { initializeFirebase } from './china-stock-config.js?v=202610021122'; // [Ver 9.9] 관리자 공유 config.js와 충돌 방지 — china-stock 전용 설정
 import { getFirestore, doc, setDoc, getDoc, updateDoc, deleteField, collection, getDocs, writeBatch, deleteDoc, onSnapshot, query, where, documentId } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
@@ -516,21 +516,15 @@ async function downloadLocMove() {
     const blob = new Blob([wbout], { type: 'application/vnd.ms-excel' });
     await downloadToDesktop('기존재고_위치값.xls', blob);
 }
-// [Ver 10.2] 당일 마감 — [🔒 마감]을 켜면 비축 입고분 중 자리 미지정 줄을 빨간색으로 목록 맨 위에 모음 (다시 누르면 해제)
-//   · 당일입고지정 목록 = 비축창고 입고분(FLOOR2_STOCK) 전부 + 오늘 위치가 전송된 상품 전부
+// [Ver 10.3] 당일입고지정: 비축 입고분 중 자리 미지정 줄은 항상 빨간색으로 목록 맨 위 (마감 버튼 없이 바로 보임)
+//   · 목록 = 비축창고 입고분(FLOOR2_STOCK) 전부 + 오늘 위치가 전송된 상품 전부
 //     (선택 출고일 표에 없으면 appendUnregisteredLocation이 행으로 추가)
-//   · 자리지정 판정은 downloadDayLoc와 같은 기준(sub=today && location). 읽기 전용 — DB에 쓰지 않음
-let dayCloseMode = false;
+//   · 자리지정 판정은 downloadDayLoc와 같은 기준(sub=today && location)
 function isAssignedToday(code) { const a = locationAssignMap[code]; return !!(a && (a.sub || '') === 'today' && a.location); }
-function toggleDayClose() { dayCloseMode = !dayCloseMode; applyFilters(); }
-function updateDayCloseButton() {
-    const btn = document.getElementById('btn-loc-dayclose');
-    if (btn) { btn.textContent = dayCloseMode ? '✕ 마감 보기 해제' : '🔒 마감 (자리지정 확인)'; btn.style.background = dayCloseMode ? '#455a64' : '#c62828'; }
-}
 // [Ver 6.9] 당일입고 위치값 다운로드 (현재 표의 상품 + 앱 지정 위치 → 헤더 상품코드/옵션추가항목1, 진짜 .xls)
 async function downloadDayLoc() {
     if (!filteredData.length) return;
-    // [Ver 10.2] 검색·열필터로 화면에서 숨겨져 다운로드에서 빠지는 지정분이 있으면 경고 (자리 미지정 확인은 [🔒 마감] 빨간 줄로)
+    // [Ver 10.2] 검색·열필터로 화면에서 숨겨져 다운로드에서 빠지는 지정분이 있으면 경고 (자리 미지정은 목록 맨 위 빨간 줄로 확인)
     const visible = new Set(filteredData.map(d => d.code));
     const hidden = new Set(tableData.filter(d => isAssignedToday(d.code) && !visible.has(d.code)).map(d => d.code)).size;
     if (hidden && !confirm(`⚠️ 검색/열필터로 화면에서 숨겨진 지정 상품 ${hidden}건은 다운로드에서 빠집니다.\n(검색·필터를 해제하고 받으면 모두 들어갑니다)\n\n그래도 다운로드할까요?`)) return;
@@ -2455,8 +2449,8 @@ function renderTable() {
                 tds += `<td>${val}</td>`;
             }
         });
-        // [Ver 8.52] 미등록 입고분 강조 / [Ver 10.1] 마감 보기 중 비축 입고분 자리 미지정 줄은 빨강
-        const dcMiss = dayCloseMode && viewMode === 'location' && locSubView === 'today' && (floor2Map[row.code] || 0) > 0 && !isAssignedToday(row.code);
+        // [Ver 8.52] 미등록 입고분 강조 / [Ver 10.3] 당일입고지정: 비축 입고분 자리 미지정 줄은 빨강
+        const dcMiss = viewMode === 'location' && locSubView === 'today' && (floor2Map[row.code] || 0) > 0 && !isAssignedToday(row.code);
         html += `<tr${dcMiss ? ' style="background:#ffcdd2;"' : (row.unregistered ? ' style="background:#fff3e0;"' : '')}>${tds}</tr>`;
     });
     tbody.innerHTML = html;
@@ -2555,14 +2549,13 @@ function applyFilters() {
         });
     }
     if (sortConfig.key) filteredData.sort(sortComparator());
-    // [Ver 10.1] 마감 보기: 비축 입고분 중 자리 미지정 줄을 맨 위로 (같은 그룹 안의 순서는 유지)
-    if (dayCloseMode && viewMode === 'location' && locSubView === 'today') {
+    // [Ver 10.3] 당일입고지정: 비축 입고분 중 자리 미지정 줄을 항상 맨 위로 (같은 그룹 안의 순서는 유지)
+    if (viewMode === 'location' && locSubView === 'today') {
         const miss = [], rest = [];
         filteredData.forEach(d => ((floor2Map[d.code] || 0) > 0 && !isAssignedToday(d.code) ? miss : rest).push(d));
         filteredData = miss.concat(rest);
     }
     renderTable(); updateSummary();
-    if (viewMode === 'location') updateDayCloseButton();
 }
 function applySearch() { applyFilters(); }
 
@@ -2758,7 +2751,7 @@ function setupMobileGate() {
 //  - 웹: 열려있는 탭이 구버전이면 새로고침 배너 표시
 //  - 앱: 최신 앱 버전을 APP_META 문서로 게시 → 앱이 시작 시 확인해 업데이트 유도
 // ---------------------------------------------------------
-const WEB_VERSION = '10.2';
+const WEB_VERSION = '10.3';
 let lastVersionCheck = 0;
 
 async function fetchVersionInfo() {
@@ -2915,8 +2908,6 @@ function setupEventListeners() {
     document.querySelectorAll('.mode-card').forEach(c => c.addEventListener('click', () => setViewMode(c.dataset.mode)));
     document.querySelectorAll('.loc-subtab').forEach(b => b.addEventListener('click', () => setLocSubView(b.dataset.sub)));
     document.getElementById('btn-loc-download-today')?.addEventListener('click', () => downloadDayLoc());
-    // [Ver 10.2] 당일 마감 — 켜면 자리 미지정 줄 빨강·맨 위 (다시 누르면 해제)
-    document.getElementById('btn-loc-dayclose')?.addEventListener('click', () => toggleDayClose());
     applyViewMode(); // 저장된 모드 초기 적용
 
     // 11. #search-input (검색)
